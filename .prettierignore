@@ -1,0 +1,6 @@
+pnpm-lock.yaml
+**/generated/**
+apps/mobile/
+services/ai/
+tests/ai-eval/
+infra/

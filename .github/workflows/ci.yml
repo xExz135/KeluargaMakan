@@ -1,0 +1,342 @@
+name: CI
+
+# Stages run in the order required for every PR; each stage blocks the next.
+#   1 lint, format, type checks   2 unit tests   3 Cek Aman safety regression
+#   4 contract check   5 fixture guard   6 secret and dependency scans
+#   7 AI eval (when prompts or model config change)   8 mobile builds
+# Branch protection should require "CI passed" and
+# "Cek Aman safety regression (required)".
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  detect:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      ai_eval: ${{ steps.filter.outputs.ai_eval }}
+      mobile: ${{ steps.mobile.outputs.enabled }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: filter
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        with:
+          filters: |
+            ai_eval:
+              - "services/ai/prompts/**"
+              - "services/ai/config/**"
+              - "services/ai/**/model_config*"
+              - "tests/ai-eval/**"
+      # Mobile stays off until the Flutter project exists AND the repository
+      # variable MOBILE_CI_ENABLED is set to "true".
+      - id: mobile
+        env:
+          MOBILE_CI_ENABLED: ${{ vars.MOBILE_CI_ENABLED }}
+        run: |
+          if [ -f apps/mobile/pubspec.yaml ] && [ "$MOBILE_CI_ENABLED" = "true" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "Mobile CI skipped (no Flutter project or MOBILE_CI_ENABLED not set)."
+          fi
+
+  # ---------- Stage 1: lint, format and type checks ----------
+  lint-ts:
+    name: "1 Lint and types (TypeScript)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-node-workspace
+      - run: pnpm format:check
+      - run: pnpm lint
+      - run: pnpm typecheck
+
+  lint-python:
+    name: "1 Lint and types (Python)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: services/ai
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-python-ai
+      - run: ruff check .
+      - run: ruff format --check .
+      - run: mypy
+
+  lint-dart:
+    name: "1 Lint and types (Dart)"
+    needs: detect
+    if: needs.detect.outputs.mobile == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: apps/mobile
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          flutter-version-file: apps/mobile/pubspec.yaml
+          cache: true
+      - run: flutter pub get
+      - run: dart format --output=none --set-exit-if-changed .
+      - run: flutter analyze
+
+  lint-infra:
+    name: "1 Terraform format and validate (unvalidated skeleton)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # The infra skeleton has never been validated with Terraform. Remove
+    # continue-on-error after the first green run so it becomes blocking.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.17.1
+          terraform_wrapper: false
+      - run: terraform fmt -check -recursive infra
+      - name: Validate each environment
+        run: |
+          for env in infra/envs/*/; do
+            echo "::group::$env"
+            terraform -chdir="$env" init -backend=false -input=false
+            terraform -chdir="$env" validate
+            echo "::endgroup::"
+          done
+
+  # ---------- Stage 2: unit tests ----------
+  test-ts:
+    name: "2 Unit tests (TypeScript)"
+    needs: [lint-ts, lint-python, lint-dart]
+    if: ${{ !failure() && !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-node-workspace
+      - run: pnpm build
+      - run: pnpm test
+
+  test-python:
+    name: "2 Unit tests (Python)"
+    needs: [lint-ts, lint-python, lint-dart]
+    if: ${{ !failure() && !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: services/ai
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-python-ai
+      - run: python -m pytest
+
+  test-dart:
+    name: "2 Unit tests (Dart)"
+    needs: [detect, lint-dart]
+    if: ${{ !failure() && !cancelled() && needs.detect.outputs.mobile == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: apps/mobile
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          flutter-version-file: apps/mobile/pubspec.yaml
+          cache: true
+      - run: flutter pub get
+      - run: flutter test
+
+  # ---------- Stage 3: Cek Aman safety regression (NFR-07) ----------
+  safety-regression:
+    name: Cek Aman safety regression (required)
+    needs: [test-ts, test-python, test-dart]
+    if: ${{ !failure() && !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-node-workspace
+      # Must pass at 100%: no retries, and a run with zero cases fails.
+      - run: pnpm test:safety
+
+  # ---------- Stage 4: contract check ----------
+  contracts:
+    name: "4 Contract check"
+    needs: safety-regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-node-workspace
+      # Regenerates clients from packages/contracts/openapi.yaml (when a
+      # generator exists) and fails if the committed output differs.
+      - run: pnpm check:contracts
+
+  # ---------- Stage 5: fixture guard ----------
+  fixture-guard:
+    name: "5 Fixture guard"
+    needs: contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - run: node scripts/check-fixture-refs.mjs
+
+  # ---------- Stage 6: secret and dependency scans (NFR-10) ----------
+  secret-scan:
+    name: "6 Secret scan"
+    needs: fixture-guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GITLEAKS_VERSION: 8.30.1
+      GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Install gitleaks (checksum pinned)
+        run: |
+          archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -sSfL -o "$RUNNER_TEMP/$archive" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/$archive"
+          echo "${GITLEAKS_SHA256}  $RUNNER_TEMP/$archive" | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP" gitleaks
+      # --redact keeps any finding's value out of the CI log.
+      - name: Scan full history
+        run: |
+          "$RUNNER_TEMP/gitleaks" git --redact --no-banner --verbose .
+
+  dependency-scan:
+    name: "6 Dependency vulnerability scan"
+    needs: fixture-guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-node-workspace
+      - run: pnpm audit:deps
+      - uses: ./.github/actions/setup-python-ai
+      - name: Audit Python dependencies
+        working-directory: services/ai
+        run: |
+          pip freeze --exclude-editable > "$RUNNER_TEMP/requirements-frozen.txt"
+          pip-audit -r "$RUNNER_TEMP/requirements-frozen.txt" --no-deps --disable-pip --strict
+
+  # ---------- Stage 7: AI eval (AI-10) ----------
+  ai-eval:
+    name: "7 AI eval"
+    needs: [detect, secret-scan, dependency-scan]
+    if: ${{ !failure() && !cancelled() && needs.detect.outputs.ai_eval == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-python-ai
+      # Runs against the mock provider only; no provider credentials in CI.
+      - run: python -m pytest tests/ai-eval -p no:cacheprovider
+
+  # ---------- Stage 8: mobile builds ----------
+  mobile-android:
+    name: "8 Mobile build (Android)"
+    needs: [detect, secret-scan, dependency-scan, ai-eval]
+    if: ${{ !failure() && !cancelled() && needs.detect.outputs.mobile == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: apps/mobile
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          flutter-version-file: apps/mobile/pubspec.yaml
+          cache: true
+      - run: flutter pub get
+      # Unsigned CI build only. Release signing and store upload are a human gate.
+      - run: flutter build apk --debug
+
+  mobile-ios:
+    name: "8 Mobile build (iOS)"
+    needs: [detect, secret-scan, dependency-scan, ai-eval]
+    if: ${{ !failure() && !cancelled() && needs.detect.outputs.mobile == 'true' }}
+    runs-on: macos-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: apps/mobile
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          flutter-version-file: apps/mobile/pubspec.yaml
+          cache: true
+      - run: flutter pub get
+      - run: flutter build ios --debug --no-codesign
+
+  # ---------- Gate ----------
+  ci-passed:
+    name: CI passed
+    if: always()
+    needs:
+      - lint-ts
+      - lint-python
+      - lint-dart
+      - test-ts
+      - test-python
+      - test-dart
+      - safety-regression
+      - contracts
+      - fixture-guard
+      - secret-scan
+      - dependency-scan
+      - ai-eval
+      - mobile-android
+      - mobile-ios
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Fail if any stage failed or was cancelled
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+          SAFETY: ${{ needs.safety-regression.result }}
+        run: |
+          echo "Results: $RESULTS"
+          if [ "$SAFETY" != "success" ]; then
+            echo "Cek Aman safety regression did not pass (result: $SAFETY)."
+            exit 1
+          fi
+          for r in $RESULTS; do
+            if [ "$r" = "failure" ] || [ "$r" = "cancelled" ]; then
+              exit 1
+            fi
+          done

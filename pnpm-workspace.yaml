@@ -1,0 +1,10 @@
+packages:
+  - apps/web
+  - services/api
+  - packages/*
+  - tests/safety-regression
+
+# Supply-chain hardening (NFR-10): do not install versions published less than
+# 3 days ago, and only allow install scripts for packages listed here.
+minimumReleaseAge: 4320
+onlyBuiltDependencies: []

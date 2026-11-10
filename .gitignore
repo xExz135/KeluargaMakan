@@ -1,0 +1,78 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+build/
+out/
+.next/
+*.tsbuildinfo
+coverage/
+
+# Environment files (only .env.example is committed)
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+.coverage
+htmlcov/
+
+# Flutter / Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+apps/mobile/build/
+apps/mobile/android/.gradle/
+apps/mobile/android/local.properties
+apps/mobile/ios/Pods/
+apps/mobile/ios/.symlinks/
+*.jks
+*.keystore
+key.properties
+GoogleService-Info.plist
+google-services.json
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+*.auto.tfvars
+terraform.tfvars
+.terraformrc
+terraform.rc
+
+# Credentials and keys
+*.pem
+*.p12
+*.p8
+*.key
+service-account*.json
+credentials*.json
+
+# Logs and OS files
+*.log
+npm-debug.log*
+pnpm-debug.log*
+.DS_Store
+Thumbs.db
+
+# Editors
+.idea/
+.vscode/*
+!.vscode/extensions.json

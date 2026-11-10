@@ -1,0 +1,44 @@
+[project]
+name = "keluargamakan-ai"
+version = "0.0.0"
+description = "KeluargaMakan AI service: recognition, adaptation and speech behind one internal API."
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "fastapi==0.162.2",
+  "uvicorn==0.54.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "httpx2==2.16.0",
+  "mypy==2.4.1",
+  "pip-audit==2.10.1",
+  "pytest==9.2.0",
+  "ruff==0.17.4",
+]
+
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S", "N", "SIM", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+packages = ["app", "tests"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"

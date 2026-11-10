@@ -1,0 +1,11 @@
+openapi: 3.1.1
+info:
+  title: KeluargaMakan API
+  version: 0.0.0
+  description: >-
+    Source of truth for API shapes. Endpoints are added by the API owner;
+    change this file first, then implement.
+servers:
+  - url: http://localhost:3000
+    description: Local development
+paths: {}
