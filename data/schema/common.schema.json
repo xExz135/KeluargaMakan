@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.keluargamakan.example/v1/common.schema.json",
+  "title": "KeluargaMakan shared vocabulary",
+  "description": "Closed value lists shared by the reference data and hard rule schemas. Must match packages/cek-aman/src/vocabulary.ts (checked by a test). Changing a list is a Cek Aman rule-set change.",
+  "$defs": {
+    "id": {
+      "description": "Stable identifier for ingredients, brands and rules.",
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9_.-]{0,99}$"
+    },
+    "nonEmptyText": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "\\S"
+    },
+    "verification": {
+      "description": "Whether the content team has verified this data. Anything not verified can only produce \"Check the label\".",
+      "enum": ["verified", "unverified"]
+    },
+    "standardAllergen": {
+      "description": "PRF-04 standard allergen list.",
+      "enum": [
+        "peanut",
+        "tree_nut",
+        "shellfish",
+        "shrimp",
+        "fish",
+        "egg",
+        "milk",
+        "soy",
+        "wheat",
+        "gluten",
+        "sesame"
+      ]
+    },
+    "halalValue": {
+      "description": "SAF-08 halal status. \"uncertain\" and \"unknown\" return \"Check the label\" for a halal rule.",
+      "enum": ["halal", "not_halal", "uncertain", "unknown"]
+    },
+    "nonHalalSource": {
+      "description": "SAF-08 reason an ingredient fails a halal rule.",
+      "enum": ["alcohol", "pork", "non_halal_animal"]
+    },
+    "dietSuitability": {
+      "description": "PRF-03 vegetarian or vegan suitability.",
+      "enum": ["suitable", "not_suitable", "uncertain", "unknown"]
+    },
+    "hardRuleType": {
+      "description": "PRF-03 hard rule types.",
+      "enum": ["allergy", "halal", "vegetarian", "vegan", "medical_exclusion", "free_text"]
+    },
+    "mappingStatus": {
+      "description": "PRF-08 mapping state. Only \"mapped\" with a human confirmer is evaluated as a mapping.",
+      "enum": ["mapped", "proposed", "unmapped"]
+    },
+    "mappingConfirmer": {
+      "description": "PRF-08: who confirmed a mapping.",
+      "enum": ["content_team", "manager"]
+    }
+  }
+}

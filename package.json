@@ -18,12 +18,14 @@
     "test:scripts": "node --test \"scripts/**/*.test.mjs\"",
     "test:safety": "pnpm --filter @keluargamakan/safety-regression run test",
     "check:fixtures": "node scripts/check-fixture-refs.mjs",
+    "validate:reference": "node scripts/validate-reference.mjs",
     "check:contracts": "pnpm --filter @keluargamakan/contracts --if-present run generate && git diff --exit-code -- packages/contracts",
     "audit:deps": "pnpm audit --audit-level=high"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
     "@types/node": "24.19.2",
+    "ajv": "8.20.0",
     "eslint": "10.14.0",
     "eslint-config-prettier": "10.1.8",
     "globals": "17.14.0",

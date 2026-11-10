@@ -4,6 +4,6 @@
     "customConditions": [],
     "rootDir": "src"
   },
-  "exclude": ["**/*.test.ts", "**/*.spec.ts"],
+  "exclude": ["**/*.test.ts", "**/*.spec.ts", "src/test-fixtures.ts"],
   "include": ["src"]
 }
