@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.keluargamakan.example/v1/reference-dataset.schema.json",
+  "title": "Reference ingredient dataset",
+  "description": "A file in data/reference/ holding reference ingredients and the data version (DAT-06, SAF-13, SAF-14). Every file in a release carries the same version.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "version", "ingredients"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "schema": { "const": "keluargamakan.reference.ingredients/1" },
+    "version": {
+      "description": "Reference data version recorded with every safety result.",
+      "$ref": "common.schema.json#/$defs/nonEmptyText"
+    },
+    "ingredients": {
+      "type": "array",
+      "items": { "$ref": "ingredient.schema.json" }
+    }
+  }
+}

@@ -1,0 +1,146 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.keluargamakan.example/v1/ingredient.schema.json",
+  "title": "Reference ingredient",
+  "description": "One reference ingredient for Cek Aman (SRS 18.1 Ingredient; SAF-03, SAF-06, SAF-07, SAF-08). Values are owned by the content team.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "displayName",
+    "localNames",
+    "category",
+    "components",
+    "allergens",
+    "halal",
+    "diet",
+    "brandVaries",
+    "brandVariants",
+    "tkpiCode"
+  ],
+  "properties": {
+    "id": { "$ref": "common.schema.json#/$defs/id" },
+    "displayName": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "en"],
+      "properties": {
+        "id": {
+          "description": "Name in Bahasa Indonesia.",
+          "$ref": "common.schema.json#/$defs/nonEmptyText"
+        },
+        "en": {
+          "description": "Name in English.",
+          "$ref": "common.schema.json#/$defs/nonEmptyText"
+        }
+      }
+    },
+    "localNames": {
+      "description": "Regional and alternative names used to resolve recipe text to this ingredient.",
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "common.schema.json#/$defs/nonEmptyText" }
+    },
+    "category": { "$ref": "common.schema.json#/$defs/nonEmptyText" },
+    "components": { "$ref": "#/$defs/components" },
+    "allergens": { "$ref": "#/$defs/allergens" },
+    "halal": { "$ref": "#/$defs/halal" },
+    "diet": { "$ref": "#/$defs/diet" },
+    "brandVaries": {
+      "description": "SAF-07: true when components, allergens, halal or diet data vary by brand. Such an ingredient returns \"Check the label\" unless the household recorded a brand with a verified variant.",
+      "type": "boolean"
+    },
+    "brandVariants": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/brandVariant" }
+    },
+    "tkpiCode": {
+      "description": "Link to the TKPI nutrition reference, when known.",
+      "type": ["string", "null"]
+    }
+  },
+  "if": { "properties": { "brandVaries": { "const": false } } },
+  "then": { "properties": { "brandVariants": { "maxItems": 0 } } },
+  "$defs": {
+    "components": {
+      "description": "SAF-03, SAF-06: reference ingredient IDs this ingredient contains, for example shrimp in terasi. An empty verified list means it has no components.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["verification", "ingredientIds"],
+      "properties": {
+        "verification": { "$ref": "common.schema.json#/$defs/verification" },
+        "ingredientIds": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "common.schema.json#/$defs/id" }
+        }
+      }
+    },
+    "allergens": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["verification", "contains", "mayContain"],
+      "properties": {
+        "verification": { "$ref": "common.schema.json#/$defs/verification" },
+        "contains": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "common.schema.json#/$defs/standardAllergen" }
+        },
+        "mayContain": {
+          "description": "Possibly contains, for example kecap that may contain wheat. Returns \"Check the label\".",
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "common.schema.json#/$defs/standardAllergen" }
+        }
+      }
+    },
+    "halal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["verification", "value", "nonHalalSources"],
+      "properties": {
+        "verification": { "$ref": "common.schema.json#/$defs/verification" },
+        "value": { "$ref": "common.schema.json#/$defs/halalValue" },
+        "nonHalalSources": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "common.schema.json#/$defs/nonHalalSource" }
+        }
+      },
+      "if": { "properties": { "value": { "const": "not_halal" } } },
+      "then": { "properties": { "nonHalalSources": { "minItems": 1 } } },
+      "else": { "properties": { "nonHalalSources": { "maxItems": 0 } } }
+    },
+    "diet": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["verification", "vegetarian", "vegan"],
+      "properties": {
+        "verification": { "$ref": "common.schema.json#/$defs/verification" },
+        "vegetarian": { "$ref": "common.schema.json#/$defs/dietSuitability" },
+        "vegan": { "$ref": "common.schema.json#/$defs/dietSuitability" }
+      },
+      "if": { "properties": { "vegetarian": { "const": "not_suitable" } } },
+      "then": {
+        "description": "Anything not vegetarian is not vegan.",
+        "properties": { "vegan": { "const": "not_suitable" } }
+      }
+    },
+    "brandVariant": {
+      "description": "SAF-07: data for one brand. Only a verified variant replaces the generic data.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["brandId", "brandName", "verified", "components", "allergens", "halal", "diet"],
+      "properties": {
+        "brandId": { "$ref": "common.schema.json#/$defs/id" },
+        "brandName": { "$ref": "common.schema.json#/$defs/nonEmptyText" },
+        "verified": { "type": "boolean" },
+        "components": { "$ref": "#/$defs/components" },
+        "allergens": { "$ref": "#/$defs/allergens" },
+        "halal": { "$ref": "#/$defs/halal" },
+        "diet": { "$ref": "#/$defs/diet" }
+      }
+    }
+  }
+}
