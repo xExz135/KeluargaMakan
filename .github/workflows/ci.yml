@@ -3,9 +3,21 @@ name: CI
 # Stages run in the order required for every PR; each stage blocks the next.
 #   1 lint, format, type checks   2 unit tests   3 Cek Aman safety regression
 #   4 contract check   5 fixture guard   6 secret and dependency scans
-#   7 AI eval (when prompts or model config change)   8 mobile builds
+#   7 AI eval (when prompts or model config change)   8 Android build
 # Branch protection should require "CI passed" and
 # "Cek Aman safety regression (required)".
+#
+# Skips propagate: a job with no `if:` runs only when every job above it in
+# the dependency chain succeeded, so a legitimately skipped job (for example
+# the Dart jobs while mobile CI is off) silently skips everything after it.
+# Every job below its first `needs:` therefore carries an explicit `if:`, and
+# "CI passed" requires each mandatory job to report success, not just
+# "not failed". Stages 5 and 6 run even when an earlier stage failed, so a
+# leaked secret or fixture reference is always reported.
+#
+# Android only (docs/DECISIONS.md, 2026-11-10): there is no iOS job.
+# Runners are pinned to ubuntu-24.04 so a change to the ubuntu-latest label
+# cannot change behavior; bump deliberately.
 
 on:
   pull_request:
@@ -23,7 +35,7 @@ concurrency:
 jobs:
   detect:
     name: Detect changes
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       contents: read
@@ -58,7 +70,7 @@ jobs:
   # ---------- Stage 1: lint, format and type checks ----------
   lint-ts:
     name: "1 Lint and types (TypeScript)"
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -69,7 +81,7 @@ jobs:
 
   lint-python:
     name: "1 Lint and types (Python)"
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     defaults:
       run:
@@ -85,7 +97,7 @@ jobs:
     name: "1 Lint and types (Dart)"
     needs: detect
     if: needs.detect.outputs.mobile == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     defaults:
       run:
@@ -102,7 +114,7 @@ jobs:
 
   lint-infra:
     name: "1 Terraform format and validate (unvalidated skeleton)"
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     # The infra skeleton has never been validated with Terraform. Remove
     # continue-on-error after the first green run so it becomes blocking.
@@ -128,7 +140,7 @@ jobs:
     name: "2 Unit tests (TypeScript)"
     needs: [lint-ts, lint-python, lint-dart]
     if: ${{ !failure() && !cancelled() }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -140,7 +152,7 @@ jobs:
     name: "2 Unit tests (Python)"
     needs: [lint-ts, lint-python, lint-dart]
     if: ${{ !failure() && !cancelled() }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     defaults:
       run:
@@ -154,7 +166,7 @@ jobs:
     name: "2 Unit tests (Dart)"
     needs: [detect, lint-dart]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.mobile == 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     defaults:
       run:
@@ -173,7 +185,7 @@ jobs:
     name: Cek Aman safety regression (required)
     needs: [test-ts, test-python, test-dart]
     if: ${{ !failure() && !cancelled() }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -185,7 +197,11 @@ jobs:
   contracts:
     name: "4 Contract check"
     needs: safety-regression
-    runs-on: ubuntu-latest
+    # Explicit `if:` so the skipped Dart jobs upstream do not skip this job.
+    # Always applicable: with no generator yet it still fails on drift in
+    # packages/contracts.
+    if: ${{ !failure() && !cancelled() }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -198,7 +214,9 @@ jobs:
   fixture-guard:
     name: "5 Fixture guard"
     needs: contracts
-    runs-on: ubuntu-latest
+    # Runs on every push and PR, even if an earlier stage failed.
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -211,7 +229,9 @@ jobs:
   secret-scan:
     name: "6 Secret scan"
     needs: fixture-guard
-    runs-on: ubuntu-latest
+    # Runs on every push and PR, even if an earlier stage failed.
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     env:
       GITLEAKS_VERSION: 8.30.1
@@ -235,7 +255,9 @@ jobs:
   dependency-scan:
     name: "6 Dependency vulnerability scan"
     needs: fixture-guard
-    runs-on: ubuntu-latest
+    # Runs on every push and PR, even if an earlier stage failed.
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -253,7 +275,7 @@ jobs:
     name: "7 AI eval"
     needs: [detect, secret-scan, dependency-scan]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.ai_eval == 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -261,12 +283,12 @@ jobs:
       # Runs against the mock provider only; no provider credentials in CI.
       - run: python -m pytest tests/ai-eval -p no:cacheprovider
 
-  # ---------- Stage 8: mobile builds ----------
+  # ---------- Stage 8: Android build (Android only, no iOS) ----------
   mobile-android:
     name: "8 Mobile build (Android)"
     needs: [detect, secret-scan, dependency-scan, ai-eval]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.mobile == 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     defaults:
       run:
@@ -285,29 +307,16 @@ jobs:
       # Unsigned CI build only. Release signing and store upload are a human gate.
       - run: flutter build apk --debug
 
-  mobile-ios:
-    name: "8 Mobile build (iOS)"
-    needs: [detect, secret-scan, dependency-scan, ai-eval]
-    if: ${{ !failure() && !cancelled() && needs.detect.outputs.mobile == 'true' }}
-    runs-on: macos-latest
-    timeout-minutes: 60
-    defaults:
-      run:
-        working-directory: apps/mobile
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
-        with:
-          flutter-version-file: apps/mobile/pubspec.yaml
-          cache: true
-      - run: flutter pub get
-      - run: flutter build ios --debug --no-codesign
-
   # ---------- Gate ----------
+  # Mandatory jobs must report "success"; "skipped" fails the gate. Conditional
+  # jobs must succeed when their detect output turns them on and must be
+  # skipped when it is off. lint-infra is excluded while it is
+  # continue-on-error (see above).
   ci-passed:
     name: CI passed
     if: always()
     needs:
+      - detect
       - lint-ts
       - lint-python
       - lint-dart
@@ -321,22 +330,53 @@ jobs:
       - dependency-scan
       - ai-eval
       - mobile-android
-      - mobile-ios
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - name: Fail if any stage failed or was cancelled
+      - name: Require every mandatory stage to succeed
+        shell: bash
         env:
-          RESULTS: ${{ join(needs.*.result, ' ') }}
-          SAFETY: ${{ needs.safety-regression.result }}
+          NEEDS: ${{ toJSON(needs) }}
+          REQUIRED: >-
+            detect lint-ts lint-python test-ts test-python safety-regression
+            contracts fixture-guard secret-scan dependency-scan
+          MOBILE_JOBS: lint-dart test-dart mobile-android
         run: |
-          echo "Results: $RESULTS"
-          if [ "$SAFETY" != "success" ]; then
-            echo "Cek Aman safety regression did not pass (result: $SAFETY)."
-            exit 1
+          set -euo pipefail
+          fail=0
+          expect() {
+            local job="$1" want="$2" got
+            got="$(jq -r --arg j "$job" '.[$j].result // "missing"' <<<"$NEEDS")"
+            if [ "$got" = "$want" ]; then
+              echo "ok    $job: $got"
+            else
+              echo "::error::$job: expected $want, got $got"
+              fail=1
+            fi
+          }
+
+          for job in $REQUIRED; do
+            expect "$job" success
+          done
+
+          ai_eval="$(jq -r '.detect.outputs.ai_eval // ""' <<<"$NEEDS")"
+          if [ "$ai_eval" = "true" ]; then
+            expect ai-eval success
+          else
+            expect ai-eval skipped
           fi
-          for r in $RESULTS; do
-            if [ "$r" = "failure" ] || [ "$r" = "cancelled" ]; then
-              exit 1
+
+          mobile="$(jq -r '.detect.outputs.mobile // ""' <<<"$NEEDS")"
+          for job in $MOBILE_JOBS; do
+            if [ "$mobile" = "true" ]; then
+              expect "$job" success
+            else
+              expect "$job" skipped
             fi
           done
+
+          if [ "$fail" -ne 0 ]; then
+            echo "::error::CI gate failed. Cek Aman safety regression result: $(jq -r '."safety-regression".result' <<<"$NEEDS")"
+            exit 1
+          fi
+          echo "All required stages passed."
