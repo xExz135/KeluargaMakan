@@ -437,4 +437,49 @@ export const regressionCases: readonly RegressionCase[] = [
       paman: ["safe"],
     },
   },
+
+  // --- Multi-rule members: halal plus an allergy ------------------------------
+  {
+    id: "REG-080",
+    requirements: ["SAF-03", "SAF-06", "SAF-08", "PRF-04"],
+    title: "nasi goreng with terasi for a halal + shrimp member",
+    ingredients: ["fx_nasi", "fx_bawang_putih", "fx_kecap_manis", "fx_terasi", "fx_telur"],
+    expect: { pakde: ["not_safe", "allergen_contains", "brand_not_recorded"], ibu: ["safe"] },
+  },
+  {
+    id: "REG-081",
+    requirements: ["SAF-07", "SAF-08", "PRF-04"],
+    title: "nasi goreng without terasi, verified kecap brand: safe for a halal + shrimp member",
+    ingredients: ["fx_nasi", "fx_bawang_putih", "fx_kecap_manis", "fx_telur"],
+    brands: [["fx_kecap_manis", "fx_brand_kecap_a"]],
+    expect: { pakde: ["safe"], bude: ["safe"] },
+  },
+  {
+    id: "REG-082",
+    requirements: ["SAF-06", "SAF-07", "SAF-08", "PRF-04"],
+    title:
+      "capcay with oyster sauce (verified halal brand) for halal + shellfish and halal + shrimp",
+    ingredients: [...base, "fx_saus_tiram"],
+    brands: [["fx_saus_tiram", "fx_brand_tiram_a"]],
+    expect: {
+      bude: ["not_safe", "allergen_contains"],
+      pakde: ["check_label", "allergen_related"],
+    },
+  },
+  {
+    id: "REG-083",
+    requirements: ["SAF-04", "SAF-06", "SAF-08", "PRF-04"],
+    title: "udang saus angciu breaks both rules of a halal + shrimp member; both are reported",
+    ingredients: [...base, "fx_udang", "fx_angciu"],
+    expect: { pakde: ["not_safe", "allergen_contains", "halal_not_halal"] },
+  },
+  {
+    id: "REG-084",
+    requirements: ["SAF-08", "SAF-07", "PRF-04"],
+    title: "capcay with oyster sauce, no brand: halal + shellfish member is Not safe",
+    ingredients: [...base, "fx_saus_tiram"],
+    expect: {
+      bude: ["not_safe", "allergen_contains", "halal_uncertain", "brand_not_recorded"],
+    },
+  },
 ];
