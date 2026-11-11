@@ -1,0 +1,13 @@
+# NFR-16: Bahasa Indonesia is the template and first locale; English second.
+# Keys come from docs/design/copy/copy-deck.md: the deck key `nav.home`
+# becomes the ARB key `navHome`, and each entry's description holds the
+# original deck key.
+arb-dir: lib/l10n
+template-arb-file: app_id.arb
+output-dir: lib/l10n/generated
+output-localization-file: app_localizations.dart
+output-class: AppLocalizations
+preferred-supported-locales: [id]
+nullable-getter: false
+required-resource-attributes: true
+format: true

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Design token `surface` (light), docs/design/design-system.md 2.1 -->
+    <color name="launch_background">#FAFAF9</color>
+</resources>
