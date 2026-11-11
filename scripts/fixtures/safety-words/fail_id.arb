@@ -1,0 +1,11 @@
+{
+  "@@locale": "id",
+  "@@x-fixture": "TEST FIXTURE: deliberately banned wording to test scripts/check-safety-words.mjs (NFR-14). Not shipped.",
+  "safetyBadgeNotSafe": "Mungkin tidak aman untuk {name}: mengandung {ingredient} · {rule}",
+  "safetyBadgeCheckLabel": "Cek label untuk {name}: sebaiknya cek {ingredient}",
+  "safetyBadgeSafe": "Dijamin aman untuk {names}",
+  "safetyPanelOverride": "Abaikan dan tetap masak",
+  "settingsPrivacyBody": "Data keluarga aman bersama kami.",
+  "kitchenScanHint": "Cek foto sebelum disimpan",
+  "safetyStateNotSafeLoud": "TIDAK AMAN!"
+}

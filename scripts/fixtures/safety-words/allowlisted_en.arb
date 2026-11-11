@@ -1,0 +1,7 @@
+{
+  "@@locale": "en",
+  "@@x-fixture": "TEST FIXTURE: wording for the allowlist tests of scripts/check-safety-words.mjs (NFR-14). Not shipped.",
+  "settingsSafeModeTitle": "Safe mode",
+  "safetyPanelStillSaved": "Results stay saved and are kept anyway",
+  "planShareBody": "This plan is not safe for Kakak, ignore it"
+}

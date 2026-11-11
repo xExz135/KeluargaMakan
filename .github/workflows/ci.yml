@@ -2,7 +2,8 @@ name: CI
 
 # Stages run in the order required for every PR; each stage blocks the next.
 #   1 lint, format, type checks   2 unit tests   3 Cek Aman safety regression
-#   4 contract check   5 fixture guard and reference data validation
+#   4 contract check   5 fixture guard, reference data validation and the
+#   safety word check
 #   6 secret and dependency scans   7 AI eval (when prompts or model config
 #   change)   8 Android build
 # Branch protection should require "CI passed" and
@@ -14,8 +15,8 @@ name: CI
 # Every job below its first `needs:` therefore carries an explicit `if:`, and
 # "CI passed" requires each mandatory job to report success, not just
 # "not failed". Stages 5 and 6 run even when an earlier stage failed, so a
-# leaked secret, a fixture reference or invalid reference data is always
-# reported.
+# leaked secret, a fixture reference, invalid reference data or a banned
+# safety word is always reported.
 #
 # Mobile jobs (Dart lint, Dart tests with the generated Dart client check,
 # Android build) run only when apps/mobile/pubspec.yaml exists AND the
@@ -312,6 +313,24 @@ jobs:
       # it stays commented until then. When enabled, keep it in this job.
       # - run: pnpm build:reference
 
+  # NFR-14, SAF-04, INT-03 (QUESTIONS #41): the app strings must not soften
+  # Tidak aman or Cek label, inflate Aman, offer an override, or use the
+  # safety words elsewhere. Runs on every push and PR so a change to the word
+  # list or the allowlist is checked too.
+  safety-words:
+    name: "5 Safety word check (required)"
+    needs: contracts
+    # Runs on every push and PR, even if an earlier stage failed.
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - run: node scripts/check-safety-words.mjs
+
   # ---------- Stage 6: secret and dependency scans (NFR-10) ----------
   secret-scan:
     name: "6 Secret scan"
@@ -449,6 +468,7 @@ jobs:
       - contracts
       - fixture-guard
       - reference-data
+      - safety-words
       - secret-scan
       - dependency-scan
       - ai-eval
@@ -462,7 +482,8 @@ jobs:
           NEEDS: ${{ toJSON(needs) }}
           REQUIRED: >-
             detect lint-ts lint-python test-ts test-python safety-regression
-            contracts fixture-guard reference-data secret-scan dependency-scan
+            contracts fixture-guard reference-data safety-words secret-scan
+            dependency-scan
           MOBILE_JOBS: lint-dart test-dart mobile-android
         run: |
           set -euo pipefail

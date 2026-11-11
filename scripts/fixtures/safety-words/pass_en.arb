@@ -1,0 +1,16 @@
+{
+  "@@locale": "en",
+  "@@x-fixture": "TEST FIXTURE: copy-deck wording used to test scripts/check-safety-words.mjs (NFR-14). Not shipped.",
+  "safetyStateSafe": "Safe",
+  "safetyStateNotSafe": "Not safe",
+  "safetyStateCheckLabel": "Check the label",
+  "safetyBadgeSafe": "Safe for {names}",
+  "safetyBadgeNotSafe": "Not safe for {name}: contains {ingredient} · {rule}",
+  "safetyBadgeMoreReasons": "{count, plural, =1{and 1 more reason} other{and {count} more reasons}}",
+  "safetyReasonMayContain": "may contain {allergen}",
+  "safetyWhyCheckHow": "Read the ingredient list on the package. If unsure, don't use it for {name}.",
+  "noResultHiddenRecipes": "{count, plural, =1{1 recipe is} other{{count} recipes are}} hidden because they haven't been checked for {names}.",
+  "helpCekAmanLabelTitle": "Cek Aman doesn't replace reading labels",
+  "settingsPrivacyBody": "Your family's data is stored and encrypted.",
+  "tweakMaybeLater": "Maybe later"
+}

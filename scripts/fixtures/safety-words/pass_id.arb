@@ -1,0 +1,20 @@
+{
+  "@@locale": "id",
+  "@@x-fixture": "TEST FIXTURE: copy-deck wording used to test scripts/check-safety-words.mjs (NFR-14). Not shipped.",
+  "safetyStateSafe": "Aman",
+  "safetyStateNotSafe": "Tidak aman",
+  "safetyStateCheckLabel": "Cek label",
+  "safetyBadgeSafe": "Aman untuk {names}",
+  "safetyBadgeNotSafe": "Tidak aman untuk {name}: mengandung {ingredient} · {rule}",
+  "safetyBadgeCheckLabel": "Cek label untuk {name}: {ingredient} · {reason}",
+  "safetyBadgeMoreReasons": "dan {count} alasan lain",
+  "safetyReasonMayContain": "bisa mengandung {allergen}",
+  "safetyReasonDietUncertain": "belum pasti cocok untuk {rule}",
+  "safetyPanelCachedFrom": "Hasil tersimpan dari {date}",
+  "recipeHalalCheck": "Status halal: cek label {ingredient}",
+  "cookCheckLabelNote": "Cek label {ingredient} sebelum dipakai untuk {names} · {reason}",
+  "helpCekAmanStateNotSafe": "Tidak aman: resep ini mengandung bahan yang melanggar aturan wajib orang itu. Hasil ini tidak bisa diabaikan selama aturannya masih ada.",
+  "noResultBody": "Hasil Cek Aman untuk pilihan ini belum ada. Sambungkan internet untuk mengecek.",
+  "settingsPrivacyBody": "Data keluarga tersimpan dan terenkripsi.",
+  "tweakLessSalt": "Kurangi garam sedikit"
+}

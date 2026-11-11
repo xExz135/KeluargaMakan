@@ -1,0 +1,7 @@
+{
+  "@@locale": "en",
+  "@@x-fixture": "TEST FIXTURE: deliberately banned wording to test scripts/check-safety-words.mjs (NFR-14). Not shipped.",
+  "planShareBody": "This plan is not safe for Kakak, try to avoid it",
+  "settingsPrivacyBody": "Your data is safe with us.",
+  "safetyBadgeCheckLabel": "Check the label for {name}: probably fine"
+}
