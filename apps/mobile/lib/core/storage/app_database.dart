@@ -134,13 +134,19 @@ class AppDatabase extends _$AppDatabase {
     },
   );
 
+  /// Settings row naming the account whose household the cache holds
+  /// (security review M2). Not a user preference: removed with the cache.
+  static const cacheOwnerKey = 'cache.ownerAccountId';
+
   /// Removes everything that belongs to the signed-in household: the
-  /// household and profile caches. Settings and public reference data stay.
-  /// Runs when the session ends (sign-out, or the server ended the session on
-  /// a shared phone).
+  /// household and profile caches and their owner. Settings and public
+  /// reference data stay. Runs when the session ends (sign-out, or the server
+  /// ended the session on a shared phone), at startup without a session, and
+  /// when a different account signs in.
   Future<void> clearUserData() => transaction(() async {
     await delete(cachedProfiles).go();
     await delete(cachedHouseholds).go();
+    await (delete(settings)..where((t) => t.key.equals(cacheOwnerKey))).go();
   });
 }
 

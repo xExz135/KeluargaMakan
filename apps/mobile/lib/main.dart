@@ -4,10 +4,9 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'app/app.dart';
-import 'core/api/api_client.dart';
 import 'core/storage/app_database.dart';
 import 'core/storage/key_value_store.dart';
-import 'data/repositories/household_repository.dart';
+import 'data/session_restore.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -20,9 +19,7 @@ Future<void> main() async {
       keyValueStoreProvider.overrideWithValue(settings),
     ],
   );
-  await container.read(sessionManagerProvider).load();
-  // Dates use the household's zone from the start when it is cached.
-  await container.read(householdRepositoryProvider).cached();
+  await restoreSession(container);
   runApp(
     UncontrolledProviderScope(
       container: container,

@@ -39,6 +39,7 @@ AppDatabase memoryDatabase() {
 }
 
 final testTokens = SessionTokens(
+  accountId: 'acc-1',
   accessToken: 'access-1',
   accessTokenExpiresAt: DateTime.utc(2026, 11, 11, 12),
   refreshToken: 'refresh-1',

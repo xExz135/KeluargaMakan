@@ -13,6 +13,7 @@ import '../../core/api/session_manager.dart';
 import '../../core/api/token_store.dart';
 import '../../core/storage/key_value_store.dart';
 import '../decoders.dart';
+import '../local_cache.dart';
 
 /// The result of a sign-in.
 final class SignedIn {
@@ -20,6 +21,14 @@ final class SignedIn {
 
   final api.Account account;
   final bool isNewAccount;
+}
+
+enum SignOutOutcome {
+  done,
+
+  /// Signed out, but cached household data could not be removed. It stays
+  /// unreadable (bound to the signed-out account); the screen can say so.
+  localDataNotCleared,
 }
 
 /// Contract `DeviceInfo`: a random installation ID and the app version. No
@@ -71,6 +80,7 @@ final class AuthRepository {
     required api.ApiClient client,
     required this._session,
     required this._installation,
+    required this._cache,
   }) : _auth = api.AuthApi(client),
        _account = api.AccountApi(client);
 
@@ -79,6 +89,7 @@ final class AuthRepository {
   final api.AccountApi _account;
   final SessionManager _session;
   final InstallationInfo _installation;
+  final LocalCache _cache;
 
   bool get isSignedIn => _session.isSignedIn;
 
@@ -139,8 +150,12 @@ final class AuthRepository {
         return Err(failure);
       case Ok(value: final session):
         final t = session.tokens;
+        // Another account's cached household is removed before this
+        // session starts (security review M2).
+        await _cache.claimFor(session.account.id);
         await _session.start(
           SessionTokens(
+            accountId: session.account.id,
             accessToken: t.accessToken,
             accessTokenExpiresAt: t.accessTokenExpiresAt.toUtc(),
             refreshToken: t.refreshToken,
@@ -156,14 +171,18 @@ final class AuthRepository {
     }
   }
 
-  /// Signs out on this phone (ACC-13). The local session and cached
-  /// household data are cleared even when the API cannot be reached; the
-  /// household stays on the server.
-  Future<void> signOut() async {
+  /// Signs out on this phone (ACC-13). Cached household data is removed
+  /// first, then the server is told, then the tokens are cleared. The
+  /// household stays on the server. Works without a connection.
+  Future<SignOutOutcome> signOut() async {
+    final wiped = await _session.clearLocalData(SessionEndReason.signedOut);
     if (_session.isSignedIn) {
       await _caller.callNoContent('signOut', () => _auth.signOutWithHttpInfo());
     }
-    await _session.end(SessionEndReason.signedOut);
+    final ended = await _session.end(SessionEndReason.signedOut);
+    return wiped && ended
+        ? SignOutOutcome.done
+        : SignOutOutcome.localDataNotCleared;
   }
 
   Future<ApiResult<api.Account>> getAccount() => _caller.call(
@@ -183,5 +202,6 @@ final authRepositoryProvider = Provider<AuthRepository>(
     client: ref.watch(apiClientProvider),
     session: ref.watch(sessionManagerProvider),
     installation: ref.watch(installationInfoProvider),
+    cache: ref.watch(localCacheProvider),
   ),
 );
