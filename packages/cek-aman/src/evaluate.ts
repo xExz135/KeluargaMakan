@@ -1,5 +1,12 @@
 import { CekAmanInputError } from "./errors.js";
-import { isObject, readSafetyData, type NormalizedSafetyData } from "./normalize.js";
+import {
+  isObject,
+  own,
+  ownItems,
+  ownList,
+  readSafetyData,
+  type NormalizedSafetyData,
+} from "./normalize.js";
 import { classifyRule, type ClassifiedRule, type EvaluableRule } from "./rules.js";
 import {
   ALLERGEN_BREAKS,
@@ -68,17 +75,16 @@ function fail(message: string): never {
 
 function indexReference(raw: unknown): { version: string; records: ReadonlyMap<string, Obj> } {
   if (!isObject(raw)) fail("reference data is required");
-  const version = raw["version"];
+  const version = own(raw, "version");
   if (!nonEmptyString(version)) fail("reference data version is required (DAT-06)");
-  const list = raw["ingredients"];
-  if (!Array.isArray(list)) fail("reference ingredients must be a list");
+  const list = ownItems(own(raw, "ingredients"));
+  if (list === null) fail("reference ingredients must be a list");
   const records = new Map<string, Obj>();
-  for (const record of list as unknown[]) {
-    if (!isObject(record) || !nonEmptyString(record["id"])) {
-      fail("every reference ingredient needs an id");
-    }
-    if (records.has(record["id"])) fail(`duplicate reference ingredient id: ${record["id"]}`);
-    records.set(record["id"], record);
+  for (const record of list) {
+    const id = isObject(record) ? own(record, "id") : undefined;
+    if (!isObject(record) || !nonEmptyString(id)) fail("every reference ingredient needs an id");
+    if (records.has(id)) fail(`duplicate reference ingredient id: ${id}`);
+    records.set(id, record);
   }
   return { version, records };
 }
@@ -87,32 +93,31 @@ function prepareMembers(
   raw: unknown,
   knownIngredient: (id: string) => boolean,
 ): readonly PreparedMember[] {
-  if (!Array.isArray(raw) || raw.length === 0) {
+  const list = ownItems(raw);
+  if (list === null || list.length === 0) {
     fail("at least one selected member is required (PRF-09)");
   }
   const seen = new Set<string>();
-  return (raw as unknown[]).map((member) => {
-    if (!isObject(member) || !nonEmptyString(member["memberId"])) fail("memberId is required");
-    const memberId = member["memberId"];
+  return list.map((member) => {
+    const memberId = isObject(member) ? own(member, "memberId") : undefined;
+    if (!isObject(member) || !nonEmptyString(memberId)) fail("memberId is required");
     if (seen.has(memberId)) fail(`duplicate memberId: ${memberId}`);
     seen.add(memberId);
-    const rules = member["hardRules"];
-    if (!Array.isArray(rules)) fail(`hardRules must be a list for member ${memberId}`);
-    return {
-      memberId,
-      rules: (rules as unknown[]).map((rule) => classifyRule(rule, knownIngredient)),
-    };
+    const rules = ownItems(own(member, "hardRules"));
+    if (rules === null) fail(`hardRules must be a list for member ${memberId}`);
+    return { memberId, rules: rules.map((rule) => classifyRule(rule, knownIngredient)) };
   });
 }
 
 /** Recorded brands per ingredient ID. Malformed entries are ignored, which fails closed. */
 function indexBrands(raw: unknown): ReadonlyMap<string, readonly string[]> {
-  if (!Array.isArray(raw)) fail("recordedBrands must be a list (may be empty)");
+  const list = ownItems(raw);
+  if (list === null) fail("recordedBrands must be a list (may be empty)");
   const brands = new Map<string, string[]>();
-  for (const entry of raw as unknown[]) {
+  for (const entry of list) {
     if (!isObject(entry)) continue;
-    const ingredientId = entry["ingredientId"];
-    const brandId = entry["brandId"];
+    const ingredientId = own(entry, "ingredientId");
+    const brandId = own(entry, "brandId");
     if (!nonEmptyString(ingredientId) || !nonEmptyString(brandId)) continue;
     const list = brands.get(ingredientId) ?? [];
     if (!list.includes(brandId)) list.push(brandId);
@@ -133,7 +138,7 @@ function brandViews(
 ): { brandId: string | null; data: NormalizedSafetyData }[] {
   const generic = { brandId: null, data: readSafetyData(record) };
   // Only an explicit `false` means the ingredient does not vary by brand.
-  if (record["brandVaries"] === false) return [generic];
+  if (own(record, "brandVaries") === false) return [generic];
   const issue = (code: ReasonCode, detail: string | null): GeneralIssue => ({
     kind: "brand_uncertain",
     code,
@@ -145,13 +150,12 @@ function brandViews(
     issues.push(issue("brand_not_recorded", null));
     return [generic];
   }
-  const variantsRaw = record["brandVariants"];
-  const variants = Array.isArray(variantsRaw) ? (variantsRaw as unknown[]).filter(isObject) : [];
+  const variants = ownList(record, "brandVariants").filter(isObject);
   const views: { brandId: string | null; data: NormalizedSafetyData }[] = [];
   let needGeneric = false;
   for (const brandId of recorded) {
-    const variant = variants.find((candidate) => candidate["brandId"] === brandId);
-    if (variant !== undefined && variant["verified"] === true) {
+    const variant = variants.find((candidate) => own(candidate, "brandId") === brandId);
+    if (variant !== undefined && own(variant, "verified") === true) {
       views.push({ brandId, data: readSafetyData(variant) });
     } else {
       issues.push(issue("brand_unverified", brandId));
@@ -169,8 +173,10 @@ function analyzeIngredient(
   brands: ReadonlyMap<string, readonly string[]>,
 ): IngredientAnalysis {
   const item = isObject(raw) ? raw : {};
-  const ingredientId = nonEmptyString(item["ingredientId"]) ? item["ingredientId"] : null;
-  const rawName = typeof item["rawName"] === "string" ? item["rawName"] : "";
+  const rawId = own(item, "ingredientId");
+  const rawText = own(item, "rawName");
+  const ingredientId = nonEmptyString(rawId) ? rawId : null;
+  const rawName = typeof rawText === "string" ? rawText : "";
   const ref: IngredientRef = { index, ingredientId, rawName };
   const issues: GeneralIssue[] = [];
   const findings: Finding[] = [];
@@ -221,7 +227,7 @@ function analyzeIngredient(
         }
         // A component's brand is unknown even when the household recorded one
         // for the standalone ingredient (docs/QUESTIONS.md).
-        if (child["brandVaries"] !== false) {
+        if (own(child, "brandVaries") !== false) {
           issue("component_brand_varies", childPath, view.brandId, childId, "brand_uncertain");
         }
         walk(childId, readSafetyData(child), childPath, new Set([...stack, childId]));
@@ -378,13 +384,13 @@ function evaluateMember(
 export function evaluate(input: CekAmanInput): CekAmanResult {
   const raw: unknown = input;
   if (!isObject(raw)) fail("input is required");
-  const { version, records } = indexReference(raw["reference"]);
+  const { version, records } = indexReference(own(raw, "reference"));
   const known = (id: string): boolean => records.has(id);
-  const members = prepareMembers(raw["members"], known);
-  const brands = indexBrands(raw["recordedBrands"]);
-  const ingredients = raw["ingredients"];
-  if (!Array.isArray(ingredients)) fail("ingredients must be a list");
-  const analyses = (ingredients as unknown[]).map((item, index) =>
+  const members = prepareMembers(own(raw, "members"), known);
+  const brands = indexBrands(own(raw, "recordedBrands"));
+  const ingredients = ownItems(own(raw, "ingredients"));
+  if (ingredients === null) fail("ingredients must be a list");
+  const analyses = ingredients.map((item, index) =>
     analyzeIngredient(item, index, records, brands),
   );
   return {

@@ -1,4 +1,4 @@
-import { isObject } from "./normalize.js";
+import { isObject, own, ownItems, ownList } from "./normalize.js";
 import { isStandardAllergen } from "./rule-set.js";
 import type { ReasonCode, RuleRef } from "./types.js";
 import { MAPPING_CONFIRMERS, type StandardAllergen } from "./vocabulary.js";
@@ -37,20 +37,22 @@ function str(value: unknown): string | null {
 export function ruleRef(raw: unknown): RuleRef {
   const rule = isObject(raw) ? raw : {};
   return {
-    ruleId: str(rule["ruleId"]) ?? "",
-    type: str(rule["type"]) ?? "",
-    allergen: str(rule["allergen"]),
+    ruleId: str(own(rule, "ruleId")) ?? "",
+    type: str(own(rule, "type")) ?? "",
+    allergen: str(own(rule, "allergen")),
   };
 }
 
 export function summarizeRule(raw: unknown): RuleSummary {
   const rule = isObject(raw) ? raw : {};
-  const mapping = isObject(rule["mapping"]) ? rule["mapping"] : {};
-  const ids = mapping["ingredientIds"];
+  const rawMapping = own(rule, "mapping");
+  const mapping = isObject(rawMapping) ? rawMapping : {};
   return {
     ...ruleRef(raw),
-    mappingStatus: str(mapping["status"]),
-    mappedIngredientIds: Array.isArray(ids) ? ids.filter((id) => typeof id === "string") : [],
+    mappingStatus: str(own(mapping, "status")),
+    mappedIngredientIds: ownList(rawMapping, "ingredientIds").filter(
+      (id) => typeof id === "string",
+    ),
   };
 }
 
@@ -71,18 +73,20 @@ function classifyMapping(
   knownIngredient: (id: string) => boolean,
 ): ClassifiedRule {
   if (!isObject(raw)) return unevaluable(ref, "rule_invalid");
-  switch (raw["status"]) {
+  switch (own(raw, "status")) {
     case "unmapped":
       return unevaluable(ref, "rule_unmapped");
     case "proposed":
       return unevaluable(ref, "rule_mapping_unconfirmed");
     case "mapped": {
-      const ids: unknown = raw["ingredientIds"];
-      const confirmed = (MAPPING_CONFIRMERS as readonly unknown[]).includes(raw["confirmedBy"]);
-      if (!confirmed || !Array.isArray(ids) || ids.length === 0) {
+      const ids = ownItems(own(raw, "ingredientIds"));
+      const confirmed = (MAPPING_CONFIRMERS as readonly unknown[]).includes(
+        own(raw, "confirmedBy"),
+      );
+      if (!confirmed || ids === null || ids.length === 0) {
         return unevaluable(ref, "rule_invalid");
       }
-      const list: unknown[] = ids;
+      const list = ids;
       if (!list.every((id): id is string => str(id) !== null)) {
         return unevaluable(ref, "rule_invalid");
       }
@@ -103,9 +107,9 @@ export function classifyRule(
 ): ClassifiedRule {
   const ref = ruleRef(raw);
   if (!isObject(raw) || ref.ruleId === "") return unevaluable(ref, "rule_invalid");
-  switch (raw["type"]) {
+  switch (own(raw, "type")) {
     case "allergy": {
-      const allergen = raw["allergen"];
+      const allergen = own(raw, "allergen");
       return isStandardAllergen(allergen)
         ? { kind: "allergy", ref, allergen }
         : unevaluable(ref, "rule_invalid");
@@ -118,7 +122,7 @@ export function classifyRule(
       return { kind: "vegan", ref };
     case "medical_exclusion":
     case "free_text":
-      return classifyMapping(ref, raw["mapping"], knownIngredient);
+      return classifyMapping(ref, own(raw, "mapping"), knownIngredient);
     default:
       return unevaluable(ref, "rule_invalid");
   }

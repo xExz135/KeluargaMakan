@@ -1,6 +1,6 @@
 import { CekAmanInputError } from "./errors.js";
 import { evaluate } from "./evaluate.js";
-import { isObject } from "./normalize.js";
+import { isObject, own, ownList } from "./normalize.js";
 import { summarizeRule, type RuleSummary } from "./rules.js";
 import type {
   CekAmanInput,
@@ -72,20 +72,21 @@ function requireText(value: unknown, name: string): string {
 
 function readContext(raw: unknown): SafetyLogContext {
   const context = isObject(raw) ? raw : {};
-  const subject = isObject(context["subject"]) ? context["subject"] : {};
-  const kind = subject["kind"];
+  const rawSubject = own(context, "subject");
+  const subject = isObject(rawSubject) ? rawSubject : {};
+  const kind = own(subject, "kind");
   if (!(SAFETY_SUBJECT_KINDS as readonly unknown[]).includes(kind)) {
     throw new CekAmanInputError("subject.kind is not a known food item kind (SAF-02)");
   }
-  const version = subject["version"];
+  const version = own(subject, "version");
   return {
-    householdId: requireText(context["householdId"], "householdId"),
+    householdId: requireText(own(context, "householdId"), "householdId"),
     subject: {
       kind: kind as SafetySubjectKind,
-      id: requireText(subject["id"], "subject.id"),
+      id: requireText(own(subject, "id"), "subject.id"),
       version: typeof version === "string" && version !== "" ? version : null,
     },
-    evaluatedAt: requireText(context["evaluatedAt"], "evaluatedAt"),
+    evaluatedAt: requireText(own(context, "evaluatedAt"), "evaluatedAt"),
   };
 }
 
@@ -94,11 +95,11 @@ function buildLogRecord(
   result: CekAmanResult,
   context: SafetyLogContext,
 ): SafetyLogRecord {
-  const ingredients = input.ingredients.map((item) => {
-    const raw: unknown = item;
-    const entry = isObject(raw) ? raw : {};
-    const id = entry["ingredientId"];
-    const name = entry["rawName"];
+  // Own properties only, exactly as evaluate() reads them (SAF-01).
+  const ingredients = ownList(input, "ingredients").map((item) => {
+    const entry = isObject(item) ? item : {};
+    const id = own(entry, "ingredientId");
+    const name = own(entry, "rawName");
     return {
       ingredientId: typeof id === "string" && id !== "" ? id : null,
       rawName: typeof name === "string" ? name : "",
@@ -107,9 +108,16 @@ function buildLogRecord(
   const inRecipe = new Set(
     ingredients.flatMap((item) => (item.ingredientId === null ? [] : [item.ingredientId])),
   );
-  const recordedBrands = input.recordedBrands
-    .filter((brand) => isObject(brand) && inRecipe.has(brand.ingredientId))
-    .map((brand) => ({ ingredientId: brand.ingredientId, brandId: brand.brandId }));
+  const recordedBrands = ownList(input, "recordedBrands").flatMap((brand): RecordedBrand[] => {
+    if (!isObject(brand)) return [];
+    const ingredientId = own(brand, "ingredientId");
+    const brandId = own(brand, "brandId");
+    if (typeof ingredientId !== "string" || !inRecipe.has(ingredientId)) return [];
+    return typeof brandId === "string" && brandId !== "" ? [{ ingredientId, brandId }] : [];
+  });
+  const members = ownList(input, "members");
+  const rulesOf = (index: number): readonly RuleSummary[] =>
+    ownList(members[index], "hardRules").map(summarizeRule);
   return {
     logFormat: SAFETY_LOG_FORMAT,
     householdId: context.householdId,
@@ -123,7 +131,7 @@ function buildLogRecord(
     members: result.perMember.map((member, index) => ({
       memberId: member.memberId,
       status: member.status,
-      rules: input.members[index]!.hardRules.map(summarizeRule),
+      rules: rulesOf(index),
       reasons: member.reasons,
     })),
   };
