@@ -23,10 +23,41 @@ Map<String, Object?> _object(Object? json, String what) =>
 List<Object?> _list(Object? json, String what) =>
     json is List<Object?> ? json : _bad(what);
 
+/// The generated `HardRule` reads a wrong-typed `allergen`, `freeText` or
+/// `mapping` as null, and a mapped rule without a known confirmer as mapped
+/// (security review L1). Check each raw row against the contract first. An
+/// allergy with an allergen code this app does not know stays allowed: it is
+/// shown as "other allergy".
+void _checkRuleRow(Object? row) {
+  final r = _object(row, 'rule');
+  switch (r['type']) {
+    case 'allergy':
+      if (r['allergen'] is! String) _bad('allergy rule allergen');
+    case 'free_text':
+      if (r['freeText'] is! String) _bad('free-text rule text');
+      _checkMapping(r['mapping']);
+    case 'medical_exclusion':
+      final text = r['freeText'];
+      if (text != null && text is! String) _bad('medical exclusion text');
+      _checkMapping(r['mapping']);
+  }
+}
+
+void _checkMapping(Object? json) {
+  final m = _object(json, 'rule mapping');
+  _list(m['ingredients'], 'rule mapping ingredients');
+  if (m['status'] == 'mapped' &&
+      m['confirmedBy'] != 'content_team' &&
+      m['confirmedBy'] != 'manager') {
+    _bad('mapped rule without a confirmer');
+  }
+}
+
 /// Contract `ProfileRules`.
 MemberRules decodeRules(Object? json) {
   final raw = _object(json, 'rules');
   final rawItems = _list(raw['items'], 'rules.items');
+  rawItems.forEach(_checkRuleRow);
   final rawConsent = _object(raw['consent'], 'rules.consent');
   if (rawConsent['status'] is! String) _bad('rules.consent.status');
 

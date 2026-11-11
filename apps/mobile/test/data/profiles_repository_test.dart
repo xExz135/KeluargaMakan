@@ -129,6 +129,28 @@ void main() {
       'missing maxProfiles': () => {
         'items': [profileJson()],
       },
+      'an allergy rule without an allergen': () =>
+          _withRule({...allergyRuleJson(), 'allergen': null}),
+      'an allergy rule with a non-string allergen': () =>
+          _withRule({...allergyRuleJson(), 'allergen': 7}),
+      'a free-text rule with non-string text': () =>
+          _withRule({...freeTextRuleJson('x'), 'freeText': 42}),
+      'a free-text rule with a malformed mapping': () =>
+          _withRule({...freeTextRuleJson('x'), 'mapping': 'oops'}),
+      'a medical exclusion without a mapping': () => _withRule({
+        ...freeTextRuleJson('x'),
+        'type': 'medical_exclusion',
+        'mapping': null,
+      }),
+      'a mapped rule with an unknown confirmer': () => _withRule({
+        ...freeTextRuleJson('x'),
+        'mapping': {
+          'status': 'mapped',
+          'ingredients': <Object?>[],
+          'confirmedBy': 'robot',
+          'updatedAt': '2026-11-01T03:00:00Z',
+        },
+      }),
       'missing profile name': () =>
           profileListJson([profileJson()..remove('name')]),
     };
@@ -370,3 +392,7 @@ void main() {
     });
   });
 }
+
+Map<String, Object?> _withRule(Map<String, Object?> rule) => profileListJson([
+  profileJson(rules: rulesJson(items: [rule])),
+]);
