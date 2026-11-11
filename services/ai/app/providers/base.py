@@ -2,7 +2,8 @@
 
 Every external AI provider sits behind one of these protocols. Feature code only
 talks to the protocols, so a provider can be added or swapped without touching
-the endpoints (QUESTIONS #8: no provider is chosen yet).
+the endpoints. Real adapters: providers/gemini.py and providers/groq.py
+(DECISIONS 2026-11-11, QUESTIONS #8).
 
 Contract for every adapter:
 
@@ -14,7 +15,9 @@ Contract for every adapter:
   provider's own model ID and usage for tracing and metering (AI-09, AI-11).
 - Raises `ProviderUnavailableError` on any failure: `ProviderTimeoutError` for a
   timeout, `ProviderQuotaExceededError` for HTTP 429 or an exhausted free-tier
-  quota. It never substitutes a default answer.
+  quota. Raises `ProviderOutputError` when the provider answered with something
+  that is not a JSON object (or was cut off or blocked). It never substitutes a
+  default answer. Error messages never carry keys, prompts or model output.
 - Is built from its `ProviderConfig` (model ID, tier, `trains_on_inputs`, rate
   limit hints). Whether a call may be sent at all is decided by the pipeline:
   a slot that trains on inputs is only used for an opted-in household.
@@ -38,8 +41,16 @@ class ProviderTimeoutError(ProviderUnavailableError):
 
 
 class ProviderQuotaExceededError(ProviderUnavailableError):
-    """The provider refused for quota or rate limit (HTTP 429). Same as an outage
-    for the caller: "AI unavailable" with the feature's fallback (AI-08)."""
+    """The provider refused for quota or rate limit (HTTP 429), or the adapter's
+    local free-tier budget is spent. Same as an outage for the caller: "AI
+    unavailable" with the feature's fallback (AI-08)."""
+
+
+class ProviderOutputError(Exception):
+    """The provider answered, but not with usable output: text that is not a JSON
+    object, an answer cut off at the token limit, or an answer the provider
+    blocked. The caller rejects it ("output rejected"); it is never repaired or
+    replaced with a default. Message must not contain user or model content."""
 
 
 @dataclass(frozen=True)
@@ -49,6 +60,9 @@ class CallOptions:
     # request carries the household's opt-in (SET-09). Otherwise the call must
     # go out with training off, and a provider that cannot do that is refused.
     allow_training: bool = False
+    # Event-loop time (asyncio loop.time()) by which the whole feature call must
+    # finish. Adapters only retry when the retry still fits before it.
+    deadline: float | None = None
 
 
 @dataclass(frozen=True)

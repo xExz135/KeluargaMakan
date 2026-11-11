@@ -53,11 +53,26 @@ OPTIONAL_CAPABILITIES = frozenset({Capability.TEXT_TO_SPEECH})
 
 
 class ProviderName(StrEnum):
-    """Adapters that exist. Gemini and Groq adapters are added in the follow-up task."""
+    """Adapters that exist (providers/registry.py)."""
 
     MOCK = "mock"
     # Always answers "AI unavailable". Lets an environment run without a provider.
     DISABLED = "disabled"
+    # Gemini API (generateContent): vision and language.
+    GEMINI = "gemini"
+    # Groq (OpenAI-compatible API): backup language and Whisper speech-to-text.
+    GROQ = "groq"
+
+
+# Which capabilities each real provider serves (DECISIONS 2026-11-11). A slot that
+# names a provider for another capability is a configuration error.
+PROVIDER_CAPABILITIES: Mapping[ProviderName, frozenset[Capability]] = {
+    ProviderName.GEMINI: frozenset({Capability.VISION, Capability.LANGUAGE}),
+    ProviderName.GROQ: frozenset({Capability.LANGUAGE, Capability.SPEECH_TO_TEXT}),
+}
+
+# Providers reached over the network with an API key.
+REMOTE_PROVIDERS = frozenset(PROVIDER_CAPABILITIES)
 
 
 class Tier(StrEnum):
@@ -70,14 +85,45 @@ class PhotoSourceName(StrEnum):
     DISABLED = "disabled"
 
 
+class SecretKey:
+    """An API key that never shows itself in repr, str, logs or error messages.
+
+    Read it with `reveal()` only where it goes into a request header.
+    """
+
+    __slots__ = ("_value",)
+
+    def __init__(self, value: str) -> None:
+        self._value = value
+
+    def reveal(self) -> str:
+        return self._value
+
+    def __repr__(self) -> str:
+        return "SecretKey('***')"
+
+    __str__ = __repr__
+
+    def __reduce__(self) -> str | tuple[object, ...]:
+        raise TypeError("SecretKey cannot be pickled")
+
+
 @dataclass(frozen=True)
 class RateLimitHints:
-    """The provider's published limits, for pacing and alerts (AI-09). Not enforced here:
-    a provider's own quota response (HTTP 429) is what the service reacts to."""
+    """The provider's published free-tier limits (AI-09).
+
+    Real adapters keep a local, in-process budget from these and refuse early
+    with a quota error when it is spent, instead of calling and getting HTTP 429.
+    The provider's own 429 is still the final word. Limits are per service
+    process; with several processes, divide them between processes.
+    """
 
     requests_per_minute: int | None = None
     requests_per_day: int | None = None
     tokens_per_minute: int | None = None
+    # Speech-to-text (Groq Whisper publishes audio seconds per hour and per day).
+    audio_seconds_per_hour: int | None = None
+    audio_seconds_per_day: int | None = None
 
 
 @dataclass(frozen=True)
@@ -98,6 +144,14 @@ class ProviderConfig:
     tier: Tier = Tier.FREE
     trains_on_inputs: bool = True
     rate_limits: RateLimitHints = field(default_factory=RateLimitHints)
+    # From <SLOT>_API_KEY. Kept out of repr and comparisons.
+    api_key: SecretKey | None = field(default=None, repr=False, compare=False)
+    # Seconds for one HTTP attempt. The feature's time budget (Timeouts) still
+    # caps the whole call; a shorter value leaves time for the backup slot.
+    request_timeout: float | None = None
+    # Extra attempts after a 5xx or connection error, never after 429 or a timeout.
+    max_retries: int = 1
+    max_output_tokens: int = 2048
 
     def __post_init__(self) -> None:
         if self.tier is Tier.FREE and not self.trains_on_inputs:
@@ -108,6 +162,23 @@ class ProviderConfig:
         for name, value in vars(self.rate_limits).items():
             if value is not None and value <= 0:
                 raise ConfigError(f"{self.slot}: {name} must be positive")
+        if self.request_timeout is not None and not self.request_timeout > 0:
+            raise ConfigError(f"{self.slot}: request timeout must be positive")
+        if not 0 <= self.max_retries <= 3:
+            raise ConfigError(f"{self.slot}: max_retries must be between 0 and 3")
+        if not 1 <= self.max_output_tokens <= 65536:
+            raise ConfigError(f"{self.slot}: max_output_tokens must be between 1 and 65536")
+        if self.provider in REMOTE_PROVIDERS:
+            env = self.slot.upper()
+            if self.capability not in PROVIDER_CAPABILITIES[self.provider]:
+                raise ConfigError(
+                    f"{env}_PROVIDER: {self.provider.value!r} does not serve "
+                    f"{self.capability.value}"
+                )
+            if not self.model_id:
+                raise ConfigError(f"{env}_MODEL_ID is required for {self.provider.value}")
+            if self.api_key is None or not self.api_key.reveal():
+                raise ConfigError(f"{env}_API_KEY is required for {self.provider.value}")
 
 
 @dataclass(frozen=True)
@@ -284,6 +355,8 @@ def _slot(
     prefix: str,
     default: ProviderName | None,
 ) -> ProviderConfig:
+    raw_key = source.get(f"{prefix}_API_KEY", "").strip()
+    has_timeout = bool(source.get(f"{prefix}_REQUEST_TIMEOUT_SECONDS", "").strip())
     return ProviderConfig(
         capability=capability,
         slot=prefix.lower(),
@@ -295,7 +368,15 @@ def _slot(
             requests_per_minute=_optional_int(source, f"{prefix}_RPM"),
             requests_per_day=_optional_int(source, f"{prefix}_RPD"),
             tokens_per_minute=_optional_int(source, f"{prefix}_TPM"),
+            audio_seconds_per_hour=_optional_int(source, f"{prefix}_ASH"),
+            audio_seconds_per_day=_optional_int(source, f"{prefix}_ASD"),
         ),
+        api_key=SecretKey(raw_key) if raw_key else None,
+        request_timeout=(
+            _float(source, f"{prefix}_REQUEST_TIMEOUT_SECONDS", 0.0) if has_timeout else None
+        ),
+        max_retries=_int(source, f"{prefix}_MAX_RETRIES", 1),
+        max_output_tokens=_int(source, f"{prefix}_MAX_OUTPUT_TOKENS", 2048),
     )
 
 

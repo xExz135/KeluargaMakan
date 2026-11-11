@@ -5,13 +5,14 @@ description = "KeluargaMakan AI service: recognition, adaptation and speech behi
 requires-python = ">=3.12,<3.13"
 dependencies = [
   "fastapi==0.162.2",
+  # HTTPS client for the Gemini and Groq REST adapters (released 2026-10-21).
+  "httpx2==2.16.0",
   "pydantic==2.14.3",
   "uvicorn==0.54.0",
 ]
 
 [project.optional-dependencies]
 dev = [
-  "httpx2==2.16.0",
   "mypy==2.4.1",
   "pip-audit==2.10.1",
   "pytest==9.2.0",
@@ -39,7 +40,7 @@ select = ["E", "F", "W", "I", "B", "UP", "S", "N", "SIM", "RUF"]
 [tool.mypy]
 python_version = "3.12"
 strict = true
-packages = ["app", "tests"]
+files = ["app", "tests", "scripts"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -6,8 +6,8 @@
 2. Call the primary, then the backup if there is one, within one time budget.
    Timeouts, outages and quota refusals (HTTP 429) all become "AI unavailable"
    with the feature's fallback, never a default result (AI-08).
-3. Parse and check the output. Schema or guard failures become "output
-   rejected" with the same fallback.
+3. Parse and check the output. Output that is not a JSON object, or that fails
+   its schema or a guard, becomes "output rejected" with the same fallback.
 4. Log each attempt with prompt ID, version, hash and model ID (AI-11) and record
    usage for the household pseudonym (AI-09). Neither holds any content.
 """
@@ -30,6 +30,7 @@ from app.prompt_registry import PromptRegistry
 from app.providers.base import (
     CallOptions,
     Provider,
+    ProviderOutputError,
     ProviderQuotaExceededError,
     Providers,
     ProviderTimeoutError,
@@ -75,9 +76,11 @@ def eligible_slots[P: Provider](slots: Sequence[Slot[P]], request: RequestContex
     return [slot for slot in slots if opted_in or not slot.config.trains_on_inputs]
 
 
-def call_options[P: Provider](slot: Slot[P], request: RequestContext) -> CallOptions:
+def call_options[P: Provider](
+    slot: Slot[P], request: RequestContext, deadline: float | None = None
+) -> CallOptions:
     allow = slot.config.trains_on_inputs and request.data_use.ai_improvement_opt_in
-    return CallOptions(language=request.language, allow_training=allow)
+    return CallOptions(language=request.language, allow_training=allow, deadline=deadline)
 
 
 class _Attempt:
@@ -147,7 +150,7 @@ async def run_call[P: Provider, T: ProviderResult, R](
         remaining = deadline - loop.time()
         if remaining <= 0:
             break
-        options = call_options(slot, request)
+        options = call_options(slot, request, deadline)
         attempt = _Attempt(ctx, feature, prompt, request, slot)
         try:
             raw = await asyncio.wait_for(invoke(slot.adapter, options), remaining)
@@ -157,6 +160,11 @@ async def run_call[P: Provider, T: ProviderResult, R](
         except ProviderQuotaExceededError:
             attempt.finish(Outcome.QUOTA_EXCEEDED, training_allowed=options.allow_training)
             continue
+        except ProviderOutputError:
+            # The provider answered with unusable output: rejected, like a schema
+            # failure, never repaired or replaced (AI-08).
+            attempt.finish(Outcome.INVALID_OUTPUT, training_allowed=options.allow_training)
+            raise AIOutputRejectedError(feature) from None
         except Exception:
             # Any other failure, including an adapter bug, means unavailable.
             attempt.finish(Outcome.UNAVAILABLE, training_allowed=options.allow_training)
