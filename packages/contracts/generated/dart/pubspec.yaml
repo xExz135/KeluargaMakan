@@ -1,0 +1,18 @@
+#
+# AUTO-GENERATED FILE, DO NOT MODIFY!
+#
+
+name: 'keluargamakan_api'
+version: '0.1.0'
+description: 'Generated KeluargaMakan API client. Do not edit.'
+homepage: 'https://github.com/xExz135/KeluargaMakan'
+publish_to: none
+environment:
+  sdk: '>=2.17.0 <4.0.0'
+dependencies:
+  collection: '>=1.17.0 <2.0.0'
+  http: '>=0.13.0 <2.0.0'
+  intl: any
+  meta: '>=1.1.8 <2.0.0'
+dev_dependencies:
+  test: '>=1.21.6 <1.22.0'

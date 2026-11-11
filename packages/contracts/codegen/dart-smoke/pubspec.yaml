@@ -1,0 +1,9 @@
+# Smoke check for the generated Dart client. Run by scripts/verify-dart.mjs in
+# a temporary copy; it is not part of the app.
+name: keluargamakan_api_smoke
+publish_to: none
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+dependencies:
+  keluargamakan_api:
+    path: ../dart
