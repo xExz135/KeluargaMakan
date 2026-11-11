@@ -7,7 +7,12 @@ import type {
   StandardAllergen,
 } from "@keluargamakan/cek-aman";
 
-import { consentStateOf, latestHealthConsents, type RulesConsentState } from "./consent.js";
+import {
+  consentStateOf,
+  latestHealthConsents,
+  type ConsentRecordRow,
+  type RulesConsentState,
+} from "./consent.js";
 import { decryptField, encryptField } from "./crypto/data-key-cipher.js";
 import { DecryptionError, KeyServiceError } from "./crypto/key-provider.js";
 import {
@@ -29,6 +34,7 @@ import {
 } from "./hard-rule-codec.js";
 import type { HealthDataKeys, MemberDataKey } from "./health-data-keys.js";
 import { isUuid } from "./ids.js";
+import { lockMembers } from "./locks.js";
 
 /**
  * SRS 18.1 Hard rule storage (PRF-03, PRF-08, DAT-02).
@@ -74,15 +80,73 @@ export type MemberRulesForEvaluation =
       readonly hardRules: null;
     };
 
-interface RuleRow {
+interface StoredRule {
   id: string;
-  profile_id: string;
-  household_id: string;
   health_key_id: string;
-  details_enc: Uint8Array;
-  created_at: Date;
-  updated_at: Date;
+  details_enc: string;
+  created_at: string;
+  updated_at: string;
 }
+
+/** One selected member with consent, key and rules, all from one statement. */
+interface MemberSnapshotRow {
+  profile_id: string;
+  c_id: string | null;
+  c_household_id: string | null;
+  c_profile_id: string | null;
+  c_purpose: "health_data" | null;
+  c_decision: "given" | "declined" | null;
+  c_text_version: string | null;
+  c_language: "id" | "en" | null;
+  c_decided_at: Date | null;
+  c_recorded_by_account_id: string | null;
+  c_withdrawn_at: Date | null;
+  c_deletion_due_by: Date | null;
+  k_id: string | null;
+  k_household_id: string | null;
+  k_key_ref: string | null;
+  k_wrapped_key: Uint8Array | null;
+  rules: StoredRule[] | null;
+}
+
+/**
+ * H1 (security review T-016): consent, key and rules come from ONE statement,
+ * so they share one snapshot under any isolation level, also inside a caller's
+ * READ COMMITTED transaction. A withdrawal that commits during the read is
+ * either fully visible (consent withdrawn, no rules) or not visible at all
+ * (consent given, every rule). It can never produce "given" with rules missing.
+ */
+const MEMBER_SNAPSHOT_SQL = `
+SELECT p.id AS profile_id,
+       c.id AS c_id, c.household_id AS c_household_id, c.profile_id AS c_profile_id,
+       c.purpose AS c_purpose, c.decision AS c_decision, c.text_version AS c_text_version,
+       c.language AS c_language, c.decided_at AS c_decided_at,
+       c.recorded_by_account_id AS c_recorded_by_account_id,
+       c.withdrawn_at AS c_withdrawn_at, c.deletion_due_by AS c_deletion_due_by,
+       k.id AS k_id, k.household_id AS k_household_id, k.key_ref AS k_key_ref,
+       k.wrapped_key AS k_wrapped_key,
+       r.rules
+  FROM profile p
+  LEFT JOIN LATERAL (
+    SELECT * FROM consent_record cr
+     WHERE cr.profile_id = p.id AND cr.household_id = p.household_id
+       AND cr.purpose = 'health_data'
+     ORDER BY cr.seq DESC
+     LIMIT 1
+  ) c ON true
+  LEFT JOIN health_data_key k ON k.profile_id = p.id AND k.household_id = p.household_id
+  LEFT JOIN LATERAL (
+    SELECT json_agg(json_build_object(
+             'id', h.id,
+             'health_key_id', h.health_key_id,
+             'details_enc', encode(h.details_enc, 'base64'),
+             'created_at', to_char(h.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+             'updated_at', to_char(h.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+           ) ORDER BY h.created_at, h.id) AS rules
+      FROM hard_rule h
+     WHERE h.profile_id = p.id AND h.household_id = p.household_id
+  ) r ON true
+ WHERE p.household_id = $1 AND p.id = ANY($2::uuid[])`;
 
 function ruleContext(ruleId: string, profileId: string, householdId: string): string {
   return `hard_rule:${ruleId}:${profileId}:${householdId}`;
@@ -98,24 +162,35 @@ function toUnavailable(error: unknown): RulesUnavailableError {
   }
   if (error instanceof RuleBodyError)
     return new RulesUnavailableError("malformed", { cause: error });
-  // Anything else from the crypto path (for example a bad key length) also fails closed.
-  return new RulesUnavailableError("decrypt_failed", { cause: error });
+  // Anything else from the crypto path (for example a bad key length) also
+  // fails closed. Its message is not kept: it could carry decrypted text (L1).
+  return new RulesUnavailableError("decrypt_failed");
 }
 
-async function requireProfiles(
-  db: SqlExecutor,
-  householdId: string,
-  profileIds: readonly string[],
-): Promise<void> {
-  const ids = [...new Set(profileIds)];
-  if (!isUuid(householdId) || ids.length === 0 || !ids.every(isUuid)) {
-    throw new NotFoundError("profile");
+function consentOf(row: MemberSnapshotRow): ConsentRecordRow | undefined {
+  if (
+    row.c_id === null ||
+    row.c_purpose === null ||
+    row.c_decision === null ||
+    row.c_text_version === null ||
+    row.c_language === null ||
+    row.c_decided_at === null
+  ) {
+    return undefined;
   }
-  const { rows } = await db.query<{ id: string }>(
-    `SELECT id FROM profile WHERE household_id = $1 AND id = ANY($2::uuid[])`,
-    [householdId, ids],
-  );
-  if (rows.length !== ids.length) throw new NotFoundError("profile");
+  return {
+    id: row.c_id,
+    householdId: row.c_household_id,
+    profileId: row.c_profile_id,
+    purpose: row.c_purpose,
+    decision: row.c_decision,
+    textVersion: row.c_text_version,
+    language: row.c_language,
+    decidedAt: new Date(row.c_decided_at),
+    recordedByAccountId: row.c_recorded_by_account_id,
+    withdrawnAt: row.c_withdrawn_at === null ? null : new Date(row.c_withdrawn_at),
+    deletionDueBy: row.c_deletion_due_by === null ? null : new Date(row.c_deletion_due_by),
+  };
 }
 
 interface DecryptedMember {
@@ -123,58 +198,71 @@ interface DecryptedMember {
   readonly rules: readonly HardRuleRecord[];
 }
 
-/** Reads and decrypts every rule of the given members, or throws. */
+/** Reads and decrypts every rule of the given members from one snapshot, or throws. */
 async function readMembers(
   db: SqlExecutor,
   keys: HealthDataKeys,
   householdId: string,
   profileIds: readonly string[],
 ): Promise<Map<string, DecryptedMember>> {
-  await requireProfiles(db, householdId, profileIds);
-  const consents = await latestHealthConsents(db, householdId, profileIds);
-  const { rows } = await db.query<RuleRow>(
-    `SELECT id, profile_id, household_id, health_key_id, details_enc, created_at, updated_at
-       FROM hard_rule
-      WHERE household_id = $1 AND profile_id = ANY($2::uuid[])
-      ORDER BY created_at, id`,
-    [householdId, [...new Set(profileIds)]],
-  );
-
-  let memberKeys: Map<string, MemberDataKey>;
-  try {
-    const withRules = [...new Set(rows.map((row) => row.profile_id))];
-    memberKeys = await keys.loadForProfiles(db, householdId, withRules);
-  } catch (error) {
-    throw toUnavailable(error);
+  const ids = [...new Set(profileIds)];
+  if (!isUuid(householdId) || ids.length === 0 || !ids.every(isUuid)) {
+    throw new NotFoundError("profile");
   }
+  const { rows } = await withDbErrors(() =>
+    db.query<MemberSnapshotRow>(MEMBER_SNAPSHOT_SQL, [householdId, ids]),
+  );
+  if (rows.length !== ids.length) throw new NotFoundError("profile");
 
   const result = new Map<string, DecryptedMember>();
-  for (const profileId of profileIds) {
-    const consent = consentStateOf(consents.get(profileId));
-    const own = rows.filter((row) => row.profile_id === profileId);
-    if (consent.status !== "given" && own.length > 0) {
+  for (const row of rows) {
+    const profileId = row.profile_id;
+    const consent = consentStateOf(consentOf(row));
+    const stored = row.rules ?? [];
+    if (consent.status !== "given" && stored.length > 0) {
       // Rules without consent cannot exist (database trigger); if they do,
       // something is wrong, and the check must not go ahead.
       throw new RulesUnavailableError("inconsistent");
     }
-    const rules = own.map((row): HardRuleRecord => {
-      const key = memberKeys.get(profileId);
-      if (key === undefined || key.keyId !== row.health_key_id) {
+    let key: MemberDataKey | null = null;
+    if (stored.length > 0) {
+      if (row.k_id === null || row.k_key_ref === null || row.k_wrapped_key === null) {
+        throw new RulesUnavailableError("inconsistent");
+      }
+      try {
+        key = await keys.unwrap({
+          id: row.k_id,
+          profile_id: profileId,
+          household_id: row.k_household_id ?? householdId,
+          key_ref: row.k_key_ref,
+          wrapped_key: row.k_wrapped_key,
+        });
+      } catch (error) {
+        throw toUnavailable(error);
+      }
+    }
+    const memberKey = key;
+    const rules = stored.map((rule): HardRuleRecord => {
+      if (memberKey === null || memberKey.keyId !== rule.health_key_id) {
         throw new RulesUnavailableError("inconsistent");
       }
       try {
         const body = decodeRuleBody(
-          decryptField(key.dataKey, row.details_enc, ruleContext(row.id, profileId, householdId)),
+          decryptField(
+            memberKey.dataKey,
+            Buffer.from(rule.details_enc, "base64"),
+            ruleContext(rule.id, profileId, householdId),
+          ),
         );
         return {
-          id: row.id,
+          id: rule.id,
           profileId,
           type: body.type,
           allergen: body.allergen,
           freeText: body.freeText,
           mapping: body.mapping,
-          createdAt: row.created_at,
-          updatedAt: row.updated_at,
+          createdAt: new Date(rule.created_at),
+          updatedAt: new Date(rule.updated_at),
         };
       } catch (error) {
         throw toUnavailable(error);
@@ -334,7 +422,7 @@ export async function insertHardRule(
   const json = encode(body);
   return withDbErrors(() =>
     db.transaction(async (tx) => {
-      await requireProfiles(tx, input.householdId, [input.profileId]);
+      await lockMembers(tx, input.householdId, [input.profileId]);
       const consentRecordId = await activeConsentId(tx, input.householdId, input.profileId);
       const key = await keys.getOrCreate(tx, input.householdId, input.profileId);
       const id = randomUUID();
@@ -385,6 +473,7 @@ export async function confirmRuleMapping(
   const now = input.now ?? new Date();
   return withDbErrors(() =>
     db.transaction(async (tx) => {
+      await lockMembers(tx, input.householdId, [input.profileId]);
       const current = (await listProfileRules(tx, keys, input.householdId, input.profileId)).items;
       const rule = current.find((item) => item.id === input.ruleId);
       if (rule === undefined) throw new NotFoundError("hard rule");

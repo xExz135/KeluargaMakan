@@ -10,7 +10,9 @@ import type { Migration } from "./types.js";
  *
  * Safety result log (SAF-14, DAT-05, DAT-06; DECISIONS 2026-11-11, QUESTIONS #40):
  * - Plain columns hold only versions, reference IDs, statuses and reason codes.
- *   No free text, raw ingredient names or member names (PR #5 M2).
+ *   No free text, raw ingredient names or member names (PR #5 M2). Migration
+ *   0005 moves statuses, reason codes and ingredient IDs into the encrypted
+ *   details (security review T-016 H3).
  * - Members are identified by a pseudonymous ID: the ID of their health-data
  *   key (`health_data_key.id`, migration 0004), never the profile ID. There is
  *   deliberately no foreign key, so the row survives the member's deletion as

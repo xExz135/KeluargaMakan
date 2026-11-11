@@ -19,13 +19,17 @@ import type { Migration } from "./types.js";
  *   consent record, and only while that record is given and not withdrawn.
  * - A child profile also needs a recorded guardian confirmation.
  * - Declining or withdrawing consent deletes the member's data key at once,
- *   which cascades to every hard rule and makes any copy left in a backup
- *   unreadable (SET-04, within the 30-day target).
+ *   which cascades to every hard rule in the live database (SET-04). Backups
+ *   and point-in-time-recovery copies taken earlier still hold the wrapped key
+ *   and the ciphertext, which the health-data key can read; they are purged on
+ *   their normal cycle, which T-023 keeps within the 30-day target.
  *
  * Deletion and redaction (SET-04, SET-07, SET-08, QUESTIONS #40): whenever a
  * member's data key is deleted (consent declined or withdrawn, profile deleted,
  * household deleted), that member's safety log details are cleared. The
- * pseudonymous member ID left in the log then points at nothing.
+ * pseudonymous member ID left in the log then points at nothing (migration
+ * 0005 also replaces it with a random ID). Migration 0005 tightens all of
+ * this after the T-016 security review.
  */
 export const migration0004: Migration = {
   version: 4,

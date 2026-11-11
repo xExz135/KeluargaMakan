@@ -9,7 +9,8 @@
  * - `health`: hard rules and other health data (`KMS_HEALTH_DATA_KEY`). Health
  *   data is encrypted in the application with data keys wrapped by this KEK,
  *   so a database dump, a backup or anyone holding only the general key cannot
- *   read it.
+ *   read it. Anyone who can use the health KEK can still read a backup taken
+ *   before a deletion, until that backup is purged on its normal cycle.
  *
  * Both providers implement the same interface: `LocalKeyProvider` for
  * development and tests, `CloudKmsKeyProvider` for staging and production.

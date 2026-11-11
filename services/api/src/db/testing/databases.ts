@@ -16,8 +16,18 @@ import { pgExecutor, type SqlExecutor } from "../executor.js";
  *   dropped afterwards. Without it the target is skipped with a message.
  */
 
+/** A second connection holding an open transaction, for race tests (PostgreSQL only). */
+export interface TestSession {
+  /** Runs inside the open transaction; `transaction()` joins it. */
+  readonly executor: SqlExecutor;
+  commit(): Promise<void>;
+  rollback(): Promise<void>;
+}
+
 export interface TestDatabase {
   readonly executor: SqlExecutor;
+  /** Null where the target has a single connection (PGlite). */
+  readonly openSession: (() => Promise<TestSession>) | null;
   close(): Promise<void>;
 }
 
@@ -54,6 +64,7 @@ export const pgliteTarget: DatabaseTarget = {
     const db = await PGlite.create();
     return {
       executor: pgliteExecutor(db, false, db),
+      openSession: null,
       close: () => db.close(),
     };
   },
@@ -81,6 +92,28 @@ export const postgresTarget: DatabaseTarget = {
     });
     return {
       executor: pgExecutor(pool),
+      async openSession() {
+        const client = await pool.connect();
+        await client.query("BEGIN");
+        const executor: SqlExecutor = {
+          async query<R extends object>(text: string, params: readonly unknown[] = []) {
+            const result = await client.query<R & Record<string, unknown>>(text, [...params]);
+            return { rows: result.rows as R[], rowCount: result.rowCount ?? 0 };
+          },
+          async execScript(sql: string) {
+            await client.query(sql);
+          },
+          transaction: (fn) => fn(executor),
+        };
+        const end = async (statement: string) => {
+          try {
+            await client.query(statement);
+          } finally {
+            client.release();
+          }
+        };
+        return { executor, commit: () => end("COMMIT"), rollback: () => end("ROLLBACK") };
+      },
       async close() {
         await pool.query(`DROP SCHEMA ${schema} CASCADE`);
         await pool.end();
