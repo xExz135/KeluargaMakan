@@ -9,15 +9,25 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint .",
     "test": "vitest run",
-    "db:migrate": "node dist/src/db/cli/migrate.js"
+    "db:migrate": "node dist/src/db/cli/migrate.js",
+    "start": "node dist/src/main.js"
   },
   "dependencies": {
     "@keluargamakan/cek-aman": "workspace:*",
-    "pg": "8.23.1"
+    "@keluargamakan/contracts": "workspace:*",
+    "@nestjs/common": "12.3.2",
+    "@nestjs/core": "12.3.2",
+    "@nestjs/platform-fastify": "12.3.2",
+    "fastify": "5.12.7",
+    "pg": "8.23.1",
+    "reflect-metadata": "0.2.2",
+    "rxjs": "7.8.2"
   },
   "devDependencies": {
     "@electric-sql/pglite": "0.5.15",
     "@types/pg": "8.23.1",
-    "vitest": "5.1.0"
+    "ajv": "8.20.0",
+    "vitest": "5.1.0",
+    "yaml": "2.9.1"
   }
 }
