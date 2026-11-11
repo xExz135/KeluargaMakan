@@ -3,11 +3,16 @@
 // app_database.dart). A cached row this app version cannot read (for example
 // an unknown age group) makes the whole cached copy unusable rather than
 // partly shown.
+//
+// The household and profile caches belong to one account (security review
+// M2). They are read only while that account is signed in, and are wiped
+// before another account's data is written or a new session starts.
 
 import 'package:drift/drift.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:keluargamakan_api/api.dart' as api;
 
+import '../core/api/api_client.dart';
 import '../core/storage/app_database.dart';
 import 'models/family.dart';
 import 'models/household.dart';
@@ -16,14 +21,55 @@ import 'models/sourced.dart';
 typedef Clock = DateTime Function();
 
 final class LocalCache {
-  LocalCache(this._db, {Clock? clock}) : _now = clock ?? DateTime.now;
+  LocalCache(this._db, {required this._currentAccountId, Clock? clock})
+    : _now = clock ?? DateTime.now;
 
   final AppDatabase _db;
+  final String? Function() _currentAccountId;
   final Clock _now;
+
+  // ------------------------------------------------------------ Owner
+
+  Future<String?> _owner() async {
+    final row = await (_db.select(
+      _db.settings,
+    )..where((t) => t.key.equals(AppDatabase.cacheOwnerKey))).getSingleOrNull();
+    return row?.value;
+  }
+
+  /// Makes [accountId] the owner, wiping another account's cached data.
+  Future<void> claimFor(String accountId) => _db.transaction(() async {
+    if (await _owner() == accountId) return;
+    await _db.clearUserData();
+    await _db
+        .into(_db.settings)
+        .insert(
+          SettingsCompanion.insert(
+            key: AppDatabase.cacheOwnerKey,
+            value: accountId,
+          ),
+        );
+  });
+
+  /// Whether the cache belongs to the signed-in account.
+  Future<bool> _readable() async {
+    final account = _currentAccountId();
+    return account != null && await _owner() == account;
+  }
+
+  /// Runs [write] for the signed-in account; does nothing when signed out.
+  Future<void> _writeAsOwner(Future<void> Function() write) async {
+    final account = _currentAccountId();
+    if (account == null) return;
+    await _db.transaction(() async {
+      await claimFor(account);
+      await write();
+    });
+  }
 
   // ------------------------------------------------------------ Household
 
-  Future<void> saveHousehold(HouseholdInfo h) => _db.transaction(() async {
+  Future<void> saveHousehold(HouseholdInfo h) => _writeAsOwner(() async {
     await _db.delete(_db.cachedHouseholds).go();
     await _db
         .into(_db.cachedHouseholds)
@@ -43,6 +89,7 @@ final class LocalCache {
   });
 
   Future<HouseholdInfo?> household() async {
+    if (!await _readable()) return null;
     final row = await _db.select(_db.cachedHouseholds).getSingleOrNull();
     if (row == null) return null;
     final language = api.Language.fromJson(row.language);
@@ -63,7 +110,7 @@ final class LocalCache {
   // ------------------------------------------------------------ Profiles
 
   /// Replaces the cached profiles with [members]. Rules are not written.
-  Future<void> saveProfiles(List<FamilyMember> members) => _db.transaction(
+  Future<void> saveProfiles(List<FamilyMember> members) => _writeAsOwner(
     () async {
       final now = _now().toUtc();
       await _db.delete(_db.cachedProfiles).go();
@@ -94,6 +141,7 @@ final class LocalCache {
   /// The cached profiles with [RulesNotLoaded], or null when there is no
   /// usable cached copy.
   Future<FamilyProfiles?> profiles() async {
+    if (!await _readable()) return null;
     final rows = await (_db.select(
       _db.cachedProfiles,
     )..orderBy([(t) => OrderingTerm(expression: t.position)])).get();
@@ -169,5 +217,8 @@ final class LocalCache {
 }
 
 final localCacheProvider = Provider<LocalCache>(
-  (ref) => LocalCache(ref.watch(appDatabaseProvider)),
+  (ref) => LocalCache(
+    ref.watch(appDatabaseProvider),
+    currentAccountId: () => ref.read(sessionManagerProvider).current?.accountId,
+  ),
 );

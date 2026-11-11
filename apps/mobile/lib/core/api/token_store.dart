@@ -11,22 +11,27 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
-/// The tokens of the signed-in session (contract `SessionTokens`).
+/// The tokens of the signed-in session (contract `SessionTokens`), with the
+/// account they belong to. The account ID binds the on-device cache to this
+/// session, so another account never reads it (security review M2).
 @immutable
 final class SessionTokens {
   const SessionTokens({
+    required this.accountId,
     required this.accessToken,
     required this.accessTokenExpiresAt,
     required this.refreshToken,
     required this.refreshTokenExpiresAt,
   });
 
+  final String accountId;
   final String accessToken;
   final DateTime accessTokenExpiresAt;
   final String refreshToken;
   final DateTime refreshTokenExpiresAt;
 
   Map<String, Object?> toJson() => {
+    'accountId': accountId,
     'accessToken': accessToken,
     'accessTokenExpiresAt': accessTokenExpiresAt.toUtc().toIso8601String(),
     'refreshToken': refreshToken,
@@ -36,11 +41,14 @@ final class SessionTokens {
   /// Null when [json] is not a complete token set.
   static SessionTokens? fromJson(Object? json) {
     if (json is! Map<String, Object?>) return null;
+    final account = json['accountId'];
     final access = json['accessToken'];
     final refresh = json['refreshToken'];
     final accessExp = _date(json['accessTokenExpiresAt']);
     final refreshExp = _date(json['refreshTokenExpiresAt']);
-    if (access is! String ||
+    if (account is! String ||
+        account.isEmpty ||
+        access is! String ||
         access.isEmpty ||
         refresh is! String ||
         refresh.isEmpty ||
@@ -49,6 +57,7 @@ final class SessionTokens {
       return null;
     }
     return SessionTokens(
+      accountId: account,
       accessToken: access,
       accessTokenExpiresAt: accessExp,
       refreshToken: refresh,
