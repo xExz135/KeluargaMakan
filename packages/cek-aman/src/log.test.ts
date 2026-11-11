@@ -111,6 +111,21 @@ describe("SAF-14 DAT-06 evaluateWithLog", () => {
     ]);
   });
 
+  it("SAF-14 logs only well-formed recorded brands, as evaluate() uses them", () => {
+    const raw = {
+      ...sample,
+      recordedBrands: [
+        { ingredientId: 7, brandId: "brand-x" },
+        { ingredientId: "a", brandId: 5 },
+        { ingredientId: "a", brandId: "" },
+        { ingredientId: "a", brandId: "brand-a" },
+      ],
+    } as unknown as CekAmanInput;
+    expect(evaluateWithLog(raw, context).logRecord.recordedBrands).toEqual([
+      { ingredientId: "a", brandId: "brand-a" },
+    ]);
+  });
+
   const badContexts: [string, unknown][] = [
     ["context missing", undefined],
     ["subject missing", { ...context, subject: undefined }],
