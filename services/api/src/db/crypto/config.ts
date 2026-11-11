@@ -7,10 +7,12 @@ import { LocalKeyProvider } from "./local-key-provider.js";
  *
  * - `KEY_PROVIDER=local`: development and tests. `LOCAL_GENERAL_DATA_KEK` and
  *   `LOCAL_HEALTH_DATA_KEK` are two different 32-byte keys, base64-encoded.
- *   Refused when `NODE_ENV=production`.
- * - `KEY_PROVIDER=cloud_kms`: staging and production. `KMS_GENERAL_DATA_KEY`
- *   and `KMS_HEALTH_DATA_KEY` are Cloud KMS crypto key names; the KMS client
- *   is passed in by the caller (T-023).
+ *   Allowed only with `APP_ENV=local` or `APP_ENV=test`; a missing or unknown
+ *   `APP_ENV` counts as production and is refused.
+ * - `KEY_PROVIDER=cloud_kms`: staging and production. `KMS_HEALTH_DATA_KEY` is
+ *   a Cloud KMS crypto key name; the KMS client is passed in by the caller
+ *   (T-023). `KMS_GENERAL_DATA_KEY` is optional: no API code uses the general
+ *   key yet, so the API service account should not hold it (least privilege).
  *
  * There is no default: a missing or unknown setting stops the API from
  * starting instead of running without health-data encryption.
@@ -27,6 +29,11 @@ function required(env: KeyProviderEnv, name: string): string {
     throw new KeyServiceError(`${name} is not set`);
   }
   return value.trim();
+}
+
+function optional(env: KeyProviderEnv, name: string): string | null {
+  const value = env[name];
+  return value === undefined || value.trim() === "" ? null : value.trim();
 }
 
 function base64Key(env: KeyProviderEnv, name: string): Buffer {
@@ -46,7 +53,7 @@ export function createKeyProvider(env: KeyProviderEnv, deps: KeyProviderDeps = {
           general: base64Key(env, "LOCAL_GENERAL_DATA_KEK"),
           health: base64Key(env, "LOCAL_HEALTH_DATA_KEK"),
         },
-        { nodeEnv: env["NODE_ENV"] },
+        { appEnv: env["APP_ENV"] },
       );
     case "cloud_kms": {
       if (deps.kmsClient === undefined) {
@@ -54,7 +61,7 @@ export function createKeyProvider(env: KeyProviderEnv, deps: KeyProviderDeps = {
       }
       return new CloudKmsKeyProvider(
         {
-          general: required(env, "KMS_GENERAL_DATA_KEY"),
+          general: optional(env, "KMS_GENERAL_DATA_KEY"),
           health: required(env, "KMS_HEALTH_DATA_KEY"),
         },
         deps.kmsClient,

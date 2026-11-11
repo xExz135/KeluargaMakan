@@ -14,7 +14,10 @@ function fakePhone(): string {
 
 /** Random local keys for one test run. No key material is committed. */
 export function randomLocalKeys(): LocalKeyProvider {
-  return new LocalKeyProvider({ general: randomBytes(32), health: randomBytes(32) });
+  return new LocalKeyProvider(
+    { general: randomBytes(32), health: randomBytes(32) },
+    { appEnv: "test" },
+  );
 }
 
 export interface SeededHousehold {
