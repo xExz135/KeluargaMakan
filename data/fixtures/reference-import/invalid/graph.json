@@ -1,0 +1,503 @@
+{
+  "$comment": "TEST FIXTURE: not real safety or nutrition data. Fictional records for the reference importer tests (T-013). Every value is invented; IDs use the fx_ prefix.",
+  "schema": "keluargamakan.reference.ingredients/1",
+  "version": "TEST-FIXTURE-reference-import-invalid-1",
+  "ingredients": [
+    {
+      "id": "fx_bad_cycle_a",
+      "displayName": {
+        "id": "Siklus fiksi A",
+        "en": "Cycle fiction A"
+      },
+      "localNames": [],
+      "category": "fixture",
+      "components": {
+        "verification": "verified",
+        "ingredientIds": ["fx_bad_cycle_b"]
+      },
+      "allergens": {
+        "verification": "verified",
+        "contains": [],
+        "mayContain": []
+      },
+      "halal": {
+        "verification": "verified",
+        "value": "halal",
+        "nonHalalSources": []
+      },
+      "diet": {
+        "verification": "verified",
+        "vegetarian": "suitable",
+        "vegan": "suitable"
+      },
+      "brandVaries": false,
+      "brandVariants": [],
+      "tkpiCode": null
+    },
+    {
+      "id": "fx_bad_cycle_b",
+      "displayName": {
+        "id": "Siklus fiksi B",
+        "en": "Cycle fiction B"
+      },
+      "localNames": [],
+      "category": "fixture",
+      "components": {
+        "verification": "verified",
+        "ingredientIds": ["fx_bad_cycle_c"]
+      },
+      "allergens": {
+        "verification": "verified",
+        "contains": [],
+        "mayContain": []
+      },
+      "halal": {
+        "verification": "verified",
+        "value": "halal",
+        "nonHalalSources": []
+      },
+      "diet": {
+        "verification": "verified",
+        "vegetarian": "suitable",
+        "vegan": "suitable"
+      },
+      "brandVaries": false,
+      "brandVariants": [],
+      "tkpiCode": null
+    },
+    {
+      "id": "fx_bad_cycle_c",
+      "displayName": {
+        "id": "Siklus fiksi C",
+        "en": "Cycle fiction C"
+      },
+      "localNames": [],
+      "category": "fixture",
+      "components": {
+        "verification": "verified",
+        "ingredientIds": ["fx_bad_cycle_a"]
+      },
+      "allergens": {
+        "verification": "verified",
+        "contains": [],
+        "mayContain": []
+      },
+      "halal": {
+        "verification": "verified",
+        "value": "halal",
+        "nonHalalSources": []
+      },
+      "diet": {
+        "verification": "verified",
+        "vegetarian": "suitable",
+        "vegan": "suitable"
+      },
+      "brandVaries": false,
+      "brandVariants": [],
+      "tkpiCode": null
+    },
+    {
+      "id": "fx_bad_deep_00",
+      "displayName": {
+        "id": "Rantai fiksi 00",
+        "en": "Chain fiction 00"
+      },
+      "localNames": [],
+      "category": "fixture",
+      "components": {
+        "verification": "verified",
+        "ingredientIds": ["fx_bad_deep_01"]
+      },
+      "allergens": {
+        "verification": "verified",
+        "contains": [],
+        "mayContain": []
+      },
+      "halal": {
+        "verification": "verified",
+        "value": "halal",
+        "nonHalalSources": []
+      },
+      "diet": {
+        "verification": "verified",
+        "vegetarian": "suitable",
+        "vegan": "suitable"
+      },
+      "brandVaries": false,
+      "brandVariants": [],
+      "tkpiCode": null
+    },
+    {
+      "id": "fx_bad_deep_01",
+      "displayName": {
+        "id": "Rantai fiksi 01",
+        "en": "Chain fiction 01"
+      },
+      "localNames": [],
+      "category": "fixture",
+      "components": {
+        "verification": "verified",
+        "ingredientIds": ["fx_bad_deep_02"]
+      },
+      "allergens": {
+        "verification": "verified",
+        "contains": [],
+        "mayContain": []
+      },
+      "halal": {
+        "verification": "verified",
+        "value": "halal",
+        "nonHalalSources": []
+      },
+      "diet": {
+        "verification": "verified",
+        "vegetarian": "suitable",
+        "vegan": "suitable"
+      },
+      "brandVaries": false,
+      "brandVariants": [],
+      "tkpiCode": null
+    },
+    {
+      "id": "fx_bad_deep_02",
+      "displayName": {
+        "id": "Rantai fiksi 02",
+        "en": "Chain fiction 02"
+      },
+      "localNames": [],
+      "category": "fixture",
+      "components": {
+        "verification": "verified",
+        "ingredientIds": ["fx_bad_deep_03"]
+      },
+      "allergens": {
+        "verification": "verified",
+        "contains": [],
+        "mayContain": []
+      },
+      "halal": {
+        "verification": "verified",
+        "value": "halal",
+        "nonHalalSources": []
+      },
+      "diet": {
+        "verification": "verified",
+        "vegetarian": "suitable",
+        "vegan": "suitable"
+      },
+      "brandVaries": false,
+      "brandVariants": [],
+      "tkpiCode": null
+    },
+    {
+      "id": "fx_bad_deep_03",
+      "displayName": {
+        "id": "Rantai fiksi 03",
+        "en": "Chain fiction 03"
+      },
+      "localNames": [],
+      "category": "fixture",
+      "components": {
+        "verification": "verified",
+        "ingredientIds": ["fx_bad_deep_04"]
+      },
+      "allergens": {
+        "verification": "verified",
+        "contains": [],
+        "mayContain": []
+      },
+      "halal": {
+        "verification": "verified",
+        "value": "halal",
+        "nonHalalSources": []
+      },
+      "diet": {
+        "verification": "verified",
+        "vegetarian": "suitable",
+        "vegan": "suitable"
+      },
+      "brandVaries": false,
+      "brandVariants": [],
+      "tkpiCode": null
+    },
+    {
+      "id": "fx_bad_deep_04",
+      "displayName": {
+        "id": "Rantai fiksi 04",
+        "en": "Chain fiction 04"
+      },
+      "localNames": [],
+      "category": "fixture",
+      "components": {
+        "verification": "verified",
+        "ingredientIds": ["fx_bad_deep_05"]
+      },
+      "allergens": {
+        "verification": "verified",
+        "contains": [],
+        "mayContain": []
+      },
+      "halal": {
+        "verification": "verified",
+        "value": "halal",
+        "nonHalalSources": []
+      },
+      "diet": {
+        "verification": "verified",
+        "vegetarian": "suitable",
+        "vegan": "suitable"
+      },
+      "brandVaries": false,
+      "brandVariants": [],
+      "tkpiCode": null
+    },
+    {
+      "id": "fx_bad_deep_05",
+      "displayName": {
+        "id": "Rantai fiksi 05",
+        "en": "Chain fiction 05"
+      },
+      "localNames": [],
+      "category": "fixture",
+      "components": {
+        "verification": "verified",
+        "ingredientIds": ["fx_bad_deep_06"]
+      },
+      "allergens": {
+        "verification": "verified",
+        "contains": [],
+        "mayContain": []
+      },
+      "halal": {
+        "verification": "verified",
+        "value": "halal",
+        "nonHalalSources": []
+      },
+      "diet": {
+        "verification": "verified",
+        "vegetarian": "suitable",
+        "vegan": "suitable"
+      },
+      "brandVaries": false,
+      "brandVariants": [],
+      "tkpiCode": null
+    },
+    {
+      "id": "fx_bad_deep_06",
+      "displayName": {
+        "id": "Rantai fiksi 06",
+        "en": "Chain fiction 06"
+      },
+      "localNames": [],
+      "category": "fixture",
+      "components": {
+        "verification": "verified",
+        "ingredientIds": ["fx_bad_deep_07"]
+      },
+      "allergens": {
+        "verification": "verified",
+        "contains": [],
+        "mayContain": []
+      },
+      "halal": {
+        "verification": "verified",
+        "value": "halal",
+        "nonHalalSources": []
+      },
+      "diet": {
+        "verification": "verified",
+        "vegetarian": "suitable",
+        "vegan": "suitable"
+      },
+      "brandVaries": false,
+      "brandVariants": [],
+      "tkpiCode": null
+    },
+    {
+      "id": "fx_bad_deep_07",
+      "displayName": {
+        "id": "Rantai fiksi 07",
+        "en": "Chain fiction 07"
+      },
+      "localNames": [],
+      "category": "fixture",
+      "components": {
+        "verification": "verified",
+        "ingredientIds": ["fx_bad_deep_08"]
+      },
+      "allergens": {
+        "verification": "verified",
+        "contains": [],
+        "mayContain": []
+      },
+      "halal": {
+        "verification": "verified",
+        "value": "halal",
+        "nonHalalSources": []
+      },
+      "diet": {
+        "verification": "verified",
+        "vegetarian": "suitable",
+        "vegan": "suitable"
+      },
+      "brandVaries": false,
+      "brandVariants": [],
+      "tkpiCode": null
+    },
+    {
+      "id": "fx_bad_deep_08",
+      "displayName": {
+        "id": "Rantai fiksi 08",
+        "en": "Chain fiction 08"
+      },
+      "localNames": [],
+      "category": "fixture",
+      "components": {
+        "verification": "verified",
+        "ingredientIds": ["fx_bad_deep_09"]
+      },
+      "allergens": {
+        "verification": "verified",
+        "contains": [],
+        "mayContain": []
+      },
+      "halal": {
+        "verification": "verified",
+        "value": "halal",
+        "nonHalalSources": []
+      },
+      "diet": {
+        "verification": "verified",
+        "vegetarian": "suitable",
+        "vegan": "suitable"
+      },
+      "brandVaries": false,
+      "brandVariants": [],
+      "tkpiCode": null
+    },
+    {
+      "id": "fx_bad_deep_09",
+      "displayName": {
+        "id": "Rantai fiksi 09",
+        "en": "Chain fiction 09"
+      },
+      "localNames": [],
+      "category": "fixture",
+      "components": {
+        "verification": "verified",
+        "ingredientIds": []
+      },
+      "allergens": {
+        "verification": "verified",
+        "contains": [],
+        "mayContain": []
+      },
+      "halal": {
+        "verification": "verified",
+        "value": "halal",
+        "nonHalalSources": []
+      },
+      "diet": {
+        "verification": "verified",
+        "vegetarian": "suitable",
+        "vegan": "suitable"
+      },
+      "brandVaries": false,
+      "brandVariants": [],
+      "tkpiCode": null
+    },
+    {
+      "id": "fx_bad_name_a",
+      "displayName": {
+        "id": "Kluwek fiksi A",
+        "en": "Fiction kluwak A"
+      },
+      "localNames": ["Kluwek Fiksi"],
+      "category": "fixture",
+      "components": {
+        "verification": "verified",
+        "ingredientIds": []
+      },
+      "allergens": {
+        "verification": "verified",
+        "contains": [],
+        "mayContain": []
+      },
+      "halal": {
+        "verification": "verified",
+        "value": "halal",
+        "nonHalalSources": []
+      },
+      "diet": {
+        "verification": "verified",
+        "vegetarian": "suitable",
+        "vegan": "suitable"
+      },
+      "brandVaries": false,
+      "brandVariants": [],
+      "tkpiCode": null
+    },
+    {
+      "id": "fx_bad_name_b",
+      "displayName": {
+        "id": "kluwék-fiksi",
+        "en": "Fiction kluwak B"
+      },
+      "localNames": [],
+      "category": "fixture",
+      "components": {
+        "verification": "verified",
+        "ingredientIds": []
+      },
+      "allergens": {
+        "verification": "verified",
+        "contains": [],
+        "mayContain": []
+      },
+      "halal": {
+        "verification": "verified",
+        "value": "halal",
+        "nonHalalSources": []
+      },
+      "diet": {
+        "verification": "verified",
+        "vegetarian": "suitable",
+        "vegan": "suitable"
+      },
+      "brandVaries": false,
+      "brandVariants": [],
+      "tkpiCode": null
+    },
+    {
+      "id": "fx_bad_duplicate_id",
+      "displayName": {
+        "id": "Duplikat fiksi",
+        "en": "Duplicate fiction"
+      },
+      "localNames": [],
+      "category": "fixture",
+      "components": {
+        "verification": "verified",
+        "ingredientIds": []
+      },
+      "allergens": {
+        "verification": "verified",
+        "contains": [],
+        "mayContain": []
+      },
+      "halal": {
+        "verification": "verified",
+        "value": "halal",
+        "nonHalalSources": []
+      },
+      "diet": {
+        "verification": "verified",
+        "vegetarian": "suitable",
+        "vegan": "suitable"
+      },
+      "brandVaries": false,
+      "brandVariants": [],
+      "tkpiCode": null
+    }
+  ]
+}

@@ -1,0 +1,511 @@
+{
+  "$comment": "TEST FIXTURE: not real safety or nutrition data. Fictional records for the reference importer tests (T-013). Every value is invented; IDs use the fx_ prefix.",
+  "schema": "keluargamakan.reference.ingredients/1",
+  "version": "TEST-FIXTURE-reference-import-invalid-1",
+  "ingredients": [
+    {
+      "id": "fx_bad_halal_listed_source",
+      "displayName": {
+        "id": "Rusak fiksi 01",
+        "en": "Broken fiction 01"
+      },
+      "localNames": [],
+      "category": "fixture",
+      "components": {
+        "verification": "verified",
+        "ingredientIds": []
+      },
+      "allergens": {
+        "verification": "verified",
+        "contains": [],
+        "mayContain": []
+      },
+      "halal": {
+        "verification": "verified",
+        "value": "halal",
+        "nonHalalSources": ["alcohol"]
+      },
+      "diet": {
+        "verification": "verified",
+        "vegetarian": "suitable",
+        "vegan": "suitable"
+      },
+      "brandVaries": false,
+      "brandVariants": [],
+      "tkpiCode": null
+    },
+    {
+      "id": "fx_bad_vegan_not_vegetarian",
+      "displayName": {
+        "id": "Rusak fiksi 02",
+        "en": "Broken fiction 02"
+      },
+      "localNames": [],
+      "category": "fixture",
+      "components": {
+        "verification": "verified",
+        "ingredientIds": []
+      },
+      "allergens": {
+        "verification": "verified",
+        "contains": [],
+        "mayContain": []
+      },
+      "halal": {
+        "verification": "verified",
+        "value": "halal",
+        "nonHalalSources": []
+      },
+      "diet": {
+        "verification": "verified",
+        "vegetarian": "uncertain",
+        "vegan": "suitable"
+      },
+      "brandVaries": false,
+      "brandVariants": [],
+      "tkpiCode": null
+    },
+    {
+      "id": "fx_bad_pork_vegetarian",
+      "displayName": {
+        "id": "Rusak fiksi 03",
+        "en": "Broken fiction 03"
+      },
+      "localNames": [],
+      "category": "fixture",
+      "components": {
+        "verification": "verified",
+        "ingredientIds": []
+      },
+      "allergens": {
+        "verification": "verified",
+        "contains": [],
+        "mayContain": []
+      },
+      "halal": {
+        "verification": "verified",
+        "value": "not_halal",
+        "nonHalalSources": ["pork"]
+      },
+      "diet": {
+        "verification": "verified",
+        "vegetarian": "suitable",
+        "vegan": "suitable"
+      },
+      "brandVaries": false,
+      "brandVariants": [],
+      "tkpiCode": null
+    },
+    {
+      "id": "fx_bad_animal_brand_vegetarian",
+      "displayName": {
+        "id": "Rusak fiksi 04",
+        "en": "Broken fiction 04"
+      },
+      "localNames": [],
+      "category": "fixture",
+      "components": {
+        "verification": "verified",
+        "ingredientIds": []
+      },
+      "allergens": {
+        "verification": "verified",
+        "contains": [],
+        "mayContain": []
+      },
+      "halal": {
+        "verification": "verified",
+        "value": "halal",
+        "nonHalalSources": []
+      },
+      "diet": {
+        "verification": "verified",
+        "vegetarian": "suitable",
+        "vegan": "suitable"
+      },
+      "brandVaries": true,
+      "brandVariants": [
+        {
+          "brandId": "fx_bad_brand",
+          "brandName": "Merek Rusak",
+          "verified": true,
+          "components": {
+            "verification": "verified",
+            "ingredientIds": []
+          },
+          "allergens": {
+            "verification": "verified",
+            "contains": [],
+            "mayContain": []
+          },
+          "halal": {
+            "verification": "verified",
+            "value": "not_halal",
+            "nonHalalSources": ["non_halal_animal"]
+          },
+          "diet": {
+            "verification": "verified",
+            "vegetarian": "unknown",
+            "vegan": "unknown"
+          }
+        }
+      ],
+      "tkpiCode": null
+    },
+    {
+      "id": "fx_bad_allergen_overlap",
+      "displayName": {
+        "id": "Rusak fiksi 05",
+        "en": "Broken fiction 05"
+      },
+      "localNames": [],
+      "category": "fixture",
+      "components": {
+        "verification": "verified",
+        "ingredientIds": []
+      },
+      "allergens": {
+        "verification": "verified",
+        "contains": ["soy"],
+        "mayContain": ["soy"]
+      },
+      "halal": {
+        "verification": "verified",
+        "value": "halal",
+        "nonHalalSources": []
+      },
+      "diet": {
+        "verification": "verified",
+        "vegetarian": "suitable",
+        "vegan": "suitable"
+      },
+      "brandVaries": false,
+      "brandVariants": [],
+      "tkpiCode": null
+    },
+    {
+      "id": "fx_bad_self_component",
+      "displayName": {
+        "id": "Rusak fiksi 06",
+        "en": "Broken fiction 06"
+      },
+      "localNames": [],
+      "category": "fixture",
+      "components": {
+        "verification": "verified",
+        "ingredientIds": ["fx_bad_self_component"]
+      },
+      "allergens": {
+        "verification": "verified",
+        "contains": [],
+        "mayContain": []
+      },
+      "halal": {
+        "verification": "verified",
+        "value": "halal",
+        "nonHalalSources": []
+      },
+      "diet": {
+        "verification": "verified",
+        "vegetarian": "suitable",
+        "vegan": "suitable"
+      },
+      "brandVaries": false,
+      "brandVariants": [],
+      "tkpiCode": null
+    },
+    {
+      "id": "fx_bad_name_spaces",
+      "displayName": {
+        "id": "Rusak fiksi 07",
+        "en": "Broken fiction 07"
+      },
+      "localNames": ["kemiri fiksi "],
+      "category": "fixture",
+      "components": {
+        "verification": "verified",
+        "ingredientIds": []
+      },
+      "allergens": {
+        "verification": "verified",
+        "contains": [],
+        "mayContain": []
+      },
+      "halal": {
+        "verification": "verified",
+        "value": "halal",
+        "nonHalalSources": []
+      },
+      "diet": {
+        "verification": "verified",
+        "vegetarian": "suitable",
+        "vegan": "suitable"
+      },
+      "brandVaries": false,
+      "brandVariants": [],
+      "tkpiCode": null
+    },
+    {
+      "id": "fx_bad_name_zero_width",
+      "displayName": {
+        "id": "Kemiri​fiksi",
+        "en": "Broken fiction 08"
+      },
+      "localNames": [],
+      "category": "fixture",
+      "components": {
+        "verification": "verified",
+        "ingredientIds": []
+      },
+      "allergens": {
+        "verification": "verified",
+        "contains": [],
+        "mayContain": []
+      },
+      "halal": {
+        "verification": "verified",
+        "value": "halal",
+        "nonHalalSources": []
+      },
+      "diet": {
+        "verification": "verified",
+        "vegetarian": "suitable",
+        "vegan": "suitable"
+      },
+      "brandVaries": false,
+      "brandVariants": [],
+      "tkpiCode": null
+    },
+    {
+      "id": "fx_bad_duplicate_brand",
+      "displayName": {
+        "id": "Rusak fiksi 09",
+        "en": "Broken fiction 09"
+      },
+      "localNames": [],
+      "category": "fixture",
+      "components": {
+        "verification": "verified",
+        "ingredientIds": []
+      },
+      "allergens": {
+        "verification": "verified",
+        "contains": [],
+        "mayContain": []
+      },
+      "halal": {
+        "verification": "verified",
+        "value": "halal",
+        "nonHalalSources": []
+      },
+      "diet": {
+        "verification": "verified",
+        "vegetarian": "suitable",
+        "vegan": "suitable"
+      },
+      "brandVaries": true,
+      "brandVariants": [
+        {
+          "brandId": "fx_bad_same",
+          "brandName": "Merek Sama",
+          "verified": true,
+          "components": {
+            "verification": "verified",
+            "ingredientIds": []
+          },
+          "allergens": {
+            "verification": "verified",
+            "contains": [],
+            "mayContain": []
+          },
+          "halal": {
+            "verification": "verified",
+            "value": "halal",
+            "nonHalalSources": []
+          },
+          "diet": {
+            "verification": "verified",
+            "vegetarian": "suitable",
+            "vegan": "suitable"
+          }
+        },
+        {
+          "brandId": "fx_bad_same",
+          "brandName": "Merek Sama Lagi",
+          "verified": true,
+          "components": {
+            "verification": "verified",
+            "ingredientIds": []
+          },
+          "allergens": {
+            "verification": "verified",
+            "contains": [],
+            "mayContain": []
+          },
+          "halal": {
+            "verification": "verified",
+            "value": "halal",
+            "nonHalalSources": []
+          },
+          "diet": {
+            "verification": "verified",
+            "vegetarian": "suitable",
+            "vegan": "suitable"
+          }
+        }
+      ],
+      "tkpiCode": null
+    },
+    {
+      "id": "fx_bad_unknown_component",
+      "displayName": {
+        "id": "Rusak fiksi 10",
+        "en": "Broken fiction 10"
+      },
+      "localNames": [],
+      "category": "fixture",
+      "components": {
+        "verification": "verified",
+        "ingredientIds": ["fx_bad_ghost"]
+      },
+      "allergens": {
+        "verification": "verified",
+        "contains": [],
+        "mayContain": []
+      },
+      "halal": {
+        "verification": "verified",
+        "value": "halal",
+        "nonHalalSources": []
+      },
+      "diet": {
+        "verification": "verified",
+        "vegetarian": "suitable",
+        "vegan": "suitable"
+      },
+      "brandVaries": false,
+      "brandVariants": [],
+      "tkpiCode": null
+    },
+    {
+      "id": "fx_bad_allergen_not_standard",
+      "displayName": {
+        "id": "Rusak fiksi 11",
+        "en": "Broken fiction 11"
+      },
+      "localNames": [],
+      "category": "fixture",
+      "components": {
+        "verification": "verified",
+        "ingredientIds": []
+      },
+      "allergens": {
+        "verification": "verified",
+        "contains": ["kiwi"],
+        "mayContain": []
+      },
+      "halal": {
+        "verification": "verified",
+        "value": "halal",
+        "nonHalalSources": []
+      },
+      "diet": {
+        "verification": "verified",
+        "vegetarian": "suitable",
+        "vegan": "suitable"
+      },
+      "brandVaries": false,
+      "brandVariants": [],
+      "tkpiCode": null
+    },
+    {
+      "id": "fx_bad_unknown_field",
+      "displayName": {
+        "id": "Rusak fiksi 12",
+        "en": "Broken fiction 12"
+      },
+      "localNames": [],
+      "category": "fixture",
+      "components": {
+        "verification": "verified",
+        "ingredientIds": []
+      },
+      "allergens": {
+        "verification": "verified",
+        "contains": [],
+        "mayContain": []
+      },
+      "halal": {
+        "verification": "verified",
+        "value": "halal",
+        "nonHalalSources": []
+      },
+      "diet": {
+        "verification": "verified",
+        "vegetarian": "suitable",
+        "vegan": "suitable"
+      },
+      "brandVaries": false,
+      "brandVariants": [],
+      "tkpiCode": null,
+      "safeForEveryone": true
+    },
+    {
+      "id": "fx_bad_duplicate_id",
+      "displayName": {
+        "id": "Rusak fiksi 13",
+        "en": "Broken fiction 13"
+      },
+      "localNames": [],
+      "category": "fixture",
+      "components": {
+        "verification": "verified",
+        "ingredientIds": []
+      },
+      "allergens": {
+        "verification": "verified",
+        "contains": [],
+        "mayContain": []
+      },
+      "halal": {
+        "verification": "verified",
+        "value": "halal",
+        "nonHalalSources": []
+      },
+      "diet": {
+        "verification": "verified",
+        "vegetarian": "suitable",
+        "vegan": "suitable"
+      },
+      "brandVaries": false,
+      "brandVariants": [],
+      "tkpiCode": null
+    },
+    {
+      "id": "fx_bad_missing_halal",
+      "displayName": {
+        "id": "Rusak fiksi 14",
+        "en": "Broken fiction 14"
+      },
+      "localNames": [],
+      "category": "fixture",
+      "components": {
+        "verification": "verified",
+        "ingredientIds": []
+      },
+      "allergens": {
+        "verification": "verified",
+        "contains": [],
+        "mayContain": []
+      },
+      "diet": {
+        "verification": "verified",
+        "vegetarian": "suitable",
+        "vegan": "suitable"
+      },
+      "brandVaries": false,
+      "brandVariants": [],
+      "tkpiCode": null
+    }
+  ]
+}
