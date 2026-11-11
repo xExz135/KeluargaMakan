@@ -21,6 +21,10 @@ final class SignedIn {
 
   final api.Account account;
   final bool isNewAccount;
+
+  /// The account holds contact details; never print them.
+  @override
+  String toString() => 'SignedIn(${account.id})';
 }
 
 enum SignOutOutcome {

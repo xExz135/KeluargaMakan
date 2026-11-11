@@ -51,6 +51,9 @@ final class Refreshed extends RefreshOutcome {
   const Refreshed(this.tokens);
 
   final SessionTokens tokens;
+
+  @override
+  String toString() => 'Refreshed(<redacted>)';
 }
 
 /// The session is over. [response] is the server's answer, when there was
@@ -59,6 +62,9 @@ final class RefreshEndedSession extends RefreshOutcome {
   const RefreshEndedSession(this.response);
 
   final http.Response? response;
+
+  @override
+  String toString() => 'RefreshEndedSession(${response?.statusCode})';
 }
 
 /// The refresh endpoint answered with a temporary error (for example 503).
@@ -67,6 +73,9 @@ final class RefreshFailed extends RefreshOutcome {
   const RefreshFailed(this.response);
 
   final http.Response response;
+
+  @override
+  String toString() => 'RefreshFailed(${response.statusCode})';
 }
 
 final class SessionManager {
