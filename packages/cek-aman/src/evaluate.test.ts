@@ -492,6 +492,58 @@ describe("PRF-03 vegetarian and vegan", () => {
       expect(codes(m)).toEqual(["diet_uncertain", "diet_uncertain", "diet_uncertain"]);
     }
   });
+
+  it.each([
+    ["uncertain", "suitable"],
+    ["unknown", "suitable"],
+    ["not even a value", "suitable"],
+    ["suitable", "uncertain"],
+    ["uncertain", "unknown"],
+  ])(
+    "PRF-03 a vegan rule takes the worse value: vegetarian %s with vegan %s is check_label",
+    (vegetarian, vegan) => {
+      const reference = [diet("x", { verification: "verified", vegetarian, vegan })];
+      const result = one(
+        input({ reference, recipe: ["x"], members: [member("vg", rules.vegan())] }),
+      );
+      expect(result.status).toBe("check_label");
+      expect(result.reasons.map((r) => [r.code, r.detail])).toEqual([["diet_uncertain", "vegan"]]);
+    },
+  );
+
+  it("PRF-03 a vegan rule is Not safe when either value is not suitable", () => {
+    const reference = [
+      diet("egg", { verification: "verified", vegetarian: "suitable", vegan: "not_suitable" }),
+      diet("odd", { verification: "verified", vegetarian: "uncertain", vegan: "not_suitable" }),
+      diet("meat", { verification: "verified", vegetarian: "not_suitable", vegan: "unknown" }),
+    ];
+    for (const id of ["egg", "odd", "meat"]) {
+      const result = one(
+        input({ reference, recipe: [id], members: [member("vg", rules.vegan())] }),
+      );
+      expect(result.status, id).toBe("not_safe");
+      expect(codes(result), id).toEqual(["diet_not_suitable"]);
+    }
+  });
+
+  it("PRF-03 a vegan rule is safe only when both values are verified suitable", () => {
+    const reference = [
+      diet("ok", { verification: "verified", vegetarian: "suitable", vegan: "suitable" }),
+      diet("egg", { verification: "verified", vegetarian: "suitable", vegan: "not_suitable" }),
+    ];
+    const result = evaluate(
+      input({
+        reference,
+        recipe: ["ok", "egg"],
+        members: [member("v", rules.vegetarian()), member("vg", rules.vegan())],
+      }),
+    );
+    expect(result.perMember.map((m) => m.status)).toEqual(["safe", "not_safe"]);
+    const okOnly = one(
+      input({ reference, recipe: ["ok"], members: [member("vg", rules.vegan())] }),
+    );
+    expect(okOnly).toMatchObject({ status: "safe", reasons: [] });
+  });
 });
 
 describe("PRF-08 SAF-09 mapped and unmapped rules", () => {

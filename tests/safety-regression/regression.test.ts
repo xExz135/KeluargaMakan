@@ -37,7 +37,8 @@ describe("NFR-07 Cek Aman regression cases", () => {
       expected.map(([key]) => fixtureMembers[key as keyof typeof fixtureMembers].memberId),
     );
     expect(result.ruleSetVersion).toBe(RULE_SET_VERSION);
-    expect(result.referenceVersion).toBe(FIXTURE_REFERENCE_VERSION);
+    // DAT-06: the version of the dataset actually used.
+    expect(result.referenceVersion).toBe(testCase.reference?.version ?? FIXTURE_REFERENCE_VERSION);
 
     expected.forEach(([key, expectation], index) => {
       const [status, ...codes] = expectation;

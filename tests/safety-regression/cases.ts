@@ -8,11 +8,19 @@ import {
   fixtureMembers,
   type FixtureMemberKey,
 } from "../../data/fixtures/cek-aman/members.fixture.js";
-import { fixtureReference } from "../../data/fixtures/cek-aman/reference.fixture.js";
+import {
+  MALFORMED_FIXTURE_REFERENCE_VERSION,
+  malformedIngredients,
+} from "../../data/fixtures/cek-aman/malformed-reference.fixture.js";
+import {
+  fixtureIngredients,
+  fixtureReference,
+} from "../../data/fixtures/cek-aman/reference.fixture.js";
 import type {
   CekAmanInput,
   ReasonCode,
   ReasonKind,
+  ReferenceDataset,
   SafetyStatus,
 } from "../../packages/cek-aman/src/index.js";
 
@@ -26,6 +34,12 @@ export interface RegressionCase {
   /** Reference IDs, or `{ custom }` for an ingredient with no reference ID. */
   readonly ingredients: readonly (string | { readonly custom: string })[];
   readonly brands?: readonly (readonly [ingredientId: string, brandId: string])[];
+  /**
+   * Reference dataset to evaluate against. Defaults to the schema-valid fixture.
+   * `malformedReference` holds contradictory records the schema rejects, to
+   * prove the engine fails closed when such data bypasses validation.
+   */
+  readonly reference?: ReferenceDataset;
   /** The selected members (PRF-11) and what each must get. */
   readonly expect: Partial<Record<FixtureMemberKey, Expectation>>;
 }
@@ -42,9 +56,16 @@ export function toInput(testCase: RegressionCase): CekAmanInput {
       brandId,
     })),
     members: (Object.keys(testCase.expect) as FixtureMemberKey[]).map((key) => fixtureMembers[key]),
-    reference: fixtureReference,
+    reference: testCase.reference ?? fixtureReference,
   };
 }
+
+/** The valid fixture plus contradictory records the schema rejects (never valid reference data). */
+export const malformedReference: ReferenceDataset = {
+  schema: fixtureReference.schema,
+  version: MALFORMED_FIXTURE_REFERENCE_VERSION,
+  ingredients: [...fixtureIngredients, ...malformedIngredients],
+};
 
 export const NOT_SAFE_KINDS: readonly ReasonKind[] = ["contains", "component"];
 
@@ -372,6 +393,26 @@ export const regressionCases: readonly RegressionCase[] = [
     title: "fish sauce in an otherwise vegetable dish with a vegan rule",
     ingredients: [...base, "fx_kecap_ikan"],
     expect: { keponakan: ["not_safe", "diet_not_suitable"] },
+  },
+  {
+    id: "REG-063",
+    requirements: ["PRF-03", "DAT-06"],
+    title: "contradictory data: vegan suitable but vegetarian uncertain is check_label for both",
+    reference: malformedReference,
+    ingredients: [...base, "fx_bad_vegan_veg_uncertain"],
+    expect: {
+      keponakan: ["check_label", "diet_uncertain"],
+      tante: ["check_label", "diet_uncertain"],
+      ibu: ["safe"],
+    },
+  },
+  {
+    id: "REG-064",
+    requirements: ["PRF-03", "DAT-06"],
+    title: "contradictory data: vegan suitable but vegetarian unknown is check_label",
+    reference: malformedReference,
+    ingredients: [...base, "fx_bad_vegan_veg_unknown"],
+    expect: { keponakan: ["check_label", "diet_uncertain"] },
   },
 
   // --- PRF-11 only selected members ------------------------------------------
