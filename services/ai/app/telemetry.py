@@ -180,3 +180,7 @@ def configure_logging(level: str = "INFO") -> None:
     root.handlers[:] = [handler]
     root.setLevel(level)
     root.propagate = False
+    # The HTTP client logs each request URL at INFO. URLs carry no key or content,
+    # but nothing from the client needs to reach the logs below a warning.
+    for name in ("httpx2", "httpcore2"):
+        logging.getLogger(name).setLevel(logging.WARNING)
