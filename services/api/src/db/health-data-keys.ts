@@ -1,7 +1,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 
 import { DATA_KEY_BYTES, type KeyEncryptionKey, type KeyProvider } from "./crypto/key-provider.js";
-import { NotFoundError, SQLSTATE } from "./errors.js";
+import { NotFoundError, SQLSTATE, translateDbError } from "./errors.js";
 import type { SqlExecutor } from "./executor.js";
 import { isUuid } from "./ids.js";
 
@@ -10,10 +10,16 @@ import { isUuid } from "./ids.js";
  * AES-256 data key, stored only wrapped by the health-data KEK. The key row's
  * ID is also the member's pseudonymous ID in the safety log (QUESTIONS #40).
  *
- * Deleting the row is crypto-shredding: every hard rule and safety log detail
- * of that member becomes unreadable, in the database and in any backup. The
- * migrations delete it when consent is declined or withdrawn and when the
- * profile or household is deleted.
+ * Deleting the row makes every hard rule and safety log detail of that member
+ * unreadable in the live database. Backups and point-in-time-recovery copies
+ * taken earlier still hold the wrapped key and the ciphertext, and the
+ * health-data key can still read them, until they are purged on their normal
+ * cycle (SET-08). Backup and PITR retention must therefore stay within the
+ * SET-04 window (T-023). The migrations delete the row when consent is
+ * declined or withdrawn and when the profile or household is deleted.
+ *
+ * A key can be created only under an active health consent (database
+ * trigger, migration 0005), and only by a rule write.
  */
 
 export interface MemberDataKey {
@@ -22,12 +28,13 @@ export interface MemberDataKey {
   readonly dataKey: Uint8Array;
 }
 
-interface KeyRow {
-  id: string;
-  profile_id: string;
-  household_id: string;
-  key_ref: string;
-  wrapped_key: Uint8Array;
+/** A `health_data_key` row as read from the database. */
+export interface StoredKeyRow {
+  readonly id: string;
+  readonly profile_id: string;
+  readonly household_id: string;
+  readonly key_ref: string;
+  readonly wrapped_key: Uint8Array;
 }
 
 function wrapContext(keyId: string, profileId: string, householdId: string): string {
@@ -45,7 +52,8 @@ export class HealthDataKeys {
     this.#kek = kek;
   }
 
-  async #unwrap(row: KeyRow): Promise<MemberDataKey> {
+  /** Unwraps one stored key row. Throws on any unwrap failure. */
+  async unwrap(row: StoredKeyRow): Promise<MemberDataKey> {
     const dataKey = await this.#kek.unwrap(
       { keyRef: row.key_ref, wrapped: row.wrapped_key },
       wrapContext(row.id, row.profile_id, row.household_id),
@@ -61,34 +69,40 @@ export class HealthDataKeys {
   ): Promise<Map<string, MemberDataKey>> {
     const ids = profileIds.filter(isUuid);
     if (!isUuid(householdId) || ids.length === 0) return new Map();
-    const { rows } = await db.query<KeyRow>(
+    const { rows } = await db.query<StoredKeyRow>(
       `SELECT id, profile_id, household_id, key_ref, wrapped_key
          FROM health_data_key
         WHERE household_id = $1 AND profile_id = ANY($2::uuid[])`,
       [householdId, ids],
     );
-    const keys = await Promise.all(rows.map((row) => this.#unwrap(row)));
+    const keys = await Promise.all(rows.map((row) => this.unwrap(row)));
     return new Map(keys.map((key) => [key.profileId, key]));
   }
 
-  /** Unwraps keys by key ID (the pseudonymous member ID used in the safety log). */
+  /** Unwraps keys of one household by key ID (the pseudonymous member ID in the safety log). */
   async loadByKeyIds(
     db: SqlExecutor,
+    householdId: string,
     keyIds: readonly string[],
   ): Promise<Map<string, MemberDataKey>> {
     const ids = keyIds.filter(isUuid);
-    if (ids.length === 0) return new Map();
-    const { rows } = await db.query<KeyRow>(
+    if (!isUuid(householdId) || ids.length === 0) return new Map();
+    const { rows } = await db.query<StoredKeyRow>(
       `SELECT id, profile_id, household_id, key_ref, wrapped_key
          FROM health_data_key
-        WHERE id = ANY($1::uuid[])`,
-      [ids],
+        WHERE household_id = $1 AND id = ANY($2::uuid[])`,
+      [householdId, ids],
     );
-    const keys = await Promise.all(rows.map((row) => this.#unwrap(row)));
+    const keys = await Promise.all(rows.map((row) => this.unwrap(row)));
     return new Map(keys.map((key) => [key.keyId, key]));
   }
 
-  /** Returns the member's key, creating it on first use. */
+  /**
+   * Returns the member's key, creating it on first use. For rule writes only:
+   * the caller holds the member lock (`lockMembers`) and has checked consent;
+   * the database refuses a new key without an active consent
+   * (`ConsentRequiredError`). The safety log never creates keys.
+   */
   async getOrCreate(
     db: SqlExecutor,
     householdId: string,
@@ -118,7 +132,7 @@ export class HealthDataKeys {
       ) {
         throw new NotFoundError("profile");
       }
-      throw error;
+      throw translateDbError(error);
     }
     if (inserted.rowCount === 1) return { keyId, profileId, dataKey };
     // Created concurrently by another request: use that one.

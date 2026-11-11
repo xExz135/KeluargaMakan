@@ -2,9 +2,12 @@
 // and ingredients only.
 import { randomBytes, randomUUID } from "node:crypto";
 
+import { inspect } from "node:util";
+
 import {
   evaluateWithLog,
   type CekAmanInput,
+  type HardRule as CekAmanHardRule,
   type ReferenceIngredient,
 } from "@keluargamakan/cek-aman";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -37,6 +40,7 @@ import {
 } from "./deletion.js";
 import {
   ConsentRequiredError,
+  DatabaseError,
   GuardianConfirmationRequiredError,
   InvalidDataError,
   ManagerProfileNotDeletableError,
@@ -58,7 +62,7 @@ import { MigrationError, migrate } from "./migrate.js";
 import { MIGRATIONS } from "./migrations/index.js";
 import { insertSafetyLog, readSafetyLog } from "./safety-log.js";
 import { SCHEMA_TRACE } from "./schema-trace.js";
-import { DATABASE_TARGETS } from "./testing/databases.js";
+import { DATABASE_TARGETS, type TestDatabase } from "./testing/databases.js";
 import {
   addProfile,
   randomLocalKeys,
@@ -121,13 +125,14 @@ for (const target of DATABASE_TARGETS) {
   }
 
   describe(`database: ${target.name}`, () => {
+    let opened: TestDatabase;
     let close: () => Promise<void>;
     let db: SqlExecutor;
     let provider: LocalKeyProvider;
     let keys: HealthDataKeys;
 
     beforeAll(async () => {
-      const opened = await target.open();
+      opened = await target.open();
       db = opened.executor;
       close = () => opened.close();
       await migrate(db);
@@ -431,14 +436,12 @@ for (const target of DATABASE_TARGETS) {
           withdrawnAt: new Date(Date.now() + 60_000),
           deletionWindowDays: 30,
         });
-        // The withdrawal deleted the key; recreate one and try a raw insert.
-        const key2 = await keys.getOrCreate(db, home.householdId, profile);
-        expect(key2.keyId).not.toBe(key.keyId);
+        // The withdrawal deleted the key; a raw insert under the old consent is refused.
         const code = await dbErrorCode(
           db.query(
             `INSERT INTO hard_rule (id, household_id, profile_id, health_key_id, consent_record_id, details_enc)
              VALUES ($1, $2, $3, $4, $5, $6)`,
-            [randomUUID(), home.householdId, profile, key2.keyId, consent.id, randomBytes(40)],
+            [randomUUID(), home.householdId, profile, key.keyId, consent.id, randomBytes(40)],
           ),
         );
         expect(code).toBe("KM001");
@@ -707,6 +710,77 @@ for (const target of DATABASE_TARGETS) {
         });
       });
 
+      it("H1 Q39 a withdrawal committed between any two statements never yields given with missing rules", async () => {
+        // Probe P2 from the review, at every statement boundary of the read.
+        for (let at = 0; at < 4; at += 1) {
+          const home = await seedHousehold(db);
+          const profile = await addProfile(db, home, "adult");
+          await giveConsent(home, profile);
+          await insertHardRule(db, keys, {
+            householdId: home.householdId,
+            profileId: profile,
+            rule: { type: "allergy", allergen: "shrimp" },
+            mappingConfirmedBy: null,
+          });
+          let statements = 0;
+          const racing: SqlExecutor = {
+            async query<R extends object>(text: string, params?: readonly unknown[]) {
+              if (statements === at) {
+                await withdrawHealthConsent(db, {
+                  householdId: home.householdId,
+                  profileId: profile,
+                  withdrawnAt: new Date(Date.now() + 60_000),
+                  deletionWindowDays: 30,
+                });
+              }
+              statements += 1;
+              return db.query<R>(text, params);
+            },
+            execScript: (sql) => db.execScript(sql),
+            transaction: (fn) => fn(racing),
+          };
+          const outcome: unknown = await loadRulesForEvaluation(racing, keys, home.householdId, [
+            profile,
+          ]).then(
+            (members) => members[0],
+            (error: unknown) => error,
+          );
+          if (outcome instanceof RulesUnavailableError) continue;
+          const member = outcome as Awaited<ReturnType<typeof loadRulesForEvaluation>>[number];
+          if (member.consent === "given") {
+            expect(member.hardRules, `withdrawal at statement ${at}`).toHaveLength(1);
+          } else {
+            expect(member).toEqual({ profileId: profile, consent: "withdrawn", hardRules: null });
+          }
+          if (at === 0) expect(member.consent).toBe("withdrawn");
+        }
+      });
+
+      it("H1 reads consent, key and rules in one statement", async () => {
+        const home = await seedHousehold(db);
+        await giveConsent(home, home.managerProfileId);
+        await insertHardRule(db, keys, {
+          householdId: home.householdId,
+          profileId: home.managerProfileId,
+          rule: { type: "vegan" },
+          mappingConfirmedBy: null,
+        });
+        let statements = 0;
+        const counting: SqlExecutor = {
+          query<R extends object>(text: string, params?: readonly unknown[]) {
+            statements += 1;
+            return db.query<R>(text, params);
+          },
+          execScript: (sql) => db.execScript(sql),
+          transaction: (fn) => fn(counting),
+        };
+        const [member] = await loadRulesForEvaluation(counting, keys, home.householdId, [
+          home.managerProfileId,
+        ]);
+        expect(member?.hardRules).toHaveLength(1);
+        expect(statements).toBe(1);
+      });
+
       it("Q39 a corrupted rule fails the whole read instead of dropping that rule", async () => {
         const home = await seedHousehold(db);
         const other = await addProfile(db, home, "adult");
@@ -818,23 +892,35 @@ for (const target of DATABASE_TARGETS) {
         ],
       };
 
-      async function logFor(home: SeededHousehold, profileId: string): Promise<string> {
-        const [member] = await loadRulesForEvaluation(db, keys, home.householdId, [profileId]);
-        if (member?.hardRules == null) throw new Error("member has no rules");
+      function recordFor(
+        home: SeededHousehold,
+        profileId: string,
+        hardRules: readonly CekAmanHardRule[],
+      ) {
         const input: CekAmanInput = {
           ingredients: [
             { ingredientId: "fixture_paste", rawName: "terasi fiksi" },
             { ingredientId: null, rawName: RAW_NAME },
           ],
           recordedBrands: [],
-          members: [{ memberId: profileId, hardRules: member.hardRules }],
+          members: [{ memberId: profileId, hardRules }],
           reference,
         };
-        const { result, logRecord } = evaluateWithLog(input, {
+        return evaluateWithLog(input, {
           householdId: home.householdId,
           subject: { kind: "library_recipe", id: "fixture_recipe", version: "1" },
           evaluatedAt: new Date().toISOString(),
         });
+      }
+
+      async function rulesOf(home: SeededHousehold, profileId: string) {
+        const [member] = await loadRulesForEvaluation(db, keys, home.householdId, [profileId]);
+        if (member?.hardRules == null) throw new Error("member has no rules");
+        return member.hardRules;
+      }
+
+      async function logFor(home: SeededHousehold, profileId: string): Promise<string> {
+        const { result, logRecord } = recordFor(home, profileId, await rulesOf(home, profileId));
         expect(result.perMember[0]?.status).toBe("not_safe");
         return insertSafetyLog(db, keys, logRecord);
       }
@@ -858,60 +944,100 @@ for (const target of DATABASE_TARGETS) {
         return { home, profile };
       }
 
-      it("SAF-14 DAT-06 logs versions, statuses and reason codes, with details only under the health key", async () => {
+      const withdraw = (home: SeededHousehold, profile: string) =>
+        withdrawHealthConsent(db, {
+          householdId: home.householdId,
+          profileId: profile,
+          withdrawnAt: new Date(Date.now() + 60_000),
+          deletionWindowDays:
+            defaultTargets.dataManagement.healthConsentWithdrawalDeletionDays.value,
+        });
+
+      it("SAF-14 DAT-06 logs versions in plain, and status, reasons and ingredients only under the health key", async () => {
         const { home, profile } = await memberWithShrimpRule();
         const logId = await logFor(home, profile);
-        const log = await readSafetyLog(db, keys, logId);
+        const log = await readSafetyLog(db, keys, home.householdId, logId);
         expect(log).toMatchObject({
           householdId: home.householdId,
           ruleSetVersion: expect.any(String) as unknown,
           referenceVersion: "fixture-ref-1",
-          ingredientIds: ["fixture_paste", null],
           subject: { kind: "library_recipe", id: "fixture_recipe", version: "1" },
         });
         const member = log.members[0];
-        expect(member?.status).toBe("not_safe");
-        expect(member?.reasonCodes).toEqual(expect.arrayContaining(["allergen_contains"]));
         expect(member?.memberKeyId).not.toBe(profile);
+        expect(member?.details).toMatchObject({
+          status: "not_safe",
+          ingredientIds: ["fixture_paste", null],
+          recordedBrands: [],
+        });
+        expect(member?.details?.reasonCodes).toEqual(expect.arrayContaining(["allergen_contains"]));
         expect(member?.details?.rules.map((rule) => rule.type)).toEqual(["allergy", "free_text"]);
       });
 
-      it("PR #5 M2 no raw names, free text or profile IDs are stored in the log", async () => {
+      it("H3 DAT-02 plain safety log columns hold no result, reason or ingredient", async () => {
+        const { rows } = await db.query<{ table_name: string; column_name: string }>(
+          `SELECT table_name, column_name FROM information_schema.columns
+            WHERE table_schema = current_schema() AND table_name IN ('safety_log', 'safety_log_member')
+            ORDER BY table_name, column_name`,
+        );
+        expect(rows.map((row) => `${row.table_name}.${row.column_name}`)).toEqual([
+          "safety_log.created_at",
+          "safety_log.evaluated_at",
+          "safety_log.household_id",
+          "safety_log.id",
+          "safety_log.log_format",
+          "safety_log.reference_version",
+          "safety_log.rule_set_version",
+          "safety_log.subject_id",
+          "safety_log.subject_kind",
+          "safety_log.subject_version",
+          "safety_log_member.details_enc",
+          "safety_log_member.log_id",
+          "safety_log_member.member_index",
+          "safety_log_member.member_key_id",
+          "safety_log_member.redacted_at",
+        ]);
+      });
+
+      it("H3 PR #5 M2 with SQL only, a member's name joins to no rule type, reason, status or ingredient", async () => {
         const { home, profile } = await memberWithShrimpRule();
         const logId = await logFor(home, profile);
+        // Probe P4 from the review: join the log to the member's name without any key.
         const { rows } = await db.query<{ t: string }>(
-          `SELECT row_to_json(l)::text || coalesce(string_agg(encode(m.details_enc, 'escape') || row_to_json(m)::text, ''), '') AS t
-             FROM safety_log l JOIN safety_log_member m ON m.log_id = l.id
-            WHERE l.id = $1 GROUP BY l.id`,
+          `SELECT row_to_json(p)::text || row_to_json(l)::text
+                  || encode(m.details_enc, 'escape') || row_to_json(m)::text AS t
+             FROM safety_log_member m
+             JOIN safety_log l ON l.id = m.log_id
+             JOIN health_data_key k ON k.id = m.member_key_id
+             JOIN profile p ON p.id = k.profile_id
+            WHERE l.id = $1`,
           [logId],
         );
         const stored = rows[0]?.t ?? "";
-        expect(stored).not.toBe("");
-        for (const secret of [RAW_NAME, "terasi fiksi", FREE_TEXT, profile, "shrimp"]) {
-          expect(stored).not.toContain(secret);
+        expect(stored).toContain("Profil Uji");
+        for (const secret of [
+          RAW_NAME,
+          "terasi fiksi",
+          FREE_TEXT,
+          "shrimp",
+          "allergen",
+          "allergy",
+          "not_safe",
+          "check_label",
+          "fixture_paste",
+        ]) {
+          expect(stored, secret).not.toContain(secret);
         }
-        const decrypted = JSON.stringify(await readSafetyLog(db, keys, logId));
+        const decrypted = JSON.stringify(await readSafetyLog(db, keys, home.householdId, logId));
         expect(decrypted).not.toContain(RAW_NAME);
         expect(decrypted).not.toContain(FREE_TEXT);
         expect(decrypted).toContain("shrimp");
       });
 
-      it("PR #5 M2c refuses non-opaque IDs and members of another household", async () => {
+      it("PR #5 M2c refuses non-opaque IDs and versions, and members of another household", async () => {
         const { home, profile } = await memberWithShrimpRule();
         const other = await seedHousehold(db);
-        const base = evaluateWithLog(
-          {
-            ingredients: [{ ingredientId: "fixture_rice", rawName: "nasi" }],
-            recordedBrands: [],
-            members: [{ memberId: profile, hardRules: [] }],
-            reference,
-          },
-          {
-            householdId: home.householdId,
-            subject: { kind: "suggestion", id: "fixture_recipe", version: null },
-            evaluatedAt: new Date().toISOString(),
-          },
-        ).logRecord;
+        const base = recordFor(home, profile, []).logRecord;
         await expectRejects(
           insertSafetyLog(db, keys, {
             ...base,
@@ -928,12 +1054,26 @@ for (const target of DATABASE_TARGETS) {
           InvalidDataError,
         );
         await expectRejects(
+          insertSafetyLog(db, keys, { ...base, referenceVersion: "versi Bu Siti 0812" }),
+          InvalidDataError,
+        );
+        await expectRejects(
           insertSafetyLog(db, keys, { ...base, householdId: other.householdId }),
           NotFoundError,
         );
       });
 
-      it("SAF-14 log rows are append-only", async () => {
+      it("M4 a log is read only within its own household", async () => {
+        const { home, profile } = await memberWithShrimpRule();
+        const other = await seedHousehold(db);
+        const logId = await logFor(home, profile);
+        await expectRejects(readSafetyLog(db, keys, other.householdId, logId), NotFoundError);
+        const keyId = (await readSafetyLog(db, keys, home.householdId, logId)).members[0]
+          ?.memberKeyId;
+        expect((await keys.loadByKeyIds(db, other.householdId, [keyId ?? ""])).size).toBe(0);
+      });
+
+      it("SAF-14 log rows are append-only, and a member row is redacted at most once", async () => {
         const { home, profile } = await memberWithShrimpRule();
         const logId = await logFor(home, profile);
         expect(
@@ -943,7 +1083,27 @@ for (const target of DATABASE_TARGETS) {
         ).toBe("KM003");
         expect(
           await dbErrorCode(
-            db.query(`UPDATE safety_log_member SET status = 'safe' WHERE log_id = $1`, [logId]),
+            db.query(`UPDATE safety_log_member SET member_index = 7 WHERE log_id = $1`, [logId]),
+          ),
+        ).toBe("KM003");
+        expect(
+          await dbErrorCode(
+            db.query(`UPDATE safety_log_member SET details_enc = $2 WHERE log_id = $1`, [
+              logId,
+              randomBytes(64),
+            ]),
+          ),
+        ).toBe("KM003");
+        await db.query(
+          `UPDATE safety_log_member SET details_enc = NULL, redacted_at = now() WHERE log_id = $1`,
+          [logId],
+        );
+        expect(
+          await dbErrorCode(
+            db.query(
+              `UPDATE safety_log_member SET member_key_id = gen_random_uuid() WHERE log_id = $1`,
+              [logId],
+            ),
           ),
         ).toBe("KM003");
       });
@@ -963,19 +1123,125 @@ for (const target of DATABASE_TARGETS) {
         ).toBe(0);
       });
 
-      describe("SET-04 SET-07 SET-08 deletion and redaction", () => {
-        it("SET-04 withdrawing consent deletes the rules and data key and redacts the log at once", async () => {
+      describe("H4 a log written after a withdrawal keeps nothing", () => {
+        it("H4 creates no data key and stores no details (probe P1)", async () => {
           const { home, profile } = await memberWithShrimpRule();
-          const logId = await logFor(home, profile);
-          const before = await readSafetyLog(db, keys, logId);
-          const oldKeyId = before.members[0]?.memberKeyId;
-          await withdrawHealthConsent(db, {
+          const hardRules = await rulesOf(home, profile);
+          await withdraw(home, profile);
+          const logId = await insertSafetyLog(
+            db,
+            keys,
+            recordFor(home, profile, hardRules).logRecord,
+          );
+          expect(
+            await count(`SELECT count(*) AS n FROM health_data_key WHERE profile_id = $1`, [
+              profile,
+            ]),
+          ).toBe(0);
+          const log = await readSafetyLog(db, keys, home.householdId, logId);
+          expect(log.members[0]?.details).toBeNull();
+          expect(
+            await count(`SELECT count(*) AS n FROM health_data_key WHERE id = $1`, [
+              log.members[0]?.memberKeyId,
+            ]),
+          ).toBe(0);
+          expect(await enforceHealthConsent(db)).toBe(0);
+        });
+
+        it("H4 after withdrawal and new consent, the withdrawn-era rules are not stored under the new key", async () => {
+          const { home, profile } = await memberWithShrimpRule();
+          const oldRules = await rulesOf(home, profile);
+          await withdraw(home, profile);
+          await giveConsent(home, profile);
+          await insertHardRule(db, keys, {
             householdId: home.householdId,
             profileId: profile,
-            withdrawnAt: new Date(Date.now() + 60_000),
-            deletionWindowDays:
-              defaultTargets.dataManagement.healthConsentWithdrawalDeletionDays.value,
+            rule: { type: "halal" },
+            mappingConfirmedBy: null,
           });
+          const logId = await insertSafetyLog(
+            db,
+            keys,
+            recordFor(home, profile, oldRules).logRecord,
+          );
+          expect(
+            (await readSafetyLog(db, keys, home.householdId, logId)).members[0]?.details,
+          ).toBeNull();
+          // With the current rules the details are stored again.
+          const fresh = await insertSafetyLog(
+            db,
+            keys,
+            recordFor(home, profile, await rulesOf(home, profile)).logRecord,
+          );
+          const details = (await readSafetyLog(db, keys, home.householdId, fresh)).members[0]
+            ?.details;
+          expect(details?.rules.map((rule) => rule.type)).toEqual(["halal"]);
+        });
+
+        it("H4 a member without consent or without a key gets no details and no key", async () => {
+          const home = await seedHousehold(db);
+          const declined = await addProfile(db, home, "adult");
+          await recordHealthConsent(db, {
+            householdId: home.householdId,
+            profileId: declined,
+            decision: "declined",
+            textVersion: "health-data-draft-1",
+            language: "id",
+            recordedByAccountId: home.accountId,
+          });
+          await giveConsent(home, home.managerProfileId); // consent, no rules, so no key
+          for (const profile of [declined, home.managerProfileId]) {
+            const logId = await insertSafetyLog(db, keys, recordFor(home, profile, []).logRecord);
+            expect(
+              (await readSafetyLog(db, keys, home.householdId, logId)).members[0]?.details,
+            ).toBeNull();
+          }
+          expect(
+            await count(`SELECT count(*) AS n FROM health_data_key WHERE household_id = $1`, [
+              home.householdId,
+            ]),
+          ).toBe(0);
+        });
+
+        it("H4 the database refuses a data key or log details without an active consent", async () => {
+          const { home, profile } = await memberWithShrimpRule();
+          const logId = await logFor(home, profile);
+          const keyId = (await readSafetyLog(db, keys, home.householdId, logId)).members[0]
+            ?.memberKeyId;
+          await withdraw(home, profile);
+          await expectRejects(
+            keys.getOrCreate(db, home.householdId, profile),
+            ConsentRequiredError,
+          );
+          expect(
+            await dbErrorCode(
+              db.query(
+                `INSERT INTO health_data_key (id, household_id, profile_id, key_ref, wrapped_key)
+                 VALUES ($1, $2, $3, 'local:health:0', $4)`,
+                [randomUUID(), home.householdId, profile, randomBytes(64)],
+              ),
+            ),
+          ).toBe("KM001");
+          expect(
+            await dbErrorCode(
+              db.query(
+                `INSERT INTO safety_log_member (log_id, member_index, member_key_id, details_enc)
+                 VALUES ($1, 5, $2, $3)`,
+                [logId, keyId, randomBytes(64)],
+              ),
+            ),
+          ).toBe("KM001");
+        });
+      });
+
+      describe("SET-04 SET-07 SET-08 deletion and redaction", () => {
+        it("SET-04 withdrawing consent deletes the rules and data key and redacts and unlinks the log at once", async () => {
+          const { home, profile } = await memberWithShrimpRule();
+          const logId = await logFor(home, profile);
+          const second = await logFor(home, profile);
+          const oldKeyId = (await readSafetyLog(db, keys, home.householdId, logId)).members[0]
+            ?.memberKeyId;
+          await withdraw(home, profile);
           expect(
             await count(`SELECT count(*) AS n FROM hard_rule WHERE profile_id = $1`, [profile]),
           ).toBe(0);
@@ -984,32 +1250,29 @@ for (const target of DATABASE_TARGETS) {
               profile,
             ]),
           ).toBe(0);
-          const after = await readSafetyLog(db, keys, logId);
-          expect(after.members[0]).toMatchObject({
-            status: "not_safe",
-            details: null,
-            memberKeyId: oldKeyId,
-          });
+          const after = await readSafetyLog(db, keys, home.householdId, logId);
+          const afterSecond = await readSafetyLog(db, keys, home.householdId, second);
+          expect(after.members[0]?.details).toBeNull();
+          // M3: redacted rows get fresh random IDs, so they no longer link to each other.
+          expect(after.members[0]?.memberKeyId).not.toBe(oldKeyId);
+          expect(after.members[0]?.memberKeyId).not.toBe(afterSecond.members[0]?.memberKeyId);
           expect(
-            await count(
-              `SELECT count(*) AS n FROM safety_log_member WHERE log_id = $1 AND redacted_at IS NOT NULL`,
-              [logId],
-            ),
-          ).toBe(1);
+            await count(`SELECT count(*) AS n FROM safety_log_member WHERE member_key_id = $1`, [
+              oldKeyId,
+            ]),
+          ).toBe(0);
           expect(await loadRulesForEvaluation(db, keys, home.householdId, [profile])).toEqual([
             { profileId: profile, consent: "withdrawn", hardRules: null },
           ]);
 
-          // New consent starts a new key: the old log entry links to nobody.
+          // New consent starts a new key.
           await giveConsent(home, profile);
           const fresh = await keys.getOrCreate(db, home.householdId, profile);
           expect(fresh.keyId).not.toBe(oldKeyId);
         });
 
-        it("SET-04 declining consent also deletes any data key", async () => {
-          const home = await seedHousehold(db);
-          const profile = await addProfile(db, home, "adult");
-          await keys.getOrCreate(db, home.householdId, profile);
+        it("SET-04 declining consent also deletes the data key and rules", async () => {
+          const { home, profile } = await memberWithShrimpRule();
           await recordHealthConsent(db, {
             householdId: home.householdId,
             profileId: profile,
@@ -1023,22 +1286,24 @@ for (const target of DATABASE_TARGETS) {
               profile,
             ]),
           ).toBe(0);
+          expect(
+            await count(`SELECT count(*) AS n FROM hard_rule WHERE profile_id = $1`, [profile]),
+          ).toBe(0);
         });
 
         it("SET-04 the deletion job backstop finds nothing after the triggers ran, and removes a stray key", async () => {
-          const home = await seedHousehold(db);
-          const profile = await addProfile(db, home, "adult");
-          await recordHealthConsent(db, {
-            householdId: home.householdId,
-            profileId: profile,
-            decision: "declined",
-            textVersion: "health-data-draft-1",
-            language: "id",
-            recordedByAccountId: home.accountId,
-          });
-          await enforceHealthConsent(db);
+          const { home, profile } = await memberWithShrimpRule();
+          await withdraw(home, profile);
           expect(await enforceHealthConsent(db)).toBe(0);
-          await keys.getOrCreate(db, home.householdId, profile);
+          // A stray key can only appear with triggers off (for example a restore).
+          await db.transaction(async (tx) => {
+            await tx.query(`SET LOCAL session_replication_role = replica`);
+            await tx.query(
+              `INSERT INTO health_data_key (id, household_id, profile_id, key_ref, wrapped_key)
+               VALUES ($1, $2, $3, 'local:health:0', $4)`,
+              [randomUUID(), home.householdId, profile, randomBytes(64)],
+            );
+          });
           expect(await enforceHealthConsent(db)).toBe(1);
         });
 
@@ -1087,7 +1352,7 @@ for (const target of DATABASE_TARGETS) {
             ).toBe(0);
           }
           expect(await count(`SELECT count(*) AS n FROM meal WHERE id = $1`, [meal])).toBe(1);
-          const log = await readSafetyLog(db, keys, logId);
+          const log = await readSafetyLog(db, keys, home.householdId, logId);
           expect(log.members[0]?.details).toBeNull();
           // QUESTIONS #33 default: consent records are kept, unlinked from the deleted profile.
           expect(
@@ -1098,13 +1363,16 @@ for (const target of DATABASE_TARGETS) {
           ).toBe(1);
         });
 
-        it("SET-08 deleting the household removes all household data and leaves only an anonymous log", async () => {
+        it("SET-08 deleting the household removes all household data and leaves an unlinked log without results", async () => {
           const { home, profile } = await memberWithShrimpRule();
           const logId = await logFor(home, profile);
+          const keyId = (await readSafetyLog(db, keys, home.householdId, logId)).members[0]
+            ?.memberKeyId;
           const kitchenItem = randomUUID();
           await db.query(
-            `INSERT INTO kitchen_item (id, household_id, ingredient_id, category) VALUES ($1, $2, 'fixture_rice', 'staples')`,
-            [kitchenItem, home.householdId],
+            `INSERT INTO kitchen_item (id, household_id, ingredient_id, category, changed_by_account_id)
+             VALUES ($1, $2, 'fixture_rice', 'staples', $3)`,
+            [kitchenItem, home.householdId, home.accountId],
           );
           const set = randomUUID();
           await db.query(
@@ -1143,9 +1411,18 @@ for (const target of DATABASE_TARGETS) {
               [home.householdId, profile],
             ),
           ).toBe(0);
-          const log = await readSafetyLog(db, keys, logId);
-          expect(log.householdId).toBeNull();
-          expect(log.members.every((member) => member.details === null)).toBe(true);
+          const { rows } = await db.query<{
+            household_id: string | null;
+            member_key_id: string;
+            details_enc: Uint8Array | null;
+          }>(
+            `SELECT l.household_id, m.member_key_id, m.details_enc
+               FROM safety_log l JOIN safety_log_member m ON m.log_id = l.id WHERE l.id = $1`,
+            [logId],
+          );
+          expect(rows).toHaveLength(1);
+          expect(rows[0]).toMatchObject({ household_id: null, details_enc: null });
+          expect(rows[0]?.member_key_id).not.toBe(keyId);
         });
       });
     });
@@ -1235,6 +1512,202 @@ for (const target of DATABASE_TARGETS) {
             `UPDATE reference_dataset SET is_active = true WHERE version = 'fixture-2'`,
           );
         });
+      });
+    });
+
+    it("L1 a corrupted but authentic body never reaches an error message", async () => {
+      const home = await seedHousehold(db);
+      await giveConsent(home, home.managerProfileId);
+      const rule = await insertHardRule(db, keys, {
+        householdId: home.householdId,
+        profileId: home.managerProfileId,
+        rule: { type: "halal" },
+        mappingConfirmedBy: null,
+      });
+      const key = await keys.getOrCreate(db, home.householdId, home.managerProfileId);
+      const leaked = '{"allergen":shrimp-secret';
+      await db.query(`UPDATE hard_rule SET details_enc = $2 WHERE id = $1`, [
+        rule.id,
+        encryptField(
+          key.dataKey,
+          leaked,
+          `hard_rule:${rule.id}:${home.managerProfileId}:${home.householdId}`,
+        ),
+      ]);
+      const ruleError = await expectRejects(
+        listProfileRules(db, keys, home.householdId, home.managerProfileId),
+        RulesUnavailableError,
+      );
+      expect(inspect(ruleError, { depth: 5 })).not.toContain("shrimp-secret");
+
+      const { rows } = await db.query<{ id: string }>(
+        `INSERT INTO safety_log (household_id, log_format, subject_kind, subject_id, evaluated_at,
+                                 rule_set_version, reference_version)
+         VALUES ($1, 'keluargamakan.safety-log/1', 'suggestion', 'fixture_recipe', now(), 'r1', 'd1')
+         RETURNING id`,
+        [home.householdId],
+      );
+      const logId = rows[0]?.id ?? "";
+      await db.query(
+        `INSERT INTO safety_log_member (log_id, member_index, member_key_id, details_enc)
+         VALUES ($1, 0, $2, $3)`,
+        [
+          logId,
+          key.keyId,
+          encryptField(key.dataKey, leaked, `safety_log_member:${logId}:0:${key.keyId}`),
+        ],
+      );
+      const logError = await expectRejects(
+        readSafetyLog(db, keys, home.householdId, logId),
+        InvalidDataError,
+      );
+      expect(inspect(logError, { depth: 5 })).not.toContain("shrimp-secret");
+    });
+
+    it("L2 database errors reach logs without contact details, values or the driver error", async () => {
+      const home = await seedHousehold(db);
+      const { rows } = await db.query<{ phone: string }>(
+        `SELECT phone FROM account WHERE id = $1`,
+        [home.accountId],
+      );
+      const phone = rows[0]?.phone ?? "";
+      expect(phone).not.toBe("");
+      const raw: unknown = await db
+        .query(`INSERT INTO account (phone, sign_in_methods) VALUES ($1, ARRAY['phone'])`, [phone])
+        .then(
+          () => undefined,
+          (caught: unknown) => caught,
+        );
+      const error = translateDbError(raw);
+      expect(error).toBeInstanceOf(DatabaseError);
+      expect(error).toMatchObject({ code: "23505", constraint: "account_phone_key" });
+      const everything = [
+        String(error),
+        JSON.stringify(error),
+        inspect(error, { depth: 5 }),
+        (error as Error).stack ?? "",
+      ].join("\n");
+      expect(everything).not.toContain(phone.slice(1));
+      expect((error as Error).cause).toBeUndefined();
+      const badId: unknown = await db.query(`SELECT $1::uuid`, ["Siti Aminah"]).then(
+        () => undefined,
+        (caught: unknown) => caught,
+      );
+      expect(inspect(translateDbError(badId))).not.toContain("Siti");
+    });
+
+    it("L6 consent records cannot be deleted", async () => {
+      const home = await seedHousehold(db);
+      const record = await giveConsent(home, home.managerProfileId);
+      expect(
+        await dbErrorCode(db.query(`DELETE FROM consent_record WHERE id = $1`, [record.id])),
+      ).toBe("KM003");
+    });
+
+    it("L4 consent and kitchen rows cannot point at another household's account or profile", async () => {
+      const a = await seedHousehold(db);
+      const b = await seedHousehold(db);
+      expect(
+        await dbErrorCode(
+          db.query(
+            `INSERT INTO consent_record (household_id, profile_id, purpose, decision, text_version, language, recorded_by_account_id)
+             VALUES ($1, $2, 'health_data', 'given', 'v1', 'id', $3)`,
+            [a.householdId, a.managerProfileId, b.accountId],
+          ),
+        ),
+      ).toBe("23503");
+      expect(
+        await dbErrorCode(
+          db.query(
+            `INSERT INTO consent_record (household_id, profile_id, purpose, decision, text_version, language, recorded_by_account_id)
+             VALUES ($1, $2, 'health_data', 'given', 'v1', 'id', $3)`,
+            [a.householdId, b.managerProfileId, a.accountId],
+          ),
+        ),
+      ).toBe("23503");
+      expect(
+        await dbErrorCode(
+          db.query(
+            `INSERT INTO kitchen_item (household_id, ingredient_id, category, changed_by_account_id)
+             VALUES ($1, 'fixture_rice', 'staples', $2)`,
+            [a.householdId, b.accountId],
+          ),
+        ),
+      ).toBe("23503");
+    });
+
+    describe("H4 concurrent health-data writes (two connections; PostgreSQL only)", () => {
+      const settledWithin = async (promise: Promise<unknown>, ms: number) => {
+        let settled = false;
+        promise.then(
+          () => (settled = true),
+          () => (settled = true),
+        );
+        await new Promise((resolve) => setTimeout(resolve, ms));
+        return settled;
+      };
+
+      it("H4 a withdrawal waits for an in-flight first rule and then deletes it", async (context) => {
+        if (opened.openSession === null) {
+          context.skip("PGlite has one connection; set TEST_DATABASE_URL to run");
+          return;
+        }
+        const home = await seedHousehold(db);
+        const profile = await addProfile(db, home, "adult");
+        await giveConsent(home, profile);
+        const session = await opened.openSession();
+        try {
+          await insertHardRule(session.executor, keys, {
+            householdId: home.householdId,
+            profileId: profile,
+            rule: { type: "allergy", allergen: "shrimp" },
+            mappingConfirmedBy: null,
+          });
+        } catch (error) {
+          await session.rollback();
+          throw error;
+        }
+        const withdrawal = withdrawHealthConsent(db, {
+          householdId: home.householdId,
+          profileId: profile,
+          withdrawnAt: new Date(Date.now() + 60_000),
+          deletionWindowDays: 30,
+        });
+        expect(await settledWithin(withdrawal, 300)).toBe(false);
+        await session.commit();
+        await withdrawal;
+        expect(
+          await count(`SELECT count(*) AS n FROM hard_rule WHERE profile_id = $1`, [profile]),
+        ).toBe(0);
+        expect(
+          await count(`SELECT count(*) AS n FROM health_data_key WHERE profile_id = $1`, [profile]),
+        ).toBe(0);
+      });
+
+      it("H4 a rule write waits for an in-flight withdrawal and is then refused", async (context) => {
+        if (opened.openSession === null) {
+          context.skip("PGlite has one connection; set TEST_DATABASE_URL to run");
+          return;
+        }
+        const home = await seedHousehold(db);
+        const profile = await addProfile(db, home, "adult");
+        await giveConsent(home, profile);
+        const session = await opened.openSession();
+        await withdrawHealthConsent(session.executor, {
+          householdId: home.householdId,
+          profileId: profile,
+          withdrawnAt: new Date(Date.now() + 60_000),
+          deletionWindowDays: 30,
+        });
+        const write = insertHardRule(db, keys, {
+          householdId: home.householdId,
+          profileId: profile,
+          rule: { type: "halal" },
+          mappingConfirmedBy: null,
+        });
+        expect(await settledWithin(write, 300)).toBe(false);
+        await session.commit();
+        await expectRejects(write, ConsentRequiredError);
       });
     });
 

@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import {
   SAFETY_LOG_FORMAT,
   SAFETY_SUBJECT_KINDS,
@@ -8,32 +10,42 @@ import {
 } from "@keluargamakan/cek-aman";
 
 import { decryptField, encryptField } from "./crypto/data-key-cipher.js";
-import { InvalidDataError, NotFoundError } from "./errors.js";
+import { InvalidDataError, NotFoundError, withDbErrors } from "./errors.js";
 import type { SqlExecutor } from "./executor.js";
 import type { HealthDataKeys } from "./health-data-keys.js";
 import { isReferenceId, isUuid } from "./ids.js";
+import { lockMembers } from "./locks.js";
 
 /**
  * SRS 18.1 Safety result log (SAF-14, DAT-05, DAT-06), stored minimal
- * (DECISIONS 2026-11-11, QUESTIONS #40; security review PR #5 M2):
+ * (DECISIONS 2026-11-11, QUESTIONS #40; security reviews PR #5 M2 and T-016 H3):
  *
- * - Plain: subject, versions, reference ingredient IDs, recorded brand IDs,
- *   and per member a pseudonymous ID, the status and the reason codes.
+ * - Plain: subject, versions and evaluation time, and per member only a
+ *   pseudonymous ID. Nothing in plain columns says what the result was or why,
+ *   so nothing links a member to a rule type without the health-data key.
+ * - Encrypted with the member's data key: status, reason codes, the reference
+ *   ingredient IDs and recorded brands evaluated, rule summaries and full
+ *   reasons.
  * - Never stored: raw ingredient names (custom ingredients and family recipes
  *   can hold names or phone numbers), member names, free-text rule wording.
- * - Encrypted with the member's health data key: the rule summaries and the
- *   full reasons (allergen, excluded ingredient, component path).
- * - IDs must be opaque: household and member IDs are UUIDs, subject IDs
- *   reference IDs. Anything else is refused, so a name can never be logged as
- *   an ID (PR #5 M2c).
+ * - IDs must be opaque (UUIDs and reference IDs) and versions must match a
+ *   version pattern, so a name can never be logged as an ID (PR #5 M2c, L7).
+ *
+ * H4: the log never creates a data key. Details are stored only when, at log
+ * time and under the member lock, the member's consent is active, their key
+ * exists and every logged rule still exists. Otherwise the member row is
+ * stored without details under a fresh random pseudonym. A log written after a
+ * withdrawal therefore cannot bring the withdrawn rules back.
  *
  * The pseudonymous member ID is the member's `health_data_key.id`. When that
- * key is deleted the details are redacted and the ID links to nobody.
+ * key is deleted the details are cleared and the ID is replaced by a random
+ * one, so the row links to nobody (migration 0005).
  */
 
 const REASON_CODE = /^[a-z_]{1,64}$/;
+const VERSION = /^[A-Za-z0-9][A-Za-z0-9._+/-]{0,99}$/;
 const STATUSES: readonly SafetyStatus[] = ["safe", "not_safe", "check_label"];
-const DETAILS_VERSION = 1;
+const DETAILS_VERSION = 2;
 
 /** A reason as logged: the ingredient's raw name is removed. */
 export type LoggedReason = Omit<SafetyReason, "ingredient"> & {
@@ -41,6 +53,11 @@ export type LoggedReason = Omit<SafetyReason, "ingredient"> & {
 };
 
 export interface SafetyLogMemberDetails {
+  readonly status: SafetyStatus;
+  readonly reasonCodes: readonly string[];
+  /** Reference ingredient IDs in recipe order; null marks an unresolved ingredient. */
+  readonly ingredientIds: readonly (string | null)[];
+  readonly recordedBrands: readonly { readonly ingredientId: string; readonly brandId: string }[];
   readonly rules: readonly RuleSummary[];
   readonly reasons: readonly LoggedReason[];
 }
@@ -48,9 +65,7 @@ export interface SafetyLogMemberDetails {
 export interface StoredSafetyLogMember {
   /** Pseudonymous member ID (not the profile ID). */
   readonly memberKeyId: string;
-  readonly status: SafetyStatus;
-  readonly reasonCodes: readonly string[];
-  /** Null once redacted (consent withdrawn, member or household deleted). */
+  /** Null when withheld (no active consent or key at log time) or redacted later. */
   readonly details: SafetyLogMemberDetails | null;
 }
 
@@ -63,8 +78,6 @@ export interface StoredSafetyLog {
   readonly evaluatedAt: Date;
   readonly ruleSetVersion: string;
   readonly referenceVersion: string;
-  readonly ingredientIds: readonly (string | null)[];
-  readonly recordedBrands: readonly { readonly ingredientId: string; readonly brandId: string }[];
   readonly members: readonly StoredSafetyLogMember[];
 }
 
@@ -110,10 +123,11 @@ function validate(record: SafetyLogRecord): void {
   );
   requireValid(isReferenceId(record.subject.id), "subject.id must be an opaque reference ID");
   requireValid(
-    record.subject.version === null ||
-      (record.subject.version.length > 0 && record.subject.version.length <= 100),
+    record.subject.version === null || VERSION.test(record.subject.version),
     "subject.version is invalid",
   );
+  requireValid(VERSION.test(record.ruleSetVersion), "ruleSetVersion is invalid");
+  requireValid(VERSION.test(record.referenceVersion), "referenceVersion is invalid");
   requireValid(
     !Number.isNaN(Date.parse(record.evaluatedAt)) && /^\d{4}-\d{2}-\d{2}T/.test(record.evaluatedAt),
     "evaluatedAt must be ISO 8601",
@@ -142,6 +156,16 @@ function validate(record: SafetyLogRecord): void {
   }
 }
 
+interface MemberStateRow {
+  profile_id: string;
+  consent_active: boolean;
+  k_id: string | null;
+  k_household_id: string | null;
+  k_key_ref: string | null;
+  k_wrapped_key: Uint8Array | null;
+  rule_ids: string[];
+}
+
 /**
  * SAF-14: persists one Cek Aman log record from `evaluateWithLog`. The caller
  * must not show the result if this throws.
@@ -152,62 +176,109 @@ export async function insertSafetyLog(
   record: SafetyLogRecord,
 ): Promise<string> {
   validate(record);
-  return db.transaction(async (tx) => {
-    const { rows } = await tx.query<{ id: string }>(
-      `INSERT INTO safety_log
-         (household_id, log_format, subject_kind, subject_id, subject_version, evaluated_at,
-          rule_set_version, reference_version, ingredient_ids, recorded_brands)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::text[], $10::jsonb)
-       RETURNING id`,
-      [
-        record.householdId,
-        record.logFormat,
-        record.subject.kind,
-        record.subject.id,
-        record.subject.version,
-        record.evaluatedAt,
-        record.ruleSetVersion,
-        record.referenceVersion,
-        record.ingredients.map((item) => item.ingredientId),
-        JSON.stringify(
-          record.recordedBrands.map((brand) => ({
-            ingredientId: brand.ingredientId,
-            brandId: brand.brandId,
-          })),
-        ),
-      ],
-    );
-    const logId = rows[0]?.id;
-    if (logId === undefined) throw new Error("safety log insert returned no row");
+  const memberIds = record.members.map((member) => member.memberId);
+  return withDbErrors(() =>
+    db.transaction(async (tx) => {
+      // H4: decide on details under the member lock, from the current state.
+      const states = new Map<string, MemberStateRow>();
+      if (memberIds.length > 0) {
+        await lockMembers(tx, record.householdId, memberIds);
+        const { rows } = await tx.query<MemberStateRow>(
+          `SELECT p.id AS profile_id,
+                  health_consent_active(p.id) AS consent_active,
+                  k.id AS k_id, k.household_id AS k_household_id,
+                  k.key_ref AS k_key_ref, k.wrapped_key AS k_wrapped_key,
+                  COALESCE(
+                    (SELECT array_agg(h.id::text) FROM hard_rule h WHERE h.profile_id = p.id),
+                    '{}'::text[]
+                  ) AS rule_ids
+             FROM profile p
+             LEFT JOIN health_data_key k ON k.profile_id = p.id AND k.household_id = p.household_id
+            WHERE p.household_id = $1 AND p.id = ANY($2::uuid[])`,
+          [record.householdId, memberIds],
+        );
+        for (const row of rows) states.set(row.profile_id, row);
+      }
 
-    for (const [index, member] of record.members.entries()) {
-      const key = await keys.getOrCreate(tx, record.householdId, member.memberId);
-      const details: SafetyLogMemberDetails & { v: number } = {
-        v: DETAILS_VERSION,
-        rules: member.rules.map(stripRule),
-        reasons: member.reasons.map(stripReason),
-      };
-      const reasonCodes = [...new Set(member.reasons.map((reason) => reason.code))];
-      await tx.query(
-        `INSERT INTO safety_log_member
-           (log_id, member_index, member_key_id, status, reason_codes, details_enc)
-         VALUES ($1, $2, $3, $4, $5::text[], $6)`,
+      const { rows } = await tx.query<{ id: string }>(
+        `INSERT INTO safety_log
+           (household_id, log_format, subject_kind, subject_id, subject_version, evaluated_at,
+            rule_set_version, reference_version)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         RETURNING id`,
         [
-          logId,
-          index,
-          key.keyId,
-          member.status,
-          reasonCodes,
-          encryptField(
-            key.dataKey,
-            JSON.stringify(details),
-            memberContext(logId, index, key.keyId),
-          ),
+          record.householdId,
+          record.logFormat,
+          record.subject.kind,
+          record.subject.id,
+          record.subject.version,
+          record.evaluatedAt,
+          record.ruleSetVersion,
+          record.referenceVersion,
         ],
       );
-    }
-    return logId;
-  });
+      const logId = rows[0]?.id;
+      if (logId === undefined) throw new Error("safety log insert returned no row");
+
+      const ingredientIds = record.ingredients.map((item) => item.ingredientId);
+      const recordedBrands = record.recordedBrands.map((brand) => ({
+        ingredientId: brand.ingredientId,
+        brandId: brand.brandId,
+      }));
+
+      for (const [index, member] of record.members.entries()) {
+        const state = states.get(member.memberId);
+        if (state === undefined) throw new NotFoundError("profile");
+        const current = new Set(state.rule_ids);
+        const rulesStillStored = member.rules.every((rule) => current.has(rule.ruleId));
+        if (
+          !state.consent_active ||
+          state.k_id === null ||
+          state.k_key_ref === null ||
+          state.k_wrapped_key === null ||
+          !rulesStillStored
+        ) {
+          await tx.query(
+            `INSERT INTO safety_log_member (log_id, member_index, member_key_id, details_enc, redacted_at)
+             VALUES ($1, $2, $3, NULL, now())`,
+            [logId, index, randomUUID()],
+          );
+          continue;
+        }
+        const key = await keys.unwrap({
+          id: state.k_id,
+          profile_id: member.memberId,
+          household_id: state.k_household_id ?? record.householdId,
+          key_ref: state.k_key_ref,
+          wrapped_key: state.k_wrapped_key,
+        });
+        const details: SafetyLogMemberDetails & { v: number } = {
+          v: DETAILS_VERSION,
+          status: member.status,
+          reasonCodes: [...new Set(member.reasons.map((reason) => reason.code))],
+          ingredientIds,
+          recordedBrands,
+          rules: member.rules.map(stripRule),
+          reasons: member.reasons.map(stripReason),
+        };
+        await tx.query(
+          `INSERT INTO safety_log_member (log_id, member_index, member_key_id, details_enc)
+           VALUES ($1, $2, $3, $4)`,
+          [
+            logId,
+            index,
+            key.keyId,
+            encryptField(
+              key.dataKey,
+              JSON.stringify(details),
+              memberContext(logId, index, key.keyId),
+            ),
+          ],
+        );
+      }
+      return logId;
+    }),
+  );
 }
 
 interface LogRow {
@@ -220,58 +291,77 @@ interface LogRow {
   evaluated_at: Date;
   rule_set_version: string;
   reference_version: string;
-  ingredient_ids: (string | null)[];
-  recorded_brands: unknown;
 }
 
 interface MemberRow {
   member_index: number;
   member_key_id: string;
-  status: SafetyStatus;
-  reason_codes: string[];
   details_enc: Uint8Array | null;
 }
 
+/** L1: never echo decrypted text in an error, whatever went wrong. */
 function parseDetails(json: string): SafetyLogMemberDetails {
-  const raw = JSON.parse(json) as { v?: unknown; rules?: unknown; reasons?: unknown };
-  if (raw.v !== DETAILS_VERSION || !Array.isArray(raw.rules) || !Array.isArray(raw.reasons)) {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(json);
+  } catch {
+    throw new InvalidDataError("safety log details are not valid JSON");
+  }
+  const details = raw as Partial<SafetyLogMemberDetails> & { v?: unknown };
+  if (
+    typeof raw !== "object" ||
+    raw === null ||
+    details.v !== DETAILS_VERSION ||
+    !STATUSES.includes(details.status as SafetyStatus) ||
+    !Array.isArray(details.reasonCodes) ||
+    !Array.isArray(details.ingredientIds) ||
+    !Array.isArray(details.recordedBrands) ||
+    !Array.isArray(details.rules) ||
+    !Array.isArray(details.reasons)
+  ) {
     throw new InvalidDataError("unknown safety log details format");
   }
   return {
-    rules: raw.rules as RuleSummary[],
-    reasons: raw.reasons as LoggedReason[],
+    status: details.status as SafetyStatus,
+    reasonCodes: details.reasonCodes,
+    ingredientIds: details.ingredientIds,
+    recordedBrands: details.recordedBrands,
+    rules: details.rules,
+    reasons: details.reasons,
   };
 }
 
 /**
- * Incident review (SAF-14): reads one log with its decrypted member details.
- * Redacted members come back with `details: null`. Details whose key is gone
- * but which are not yet redacted cannot happen (trigger); if they did, this
- * throws rather than guess.
+ * Incident review (SAF-14): reads one log of the given household with its
+ * decrypted member details (security review T-016 M4: household-scoped).
+ * Members without details come back with `details: null`. Details whose key
+ * is gone cannot happen (trigger); if they did, this throws rather than guess.
  */
 export async function readSafetyLog(
   db: SqlExecutor,
   keys: HealthDataKeys,
+  householdId: string,
   logId: string,
 ): Promise<StoredSafetyLog> {
-  if (!isUuid(logId)) throw new NotFoundError("safety log");
+  if (!isUuid(householdId) || !isUuid(logId)) throw new NotFoundError("safety log");
   const { rows } = await db.query<LogRow>(
     `SELECT id, household_id, log_format, subject_kind, subject_id, subject_version, evaluated_at,
-            rule_set_version, reference_version, ingredient_ids, recorded_brands
-       FROM safety_log WHERE id = $1`,
-    [logId],
+            rule_set_version, reference_version
+       FROM safety_log WHERE id = $1 AND household_id = $2`,
+    [logId, householdId],
   );
   const log = rows[0];
   if (log === undefined) throw new NotFoundError("safety log");
   const members = (
     await db.query<MemberRow>(
-      `SELECT member_index, member_key_id, status, reason_codes, details_enc
+      `SELECT member_index, member_key_id, details_enc
          FROM safety_log_member WHERE log_id = $1 ORDER BY member_index`,
       [logId],
     )
   ).rows;
   const keyMap = await keys.loadByKeyIds(
     db,
+    householdId,
     members.filter((member) => member.details_enc !== null).map((member) => member.member_key_id),
   );
   return {
@@ -282,23 +372,14 @@ export async function readSafetyLog(
     evaluatedAt: log.evaluated_at,
     ruleSetVersion: log.rule_set_version,
     referenceVersion: log.reference_version,
-    ingredientIds: log.ingredient_ids,
-    recordedBrands: log.recorded_brands as StoredSafetyLog["recordedBrands"],
     members: members.map((member): StoredSafetyLogMember => {
       if (member.details_enc === null) {
-        return {
-          memberKeyId: member.member_key_id,
-          status: member.status,
-          reasonCodes: member.reason_codes,
-          details: null,
-        };
+        return { memberKeyId: member.member_key_id, details: null };
       }
       const key = keyMap.get(member.member_key_id);
       if (key === undefined) throw new InvalidDataError("safety log details have no key");
       return {
         memberKeyId: member.member_key_id,
-        status: member.status,
-        reasonCodes: member.reason_codes,
         details: parseDetails(
           decryptField(
             key.dataKey,

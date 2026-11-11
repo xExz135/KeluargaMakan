@@ -1,6 +1,7 @@
 import { DataLayerError, NotFoundError, withDbErrors } from "./errors.js";
 import type { SqlExecutor } from "./executor.js";
 import { isUuid } from "./ids.js";
+import { lockMembers } from "./locks.js";
 
 /**
  * SRS 18.1 Consent record (ACC-08, SET-03, SET-04, SET-10; QUESTIONS #13, #36, #47).
@@ -12,7 +13,10 @@ import { isUuid } from "./ids.js";
  * - A withdrawal records `withdrawnAt` and `deletionDueBy` (now plus the
  *   configured SET-04 window). The database then deletes the member's data key
  *   at once, which removes every hard rule and redacts their safety log
- *   details.
+ *   details in the live database. Backups and point-in-time-recovery copies
+ *   are purged on their normal cycle, which must stay within the window (T-023).
+ * - Every decision locks the member first (`lockMembers`, security review
+ *   T-016 H4), so it waits for an in-flight rule write and then removes it.
  * - `guardian_confirmation` records the manager's confirmation as parent or
  *   guardian of a child profile (SET-10).
  */
@@ -127,25 +131,28 @@ async function insertRecord(
 ): Promise<ConsentRecordRow> {
   if (!isUuid(input.householdId) || !isUuid(input.profileId)) throw new NotFoundError("profile");
   const { rows } = await withDbErrors(() =>
-    db.query<Row>(
-      `INSERT INTO consent_record
+    db.transaction(async (tx) => {
+      await lockMembers(tx, input.householdId, [input.profileId]);
+      return tx.query<Row>(
+        `INSERT INTO consent_record
          (household_id, profile_id, purpose, decision, text_version, language,
           decided_at, recorded_by_account_id)
        SELECT p.household_id, p.id, $3, $4, $5, $6, COALESCE($7::timestamptz, now()), $8
          FROM profile p
         WHERE p.id = $2 AND p.household_id = $1
        RETURNING ${COLUMNS}`,
-      [
-        input.householdId,
-        input.profileId,
-        purpose,
-        decision,
-        input.textVersion,
-        input.language,
-        input.decidedAt ?? null,
-        input.recordedByAccountId,
-      ],
-    ),
+        [
+          input.householdId,
+          input.profileId,
+          purpose,
+          decision,
+          input.textVersion,
+          input.language,
+          input.decidedAt ?? null,
+          input.recordedByAccountId,
+        ],
+      );
+    }),
   );
   const row = rows[0];
   if (row === undefined) throw new NotFoundError("profile");
@@ -231,8 +238,9 @@ const DAY_MS = 86_400_000;
  * SET-03, SET-04: withdraws the member's active health-data consent.
  * `deletionWindowDays` is `targets.dataManagement.healthConsentWithdrawalDeletionDays`.
  * The database deletes the member's hard rules and redacts their safety log
- * details in the same transaction; `deletionDueBy` is the outer bound that
- * also covers caches and backups.
+ * details in the same transaction. `deletionDueBy` is the outer bound for
+ * caches, and for backups and point-in-time-recovery copies, which are purged
+ * on their normal cycle (T-023 keeps that cycle within the window).
  */
 export async function withdrawHealthConsent(
   db: SqlExecutor,
@@ -246,21 +254,26 @@ export async function withdrawHealthConsent(
   if (!Number.isInteger(input.deletionWindowDays) || input.deletionWindowDays < 0) {
     throw new RangeError("deletionWindowDays must be a non-negative integer");
   }
-  return db.transaction(async (tx) => {
-    const latest = (await latestHealthConsents(tx, input.householdId, [input.profileId])).get(
-      input.profileId,
-    );
-    if (latest === undefined || consentStateOf(latest).status !== "given") {
-      throw new ConsentNotActiveError();
-    }
-    const deletionDueBy = new Date(input.withdrawnAt.getTime() + input.deletionWindowDays * DAY_MS);
-    const { rows } = await tx.query<Row>(
-      `UPDATE consent_record SET withdrawn_at = $2, deletion_due_by = $3
+  return withDbErrors(() =>
+    db.transaction(async (tx) => {
+      await lockMembers(tx, input.householdId, [input.profileId]);
+      const latest = (await latestHealthConsents(tx, input.householdId, [input.profileId])).get(
+        input.profileId,
+      );
+      if (latest === undefined || consentStateOf(latest).status !== "given") {
+        throw new ConsentNotActiveError();
+      }
+      const deletionDueBy = new Date(
+        input.withdrawnAt.getTime() + input.deletionWindowDays * DAY_MS,
+      );
+      const { rows } = await tx.query<Row>(
+        `UPDATE consent_record SET withdrawn_at = $2, deletion_due_by = $3
         WHERE id = $1 AND withdrawn_at IS NULL
         RETURNING ${COLUMNS}`,
-      [latest.id, input.withdrawnAt, deletionDueBy],
-    );
-    if (rows[0] === undefined) throw new ConsentNotActiveError();
-    return fromRow(rows[0]);
-  });
+        [latest.id, input.withdrawnAt, deletionDueBy],
+      );
+      if (rows[0] === undefined) throw new ConsentNotActiveError();
+      return fromRow(rows[0]);
+    }),
+  );
 }

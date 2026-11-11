@@ -115,23 +115,62 @@ function field(error: unknown, name: string): unknown {
     : undefined;
 }
 
-/** Turns trigger and constraint errors from PostgreSQL into typed data-layer errors. */
+const SQLSTATE_PATTERN = /^[0-9A-Z]{5}$/;
+const IDENTIFIER_PATTERN = /^[a-z_][a-z0-9_]{0,62}$/;
+
+/**
+ * Any other PostgreSQL error, stripped for logs and error tracking (security
+ * review T-016, L2). The driver's error carries `detail` (for example
+ * `Key (phone)=(+62...) already exists`), `where`, the failing values in its
+ * message and sometimes the query parameters. Only the SQLSTATE and the
+ * constraint, table and column names are kept, and the original is not kept as
+ * `cause`.
+ */
+export class DatabaseError extends Error {
+  readonly code: string;
+  readonly constraint: string | null;
+  readonly table: string | null;
+  readonly column: string | null;
+
+  constructor(code: string, names: { constraint: unknown; table: unknown; column: unknown }) {
+    const identifier = (value: unknown): string | null =>
+      typeof value === "string" && IDENTIFIER_PATTERN.test(value) ? value : null;
+    const constraint = identifier(names.constraint);
+    super(`database error ${code}${constraint === null ? "" : ` (${constraint})`}`);
+    this.name = "DatabaseError";
+    this.code = code;
+    this.constraint = constraint;
+    this.table = identifier(names.table);
+    this.column = identifier(names.column);
+  }
+}
+
+/**
+ * Turns trigger and constraint errors from PostgreSQL into typed data-layer
+ * errors, and every other database error into a sanitized `DatabaseError`.
+ * Errors that do not come from the database pass through unchanged.
+ */
 export function translateDbError(error: unknown): unknown {
   const code = field(error, "code");
-  if (code === SQLSTATE.consentRequired) return new ConsentRequiredError({ cause: error });
+  if (typeof code !== "string" || !SQLSTATE_PATTERN.test(code)) return error;
+  if (code === SQLSTATE.consentRequired) return new ConsentRequiredError();
   if (code === SQLSTATE.guardianConfirmationRequired) {
-    return new GuardianConfirmationRequiredError({ cause: error });
+    return new GuardianConfirmationRequiredError();
   }
   if (
     code === SQLSTATE.foreignKeyViolation &&
     field(error, "constraint") === MANAGER_PROFILE_CONSTRAINT
   ) {
-    return new ManagerProfileNotDeletableError({ cause: error });
+    return new ManagerProfileNotDeletableError();
   }
-  return error;
+  return new DatabaseError(code, {
+    constraint: field(error, "constraint"),
+    table: field(error, "table"),
+    column: field(error, "column"),
+  });
 }
 
-/** Runs `fn` and rethrows database errors as typed data-layer errors. */
+/** Runs `fn` and rethrows database errors as typed or sanitized data-layer errors. */
 export async function withDbErrors<T>(fn: () => Promise<T>): Promise<T> {
   try {
     return await fn();

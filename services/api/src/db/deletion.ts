@@ -7,16 +7,22 @@ import { isUuid } from "./ids.js";
  * DAT-05. The full flows (scheduling, object storage, caches, confirmation
  * screens) are later tasks (T-072); these functions are what they call.
  *
- * What the database guarantees on its own (migrations 0001 to 0004):
+ * What the database guarantees on its own (migrations 0001 to 0005):
  * - Deleting a profile removes its preferences, likes and dislikes, hard
  *   rules, data key, meal participation and per-member feedback. Deleting the
- *   data key redacts the member's safety log details. Consent records are kept,
- *   unlinked (QUESTIONS #33 safer default, legal to confirm).
+ *   data key redacts the member's safety log details and replaces their
+ *   pseudonymous ID with a random one. Consent records are kept, unlinked
+ *   (QUESTIONS #33 safer default, legal to confirm).
  * - Deleting a household removes every row that belongs to it. Safety log rows
- *   stay for DAT-05, but lose the household link and every member's details,
- *   so they keep only versions, reference IDs, statuses and reason codes.
+ *   stay for DAT-05, but lose the household link and every member's details
+ *   and pseudonym, so they keep only the subject, versions and times. They are
+ *   still pseudonymous rather than anonymous data (review T-016 M3, legal).
  * - Declining or withdrawing health consent deletes the member's data key,
  *   which removes the hard rules and redacts the log details at once (SET-04).
+ *
+ * All of this applies to the live database. Backups and point-in-time-recovery
+ * copies are not changed: they are purged on their normal cycle (SET-08), and
+ * T-023 must keep backup and PITR retention within the SET-04 window.
  */
 
 /**

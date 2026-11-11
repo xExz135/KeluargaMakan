@@ -291,8 +291,6 @@ export const SCHEMA_TRACE: Readonly<Record<string, TableTrace>> = {
       evaluated_at: "evaluation time (SAF-14)",
       rule_set_version: "Rule set version",
       reference_version: "Data version",
-      ingredient_ids: "Recipe: reference ingredient IDs evaluated",
-      recorded_brands: "Recipe: household brands evaluated (SAF-07)",
       created_at: created,
     },
   },
@@ -302,11 +300,11 @@ export const SCHEMA_TRACE: Readonly<Record<string, TableTrace>> = {
     columns: {
       log_id: "Safety result log",
       member_index: "Members: order",
-      member_key_id: "Members: pseudonymous ID (QUESTIONS #40)",
-      status: "Result",
-      reason_codes: "Result: reason codes",
-      details_enc: "Result: rules and reasons (encrypted, DAT-02)",
-      redacted_at: "Result: time the details were removed (SET-04, SET-07, SET-08)",
+      member_key_id:
+        "Members: pseudonymous ID (QUESTIONS #40); replaced by a random ID on redaction",
+      details_enc:
+        "Result, reason codes, recipe ingredients and brands, rules and reasons (encrypted, DAT-02, review T-016 H3)",
+      redacted_at: "Result: time the details were withheld or removed (SET-04, SET-07, SET-08)",
     },
   },
 };
