@@ -1,0 +1,9 @@
+# Files the Dart generator should not write into generated/dart. Used through
+# --ignore-file-override by scripts/generate.mjs, which also deletes any
+# supporting file this list does not catch (see DART_EXTRAS there).
+#
+# No Markdown is generated: the repository never commits *.md files.
+
+**/*.md
+doc/**
+test/**

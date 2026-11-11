@@ -1,11 +1,1837 @@
 openapi: 3.1.1
 info:
   title: KeluargaMakan API
-  version: 0.0.0
+  version: 0.1.0
+  summary: Household manager API for KeluargaMakan (FamilyEats).
   description: >-
-    Source of truth for API shapes. Endpoints are added by the API owner;
-    change this file first, then implement.
+    Source of truth for API shapes: change this file first, then implement.
+    The TypeScript and Dart clients in this package are generated from it and
+    are never edited by hand.
+
+
+    v0.1 covers sign-in (ACC-01, ACC-02 Google only, ACC-13), the household
+    and its single manager account (ACC-03), family profiles (PRF-01, PRF-02,
+    PRF-07, PRF-18), hard rules with their mapping status (PRF-03, PRF-04,
+    PRF-08), soft preferences and likes (PRF-05, PRF-06), health-data consent
+    (ACC-08, SET-03, SET-10) and the error model. There is no Apple sign-in
+    (Android only, owner decision 2026-11-10).
+
+
+    Conventions: JSON bodies use camelCase. Timestamps are RFC 3339 in UTC.
+    Identifiers are opaque strings. Clients must treat enum values they do not
+    know as unknown and must never map an unknown value to a permissive state.
+    Errors use `application/problem+json` (RFC 9457) with a stable `code`;
+    clients localize messages from `code`, never from `title` or `detail`.
+
+
+    Data classes: every schema carries `x-data-sensitivity` (`public`,
+    `personal`, `sensitive_health` or `credential`), traced to SRS 18.1.
+    `sensitive_health` data (hard rules) is stored encrypted with a key separate
+    from general household data (DAT-02) and is only stored after a consent
+    record exists (ACC-08, DECISIONS 2026-11-10). No endpoint in this contract
+    forwards names, contact details or photos of people to AI services (AI-03).
 servers:
   - url: http://localhost:3000
     description: Local development
-paths: {}
+security:
+  - bearerAuth: []
+tags:
+  - name: Auth
+    description: Sign in with a verification code or Google, refresh and sign out (ACC-01, ACC-02, ACC-13, INT-13).
+  - name: Account
+    description: The signed-in household manager account (ACC-01, ACC-03).
+  - name: Household
+    description: The household, which has exactly one manager account (ACC-03).
+  - name: Profiles
+    description: Keluarga Saya family member profiles. Members are profiles, not accounts (PRF-01, ACC-03).
+  - name: HardRules
+    description: Hard rules that Cek Aman never overrides, with their mapping status (PRF-03, PRF-04, PRF-08). Sensitive health data (DAT-02).
+  - name: Preferences
+    description: Soft preferences, likes and dislikes, which may be relaxed (PRF-05, PRF-06).
+  - name: Consent
+    description: Health-data consent per member, recorded with date and text version and withdrawable (ACC-08, SET-03, SET-04, SET-10).
+  - name: Reference
+    description: Read-only reference vocabularies.
+
+paths:
+  # ---------------------------------------------------------------- Auth
+  /v1/auth/code/request:
+    post:
+      tags: [Auth]
+      operationId: requestSignInCode
+      summary: Send a sign-in code to a phone number or email
+      description: >-
+        Sends a one-time verification code (ACC-01). The response is the same
+        whether or not an account exists for the destination, so it cannot be
+        used to discover accounts. Code length, expiry and the resend wait come
+        from configuration. Requests are rate-limited per destination and per
+        device; a limited request returns 429 with `Retry-After`.
+      security: []
+      x-requirements: [ACC-01, INT-13]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SignInCodeRequest" }
+      responses:
+        "202":
+          description: Code sent (or silently not sent, see description).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SignInCodeChallenge" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+
+  /v1/auth/code/verify:
+    post:
+      tags: [Auth]
+      operationId: verifySignInCode
+      summary: Verify a sign-in code and start a session
+      description: >-
+        Verifies the code for a challenge (ACC-01). On first sign-in a manager
+        account is created with no household (`account.householdId` is null);
+        the client then creates the household. On a later sign-in, including on
+        a new device, the existing household is returned unchanged (ACC-13).
+        Wrong codes count towards an attempt limit from configuration.
+      security: []
+      x-requirements: [ACC-01, ACC-03, ACC-13]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SignInCodeVerification" }
+      responses:
+        "200":
+          description: Signed in.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Session" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+
+  /v1/auth/google:
+    post:
+      tags: [Auth]
+      operationId: signInWithGoogle
+      summary: Exchange a Google ID token for a session
+      description: >-
+        Signs in with a Google ID token obtained on Android through Credential
+        Manager (ACC-02). The server verifies the token with Google. When Google
+        sign-in is unavailable the server returns 503
+        `sign_in_method_unavailable` and the client offers phone or email
+        sign-in instead (INT-13). Apple sign-in is not part of this API.
+      security: []
+      x-requirements: [ACC-02, ACC-03, ACC-13, INT-13]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GoogleSignIn" }
+      responses:
+        "200":
+          description: Signed in.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Session" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+
+  /v1/auth/refresh:
+    post:
+      tags: [Auth]
+      operationId: refreshSession
+      summary: Exchange a refresh token for new tokens
+      description: >-
+        Rotates the refresh token. Each refresh token works once; reusing an
+        old one revokes the whole session and returns 401
+        `refresh_token_invalid`.
+      security: []
+      x-requirements: [ACC-13]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SessionRefresh" }
+      responses:
+        "200":
+          description: New tokens.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SessionTokens" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+
+  /v1/auth/sign-out:
+    post:
+      tags: [Auth]
+      operationId: signOut
+      summary: Sign out on this device
+      description: >-
+        Revokes the current session (its access and refresh tokens). Household
+        data is kept on the server, so the user can sign in again on any device
+        (ACC-13). The client clears its local session afterwards.
+      x-requirements: [ACC-13]
+      responses:
+        "204":
+          description: Signed out.
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+
+  # ---------------------------------------------------------------- Account
+  /v1/account:
+    get:
+      tags: [Account]
+      operationId: getAccount
+      summary: Get the signed-in account
+      x-requirements: [ACC-01, ACC-03, ACC-13]
+      responses:
+        "200":
+          description: The account.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Account" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+
+  # ---------------------------------------------------------------- Household
+  /v1/household:
+    post:
+      tags: [Household]
+      operationId: createHousehold
+      summary: Create the household for the signed-in account
+      description: >-
+        Creates the household with the signed-in account as its only manager,
+        and the manager's own profile (ACC-03, ACC-04). An account has at most
+        one household; a second call returns 409 `household_exists`.
+      x-requirements: [ACC-03, ACC-04]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/HouseholdCreate" }
+      responses:
+        "201":
+          description: Household created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Household" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+    get:
+      tags: [Household]
+      operationId: getHousehold
+      summary: Get the household
+      description: Returns 409 `household_required` when the account has no household yet.
+      x-requirements: [ACC-03, ACC-13]
+      responses:
+        "200":
+          description: The household.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Household" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+    patch:
+      tags: [Household]
+      operationId: updateHousehold
+      summary: Update household details
+      description: Only the fields present are changed.
+      x-requirements: [ACC-03]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/HouseholdUpdate" }
+      responses:
+        "200":
+          description: The updated household.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Household" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+
+  # ---------------------------------------------------------------- Profiles
+  /v1/household/profiles:
+    get:
+      tags: [Profiles]
+      operationId: listProfiles
+      summary: List the household's profiles
+      description: >-
+        Returns every profile with its hard rules, preferences, likes and
+        portions. The manager's own profile comes first. `maxProfiles` is the
+        configured limit (PRF-02, at least 12, target). If any member's rules
+        cannot be read or decrypted the whole request fails with 503
+        `rules_unavailable`; it never returns that member with an empty rule
+        list (QUESTIONS #39).
+      x-requirements: [PRF-01, PRF-02, PRF-03, PRF-05, PRF-06, PRF-07, PRF-18]
+      responses:
+        "200":
+          description: The profiles.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProfileList" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+    post:
+      tags: [Profiles]
+      operationId: createProfile
+      summary: Add a family member profile
+      description: >-
+        Adds a member (PRF-01). Infant, child and teen age groups are flagged as
+        children (PRF-18) and need the manager's confirmation as parent or
+        guardian, which is recorded as a consent record (SET-10); without it
+        the server returns 409 `guardian_confirmation_required`. Health data
+        stays off for every new profile, children included, until a
+        health-data consent is recorded (SET-10, ACC-08). Returns 409
+        `profile_limit_reached` at the configured limit (PRF-02).
+      x-requirements: [PRF-01, PRF-02, PRF-07, PRF-18, SET-10]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ProfileCreate" }
+      responses:
+        "201":
+          description: Profile created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Profile" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+
+  /v1/household/profiles/{profileId}:
+    parameters:
+      - $ref: "#/components/parameters/ProfileId"
+    get:
+      tags: [Profiles]
+      operationId: getProfile
+      summary: Get one profile
+      description: Fails with 503 `rules_unavailable` when the member's rules cannot be read (QUESTIONS #39).
+      x-requirements: [PRF-01]
+      responses:
+        "200":
+          description: The profile.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Profile" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+    patch:
+      tags: [Profiles]
+      operationId: updateProfile
+      summary: Edit a profile
+      description: >-
+        Only the fields present are changed. Setting `portionSize` or
+        `ricePortion` to null returns it to the age-group default from
+        configuration (PRF-07). Changing an adult profile to an infant, child
+        or teen age group needs `guardianConfirmation` (SET-10). The child flag
+        follows the age group and cannot be set directly (PRF-18).
+      x-requirements: [PRF-01, PRF-07, PRF-18, SET-10]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ProfileUpdate" }
+      responses:
+        "200":
+          description: The updated profile.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Profile" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+    delete:
+      tags: [Profiles]
+      operationId: deleteProfile
+      summary: Delete a profile and all of its data
+      description: >-
+        Removes the member from suggestions, safety results and plans at once
+        and deletes the profile's data (PRF-01, SET-07). The manager's own
+        profile cannot be deleted here (409 `manager_profile_not_deletable`);
+        the manager deletes the whole account instead.
+      x-requirements: [PRF-01, SET-07]
+      responses:
+        "204":
+          description: Profile deleted.
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+
+  # ---------------------------------------------------------------- Preferences
+  /v1/household/profiles/{profileId}/preferences:
+    parameters:
+      - $ref: "#/components/parameters/ProfileId"
+    put:
+      tags: [Preferences]
+      operationId: replaceSoftPreferences
+      summary: Replace a profile's soft preferences
+      description: >-
+        Soft preferences may be relaxed when selected members conflict (PRF-05,
+        PRF-12). They are not hard rules and are never health data. The whole
+        object is replaced, so an offline edit replayed later is safe to send
+        again.
+      x-requirements: [PRF-05]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SoftPreferencesInput" }
+      responses:
+        "200":
+          description: The saved preferences.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SoftPreferences" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+
+  /v1/household/profiles/{profileId}/likes-dislikes:
+    parameters:
+      - $ref: "#/components/parameters/ProfileId"
+    put:
+      tags: [Preferences]
+      operationId: replaceLikesDislikes
+      summary: Replace a profile's likes and dislikes
+      description: >-
+        Likes and dislikes are ingredients or dishes (PRF-06). A dislike is not
+        an allergy and is never treated as a hard rule. The whole object is
+        replaced.
+      x-requirements: [PRF-06]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LikesDislikesInput" }
+      responses:
+        "200":
+          description: The saved likes and dislikes.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LikesDislikes" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+
+  # ---------------------------------------------------------------- Hard rules
+  /v1/household/profiles/{profileId}/hard-rules:
+    parameters:
+      - $ref: "#/components/parameters/ProfileId"
+    get:
+      tags: [HardRules]
+      operationId: listHardRules
+      summary: List a profile's hard rules and consent state
+      description: >-
+        Returns the member's hard rules and the consent state that decides
+        whether rules can be stored. With no current consent there are no
+        rules, and clients show "rules not saved" for the member, never "Safe"
+        (DECISIONS 2026-11-10). If the rules cannot be read or decrypted the
+        server returns 503 `rules_unavailable`, never an empty list
+        (QUESTIONS #39).
+      x-requirements: [PRF-03, PRF-08, ACC-08]
+      responses:
+        "200":
+          description: The member's rules.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProfileRules" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+    post:
+      tags: [HardRules]
+      operationId: createHardRule
+      summary: Add a hard rule
+      description: >-
+        Adds an allergy from the standard list, halal, vegetarian, vegan, a
+        medical exclusion or a free-text rule (PRF-03, PRF-04). Needs a current
+        health-data consent for the member, else 409 `consent_required`
+        (ACC-08); for a child the guardian confirmation must also be on record
+        (SET-10). Free-text and medical-exclusion rules are saved as unmapped
+        unless the manager picked matching ingredients (`mappedIngredientIds`).
+        An unmapped rule makes Cek Aman return "Check the label" for related
+        recipes, never "Safe" (PRF-08, SAF-09). Online only: the server
+        re-evaluates affected safety results.
+      x-requirements: [PRF-03, PRF-04, PRF-08, ACC-08, SET-10]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/HardRuleCreate" }
+      responses:
+        "201":
+          description: Rule saved.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HardRule" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+
+  /v1/household/profiles/{profileId}/hard-rules/{ruleId}:
+    parameters:
+      - $ref: "#/components/parameters/ProfileId"
+      - $ref: "#/components/parameters/RuleId"
+    delete:
+      tags: [HardRules]
+      operationId: deleteHardRule
+      summary: Remove a hard rule
+      description: >-
+        The manager removes a rule from their family's data. This is an edit of
+        the profile, not an override of a safety result: there is no way to
+        override a "Not safe" result while a rule is active (SAF-12).
+      x-requirements: [PRF-03]
+      responses:
+        "204":
+          description: Rule removed.
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+
+  /v1/household/profiles/{profileId}/hard-rules/{ruleId}/mapping:
+    parameters:
+      - $ref: "#/components/parameters/ProfileId"
+      - $ref: "#/components/parameters/RuleId"
+    put:
+      tags: [HardRules]
+      operationId: confirmHardRuleMapping
+      summary: Confirm which ingredients a free-text rule means
+      description: >-
+        The manager confirms a mapping, either accepting a content-team
+        proposal or choosing ingredients from the catalog (PRF-08). The rule
+        becomes `mapped` with `confirmedBy: manager`, and affected safety
+        results are re-evaluated. Only `free_text` and `medical_exclusion`
+        rules have a mapping; other types return 409 `mapping_not_applicable`.
+      x-requirements: [PRF-08]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/HardRuleMappingConfirmation" }
+      responses:
+        "200":
+          description: The updated rule.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HardRule" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+    delete:
+      tags: [HardRules]
+      operationId: rejectHardRuleMapping
+      summary: Reject or clear a free-text rule mapping
+      description: >-
+        "Bukan ini": the rule returns to `unmapped` and goes back to the
+        content team's anonymized queue (no names). Until it is mapped again,
+        related recipes get "Check the label" (PRF-08, SAF-09). Other rule
+        types return 409 `mapping_not_applicable`.
+      x-requirements: [PRF-08]
+      responses:
+        "200":
+          description: The updated rule.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HardRule" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+
+  # ---------------------------------------------------------------- Consent
+  /v1/consent-texts/{purpose}:
+    parameters:
+      - name: purpose
+        in: path
+        required: true
+        schema: { $ref: "#/components/schemas/ConsentPurpose" }
+      - name: language
+        in: query
+        required: true
+        schema: { $ref: "#/components/schemas/Language" }
+    get:
+      tags: [Consent]
+      operationId: getConsentText
+      summary: Get the current consent text for a purpose
+      description: >-
+        Returns the current text and its version, which the client sends back
+        when recording a decision (SET-03). Texts are served from content, not
+        built into the app, so legal changes need no release. `isDraft` stays
+        true until legal approval.
+      x-requirements: [ACC-08, SET-03, SET-10]
+      responses:
+        "200":
+          description: The consent text.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConsentText" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+
+  /v1/household/profiles/{profileId}/consents:
+    parameters:
+      - $ref: "#/components/parameters/ProfileId"
+    get:
+      tags: [Consent]
+      operationId: listConsentRecords
+      summary: List a member's consent records
+      description: All consent records for the member, newest first, including withdrawn ones (SET-03).
+      x-requirements: [SET-03, SET-10]
+      responses:
+        "200":
+          description: The consent records.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConsentRecordList" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+
+  /v1/household/profiles/{profileId}/consents/health-data:
+    parameters:
+      - $ref: "#/components/parameters/ProfileId"
+    post:
+      tags: [Consent]
+      operationId: recordHealthDataConsent
+      summary: Record the manager's health-data consent decision for a member
+      description: >-
+        Records an explicit decision, given or declined, on storing the
+        member's hard rules (ACC-08, SET-03). Nothing is pre-given. `textVersion`
+        must be the current version from `getConsentText`, else 409
+        `consent_text_outdated`. For a child profile the guardian confirmation
+        must be on record, else 409 `guardian_confirmation_required` (SET-10).
+        A decline stores no rules; the member shows "rules not saved".
+      x-requirements: [ACC-08, SET-03, SET-10]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/HealthDataConsentDecision" }
+      responses:
+        "201":
+          description: Decision recorded.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConsentRecord" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+
+  /v1/household/profiles/{profileId}/consents/health-data/withdraw:
+    parameters:
+      - $ref: "#/components/parameters/ProfileId"
+    post:
+      tags: [Consent]
+      operationId: withdrawHealthDataConsent
+      summary: Withdraw a member's health-data consent
+      description: >-
+        Withdraws the current consent (SET-03). The member's hard rules stop
+        being used at once and are deleted by `deletionDueBy`, set from the
+        configured period (SET-04, 30 days target). Cek Aman no longer checks
+        rules for this member, and clients show "rules not saved". Returns 409
+        `consent_not_active` when there is no current consent.
+      x-requirements: [SET-03, SET-04]
+      responses:
+        "200":
+          description: The withdrawn consent record.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConsentRecord" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+
+  # ---------------------------------------------------------------- Reference
+  /v1/reference/allergens:
+    get:
+      tags: [Reference]
+      operationId: listStandardAllergens
+      summary: List the standard allergen list
+      description: >-
+        The PRF-04 standard allergen list in display order, from the Cek Aman
+        rule-set vocabulary. Clients show localized labels for each code.
+      x-requirements: [PRF-04]
+      responses:
+        "200":
+          description: The standard allergens.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StandardAllergenList" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Short-lived access token from `Session.tokens.accessToken`.
+
+  parameters:
+    ProfileId:
+      name: profileId
+      in: path
+      required: true
+      schema: { $ref: "#/components/schemas/Id" }
+    RuleId:
+      name: ruleId
+      in: path
+      required: true
+      schema: { $ref: "#/components/schemas/Id" }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: >-
+        A client-generated UUID. Repeating a request with the same key returns
+        the first result instead of creating a duplicate, so an offline queue
+        can replay safely. Reusing a key with a different body returns 409
+        `idempotency_key_reused`. Keys are kept for a configured period.
+      schema:
+        type: string
+        format: uuid
+
+  headers:
+    RetryAfter:
+      description: Seconds to wait before retrying.
+      schema:
+        type: integer
+        minimum: 0
+
+  responses:
+    BadRequest:
+      description: The request is malformed or fails validation.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    Unauthorized:
+      description: Missing, invalid or expired credentials.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    NotFound:
+      description: The resource does not exist in the caller's household.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    Conflict:
+      description: The request conflicts with the current state; see `code`.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    TooManyRequests:
+      description: Rate limit reached.
+      headers:
+        Retry-After: { $ref: "#/components/headers/RetryAfter" }
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    ServiceUnavailable:
+      description: A dependency is unavailable; see `code`.
+      headers:
+        Retry-After: { $ref: "#/components/headers/RetryAfter" }
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    UnexpectedError:
+      description: Any other error, including 403 and 5xx.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+
+  schemas:
+    # ------------------------------------------------------------ Common
+    Id:
+      description: Opaque identifier (lowercase, safe for Cek Aman rule IDs).
+      x-data-sensitivity: public
+      type: string
+      pattern: "^[a-z0-9][a-z0-9_.-]{0,99}$"
+      example: 0b7f3c2e-6f1a-4c55-9d3e-2a1b4c5d6e7f
+
+    ReferenceId:
+      description: Identifier of a reference ingredient or library dish.
+      x-data-sensitivity: public
+      type: string
+      pattern: "^[a-z0-9][a-z0-9_.-]{0,99}$"
+      example: example_ingredient
+
+    Language:
+      description: App and content language (ACC-09). `id` is Bahasa Indonesia.
+      x-data-sensitivity: public
+      type: string
+      enum: [id, en]
+
+    LocalizedText:
+      description: Text in both languages.
+      x-data-sensitivity: public
+      type: object
+      additionalProperties: false
+      required: [id, en]
+      properties:
+        id: { type: string }
+        en: { type: string }
+
+    # ------------------------------------------------------------ Errors
+    Problem:
+      description: >-
+        RFC 9457 problem details. `title` and `detail` are for developers and
+        logs, in English, and never contain health data, names or contact
+        details; clients show text localized from `code`.
+      x-data-sensitivity: public
+      type: object
+      additionalProperties: false
+      required: [type, title, status, code, requestId]
+      properties:
+        type:
+          description: Problem type URI, `urn:keluargamakan:problem:<code>`.
+          type: string
+          example: urn:keluargamakan:problem:consent_required
+        title:
+          type: string
+          example: Consent required
+        status:
+          type: integer
+          minimum: 400
+          maximum: 599
+        code: { $ref: "#/components/schemas/ErrorCode" }
+        detail:
+          type: [string, "null"]
+        requestId:
+          description: Correlation ID to quote in support requests.
+          type: string
+        retryAfterSeconds:
+          description: Present on 429 and on 503 when a retry time is known.
+          type: [integer, "null"]
+          minimum: 0
+        errors:
+          description: Field errors for `validation_failed`.
+          type: array
+          items: { $ref: "#/components/schemas/FieldError" }
+
+    FieldError:
+      x-data-sensitivity: public
+      type: object
+      additionalProperties: false
+      required: [pointer, code]
+      properties:
+        pointer:
+          description: JSON Pointer (RFC 6901) into the request body, for example `/name`.
+          type: string
+          example: /name
+        code: { $ref: "#/components/schemas/FieldErrorCode" }
+
+    FieldErrorCode:
+      x-data-sensitivity: public
+      type: string
+      enum:
+        [
+          required,
+          invalid_type,
+          invalid_format,
+          invalid_value,
+          too_short,
+          too_long,
+          too_many_items,
+          duplicate,
+          not_allowed,
+        ]
+
+    ErrorCode:
+      description: >-
+        Stable machine-readable error code. New codes may be added; clients
+        treat an unknown code like `internal_error`.
+      x-data-sensitivity: public
+      type: string
+      enum:
+        # 400
+        - validation_failed
+        - code_invalid
+        - code_expired
+        - code_attempts_exceeded
+        # 401
+        - unauthenticated
+        - access_token_expired
+        - refresh_token_invalid
+        - google_token_invalid
+        # 403
+        - forbidden
+        # 404
+        - not_found
+        # 409
+        - household_required
+        - household_exists
+        - profile_limit_reached
+        - manager_profile_not_deletable
+        - guardian_confirmation_required
+        - consent_required
+        - consent_text_outdated
+        - consent_not_active
+        - hard_rule_duplicate
+        - mapping_not_applicable
+        - idempotency_key_reused
+        # 429
+        - rate_limited
+        # 5xx
+        - rules_unavailable
+        - sign_in_method_unavailable
+        - service_unavailable
+        - internal_error
+
+    # ------------------------------------------------------------ Auth
+    SignInChannel:
+      x-data-sensitivity: public
+      type: string
+      enum: [phone, email]
+
+    SignInMethod:
+      x-data-sensitivity: public
+      type: string
+      enum: [phone, email, google]
+
+    DevicePlatform:
+      description: Android only (owner decision 2026-11-10).
+      x-data-sensitivity: public
+      type: string
+      enum: [android]
+
+    DeviceInfo:
+      description: >-
+        Identifies the app installation for session management. No device name,
+        model or advertising ID.
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required: [installationId, platform, appVersion]
+      properties:
+        installationId:
+          description: Random UUID generated by the app on first launch.
+          type: string
+          format: uuid
+        platform: { $ref: "#/components/schemas/DevicePlatform" }
+        appVersion:
+          type: string
+          minLength: 1
+          maxLength: 32
+          example: 0.1.0
+
+    SignInCodeRequest:
+      description: >-
+        `destination` is a phone number in E.164 form (the app turns "08…" into
+        "+628…") or an email address, matching `channel`.
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required: [channel, destination, language]
+      properties:
+        channel: { $ref: "#/components/schemas/SignInChannel" }
+        destination:
+          type: string
+          minLength: 3
+          maxLength: 254
+          example: "+6281200000000"
+        language:
+          description: Language of the message that carries the code.
+          allOf:
+            - $ref: "#/components/schemas/Language"
+
+    SignInCodeChallenge:
+      description: Does not echo the destination.
+      x-data-sensitivity: public
+      type: object
+      additionalProperties: false
+      required: [challengeId, channel, codeLength, expiresAt, resendAvailableAt]
+      properties:
+        challengeId:
+          type: string
+          format: uuid
+        channel: { $ref: "#/components/schemas/SignInChannel" }
+        codeLength:
+          description: Number of digits, from configuration.
+          type: integer
+          minimum: 4
+          maximum: 8
+        expiresAt:
+          type: string
+          format: date-time
+        resendAvailableAt:
+          description: Earliest time a new code may be requested (configuration).
+          type: string
+          format: date-time
+
+    SignInCodeVerification:
+      x-data-sensitivity: credential
+      type: object
+      additionalProperties: false
+      required: [challengeId, code, device]
+      properties:
+        challengeId:
+          type: string
+          format: uuid
+        code:
+          type: string
+          pattern: "^[0-9]{4,8}$"
+        device: { $ref: "#/components/schemas/DeviceInfo" }
+
+    GoogleSignIn:
+      x-data-sensitivity: credential
+      type: object
+      additionalProperties: false
+      required: [idToken, device]
+      properties:
+        idToken:
+          description: Google ID token from Credential Manager on Android.
+          type: string
+          minLength: 1
+          maxLength: 8192
+        device: { $ref: "#/components/schemas/DeviceInfo" }
+
+    SessionRefresh:
+      x-data-sensitivity: credential
+      type: object
+      additionalProperties: false
+      required: [refreshToken]
+      properties:
+        refreshToken:
+          type: string
+          minLength: 1
+          maxLength: 4096
+
+    SessionTokens:
+      description: Lifetimes come from configuration. Store tokens in encrypted device storage only.
+      x-data-sensitivity: credential
+      type: object
+      additionalProperties: false
+      required: [tokenType, accessToken, accessTokenExpiresAt, refreshToken, refreshTokenExpiresAt]
+      properties:
+        tokenType:
+          type: string
+          enum: [Bearer]
+        accessToken:
+          type: string
+        accessTokenExpiresAt:
+          type: string
+          format: date-time
+        refreshToken:
+          type: string
+        refreshTokenExpiresAt:
+          type: string
+          format: date-time
+
+    Session:
+      x-data-sensitivity: credential
+      type: object
+      additionalProperties: false
+      required: [tokens, account, isNewAccount]
+      properties:
+        tokens: { $ref: "#/components/schemas/SessionTokens" }
+        account: { $ref: "#/components/schemas/Account" }
+        isNewAccount:
+          description: True when this sign-in created the account.
+          type: boolean
+
+    # ------------------------------------------------------------ Account
+    AccountRole:
+      description: V1 has manager accounts only; co-cooks arrive in V2 (ACC-11).
+      x-data-sensitivity: public
+      type: string
+      enum: [manager]
+
+    Account:
+      description: >-
+        The signed-in user's own account (SRS 18.1 Account). Contact details are
+        returned only to their owner and are never sent to AI services (AI-03).
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required: [id, role, householdId, signInMethods, phone, email, createdAt]
+      properties:
+        id: { $ref: "#/components/schemas/Id" }
+        role: { $ref: "#/components/schemas/AccountRole" }
+        householdId:
+          description: Null until the household is created.
+          oneOf:
+            - $ref: "#/components/schemas/Id"
+            - type: "null"
+        signInMethods:
+          type: array
+          uniqueItems: true
+          minItems: 1
+          items: { $ref: "#/components/schemas/SignInMethod" }
+        phone:
+          description: E.164 phone number, if verified.
+          type: [string, "null"]
+        email:
+          description: Email address, if verified or from Google.
+          type: [string, "null"]
+        createdAt:
+          type: string
+          format: date-time
+
+    # ------------------------------------------------------------ Household
+    TimeZone:
+      description: IANA time zone name (NFR-16).
+      x-data-sensitivity: personal
+      type: string
+      minLength: 1
+      maxLength: 64
+      example: Asia/Jakarta
+
+    HouseholdName:
+      x-data-sensitivity: personal
+      type: string
+      minLength: 1
+      maxLength: 60
+
+    City:
+      x-data-sensitivity: personal
+      type: string
+      minLength: 1
+      maxLength: 80
+
+    Household:
+      description: SRS 18.1 Household.
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required:
+        [
+          id,
+          name,
+          city,
+          timeZone,
+          language,
+          managerAccountId,
+          managerProfileId,
+          createdAt,
+          updatedAt,
+        ]
+      properties:
+        id: { $ref: "#/components/schemas/Id" }
+        name:
+          oneOf:
+            - $ref: "#/components/schemas/HouseholdName"
+            - type: "null"
+        city:
+          oneOf:
+            - $ref: "#/components/schemas/City"
+            - type: "null"
+        timeZone: { $ref: "#/components/schemas/TimeZone" }
+        language: { $ref: "#/components/schemas/Language" }
+        managerAccountId:
+          description: The household's only manager account (ACC-03).
+          allOf:
+            - $ref: "#/components/schemas/Id"
+        managerProfileId:
+          description: The manager's own profile.
+          allOf:
+            - $ref: "#/components/schemas/Id"
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    ManagerProfileCreate:
+      description: >-
+        The manager's own profile from onboarding (ACC-04). Only a name is asked;
+        the age group starts as `adult` and can be edited later.
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name: { $ref: "#/components/schemas/ProfileName" }
+        avatar: { $ref: "#/components/schemas/Avatar" }
+
+    HouseholdCreate:
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required: [timeZone, language, managerProfile]
+      properties:
+        name: { $ref: "#/components/schemas/HouseholdName" }
+        city: { $ref: "#/components/schemas/City" }
+        timeZone: { $ref: "#/components/schemas/TimeZone" }
+        language: { $ref: "#/components/schemas/Language" }
+        managerProfile: { $ref: "#/components/schemas/ManagerProfileCreate" }
+
+    HouseholdUpdate:
+      description: Fields present are changed; null clears `name` or `city`.
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        name:
+          oneOf:
+            - $ref: "#/components/schemas/HouseholdName"
+            - type: "null"
+        city:
+          oneOf:
+            - $ref: "#/components/schemas/City"
+            - type: "null"
+        timeZone: { $ref: "#/components/schemas/TimeZone" }
+        language: { $ref: "#/components/schemas/Language" }
+
+    # ------------------------------------------------------------ Profiles
+    ProfileName:
+      description: Nickname such as "Ayah" or "Kakak" (PRF-01).
+      x-data-sensitivity: personal
+      type: string
+      minLength: 1
+      maxLength: 30
+
+    AgeGroup:
+      description: >-
+        PRF-01 age groups (DECISIONS 2026-11-10): infant 0–1, child 2–12,
+        teen 13–17, adult 18–59, elderly 60+. Infant, child and teen are
+        flagged as children (PRF-18).
+      x-data-sensitivity: personal
+      type: string
+      enum: [infant, child, teen, adult, elderly]
+
+    AvatarStyle:
+      x-data-sensitivity: public
+      type: string
+      enum: [initials, illustration]
+
+    Avatar:
+      description: >-
+        Initials on a colour, or a preset illustration with no faces. There is
+        no member photo upload in V1 (QUESTIONS #27).
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required: [style]
+      properties:
+        style: { $ref: "#/components/schemas/AvatarStyle" }
+        colorToken:
+          description: Design-system avatar colour token, for `initials`.
+          type: [string, "null"]
+          pattern: "^[a-z0-9_]{1,32}$"
+        illustrationId:
+          description: Preset illustration ID, for `illustration`.
+          type: [string, "null"]
+          pattern: "^[a-z0-9_]{1,32}$"
+
+    PortionSize:
+      x-data-sensitivity: personal
+      type: string
+      enum: [small, normal, large]
+
+    Portions:
+      description: >-
+        PRF-07 portion size and rice portion. When `*IsDefault` is true the value
+        is the age-group default from configuration.
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required: [portionSize, portionSizeIsDefault, ricePortion, ricePortionIsDefault]
+      properties:
+        portionSize: { $ref: "#/components/schemas/PortionSize" }
+        portionSizeIsDefault: { type: boolean }
+        ricePortion: { $ref: "#/components/schemas/PortionSize" }
+        ricePortionIsDefault: { type: boolean }
+
+    GuardianConfirmationInput:
+      description: >-
+        The manager confirms being the child's parent or guardian (SET-10).
+        `confirmed` must be true; `textVersion` is the current
+        `guardian_confirmation` consent text version.
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required: [confirmed, textVersion, language]
+      properties:
+        confirmed: { type: boolean }
+        textVersion: { $ref: "#/components/schemas/ConsentTextVersion" }
+        language: { $ref: "#/components/schemas/Language" }
+
+    GuardianConfirmation:
+      description: The recorded guardian confirmation for a child profile (SET-10).
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required: [consentRecordId, confirmedAt, textVersion]
+      properties:
+        consentRecordId: { $ref: "#/components/schemas/Id" }
+        confirmedAt:
+          type: string
+          format: date-time
+        textVersion: { $ref: "#/components/schemas/ConsentTextVersion" }
+
+    Profile:
+      description: >-
+        SRS 18.1 Profile, with its hard rules, soft preferences and likes. The
+        API never returns another household's profiles. Sensitive as a whole
+        because it embeds the member's hard rules.
+      x-data-sensitivity: sensitive_health
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - name
+        - avatar
+        - ageGroup
+        - isChild
+        - isManager
+        - guardianConfirmation
+        - portions
+        - rules
+        - preferences
+        - likesDislikes
+        - createdAt
+        - updatedAt
+      properties:
+        id: { $ref: "#/components/schemas/Id" }
+        name: { $ref: "#/components/schemas/ProfileName" }
+        avatar: { $ref: "#/components/schemas/Avatar" }
+        ageGroup: { $ref: "#/components/schemas/AgeGroup" }
+        isChild:
+          description: >-
+            Derived from `ageGroup` (infant, child or teen): stricter data
+            handling applies, health data is off by default and the profile is
+            never used for marketing (PRF-18, SET-10). Read-only.
+          type: boolean
+        isManager:
+          description: True for the manager's own profile. Read-only.
+          type: boolean
+        guardianConfirmation:
+          description: Present for child profiles; null for adults.
+          oneOf:
+            - $ref: "#/components/schemas/GuardianConfirmation"
+            - type: "null"
+        portions: { $ref: "#/components/schemas/Portions" }
+        rules: { $ref: "#/components/schemas/ProfileRules" }
+        preferences: { $ref: "#/components/schemas/SoftPreferences" }
+        likesDislikes: { $ref: "#/components/schemas/LikesDislikes" }
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    ProfileList:
+      x-data-sensitivity: sensitive_health
+      type: object
+      additionalProperties: false
+      required: [items, maxProfiles]
+      properties:
+        items:
+          description: Manager's profile first.
+          type: array
+          items: { $ref: "#/components/schemas/Profile" }
+        maxProfiles:
+          description: Configured profile limit (PRF-02, at least 12, target).
+          type: integer
+          minimum: 12
+
+    ProfileCreate:
+      description: >-
+        `guardianConfirmation` is required when `ageGroup` is infant, child or
+        teen (SET-10).
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required: [name, ageGroup]
+      properties:
+        name: { $ref: "#/components/schemas/ProfileName" }
+        ageGroup: { $ref: "#/components/schemas/AgeGroup" }
+        avatar: { $ref: "#/components/schemas/Avatar" }
+        guardianConfirmation: { $ref: "#/components/schemas/GuardianConfirmationInput" }
+
+    ProfileUpdate:
+      description: >-
+        Fields present are changed. Null `portionSize` or `ricePortion` resets
+        it to the age-group default.
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        name: { $ref: "#/components/schemas/ProfileName" }
+        avatar: { $ref: "#/components/schemas/Avatar" }
+        ageGroup: { $ref: "#/components/schemas/AgeGroup" }
+        portionSize:
+          oneOf:
+            - $ref: "#/components/schemas/PortionSize"
+            - type: "null"
+        ricePortion:
+          oneOf:
+            - $ref: "#/components/schemas/PortionSize"
+            - type: "null"
+        guardianConfirmation: { $ref: "#/components/schemas/GuardianConfirmationInput" }
+
+    # ------------------------------------------------------------ Preferences
+    SpiceLevel:
+      x-data-sensitivity: personal
+      type: string
+      enum: [not_spicy, medium, spicy]
+
+    LessOf:
+      description: '"Kurangi" preferences: less fried food, sugar, salt or santan (PRF-05).'
+      x-data-sensitivity: personal
+      type: string
+      enum: [fried, sugar, salt, santan]
+
+    TexturePreference:
+      description: Liked textures (PRF-05).
+      x-data-sensitivity: personal
+      type: string
+      enum: [soft, crunchy, soupy]
+
+    SoftPreferencesInput:
+      description: SRS 18.1 Soft preference. Not health data.
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required: [spiceLevel, lessOf, textures]
+      properties:
+        spiceLevel:
+          description: Null when not chosen (ranked as `medium`).
+          oneOf:
+            - $ref: "#/components/schemas/SpiceLevel"
+            - type: "null"
+        lessOf:
+          type: array
+          uniqueItems: true
+          items: { $ref: "#/components/schemas/LessOf" }
+        textures:
+          type: array
+          uniqueItems: true
+          items: { $ref: "#/components/schemas/TexturePreference" }
+
+    SoftPreferences:
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required: [spiceLevel, lessOf, textures, updatedAt]
+      properties:
+        spiceLevel:
+          oneOf:
+            - $ref: "#/components/schemas/SpiceLevel"
+            - type: "null"
+        lessOf:
+          type: array
+          uniqueItems: true
+          items: { $ref: "#/components/schemas/LessOf" }
+        textures:
+          type: array
+          uniqueItems: true
+          items: { $ref: "#/components/schemas/TexturePreference" }
+        updatedAt:
+          description: Null until first saved.
+          type: [string, "null"]
+          format: date-time
+
+    FoodRefKind:
+      x-data-sensitivity: public
+      type: string
+      enum: [ingredient, dish]
+
+    FoodRefInput:
+      description: An ingredient or a library dish picked by search (PRF-06).
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required: [kind, refId]
+      properties:
+        kind: { $ref: "#/components/schemas/FoodRefKind" }
+        refId: { $ref: "#/components/schemas/ReferenceId" }
+
+    FoodRef:
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required: [kind, refId, displayName]
+      properties:
+        kind: { $ref: "#/components/schemas/FoodRefKind" }
+        refId: { $ref: "#/components/schemas/ReferenceId" }
+        displayName:
+          description: Reference display name, filled by the server.
+          allOf:
+            - $ref: "#/components/schemas/LocalizedText"
+
+    LikesDislikesInput:
+      description: An item may not be both liked and disliked.
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required: [likes, dislikes]
+      properties:
+        likes:
+          type: array
+          maxItems: 100
+          items: { $ref: "#/components/schemas/FoodRefInput" }
+        dislikes:
+          type: array
+          maxItems: 100
+          items: { $ref: "#/components/schemas/FoodRefInput" }
+
+    LikesDislikes:
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required: [likes, dislikes, updatedAt]
+      properties:
+        likes:
+          type: array
+          items: { $ref: "#/components/schemas/FoodRef" }
+        dislikes:
+          type: array
+          items: { $ref: "#/components/schemas/FoodRef" }
+        updatedAt:
+          description: Null until first saved.
+          type: [string, "null"]
+          format: date-time
+
+    # ------------------------------------------------------------ Hard rules
+    HardRuleType:
+      description: PRF-03 hard rule types, matching the Cek Aman vocabulary.
+      x-data-sensitivity: sensitive_health
+      type: string
+      enum: [allergy, halal, vegetarian, vegan, medical_exclusion, free_text]
+
+    StandardAllergen:
+      description: >-
+        PRF-04 standard allergen codes, matching the Cek Aman vocabulary.
+        Shellfish and shrimp, and wheat and gluten, are separate codes.
+      x-data-sensitivity: public
+      type: string
+      enum: [peanut, tree_nut, shellfish, shrimp, fish, egg, milk, soy, wheat, gluten, sesame]
+
+    MappingStatus:
+      description: >-
+        PRF-08 mapping state. Only `mapped` is evaluated as a mapping;
+        `proposed` and `unmapped` make Cek Aman return "Check the label" for
+        related recipes (SAF-09).
+      x-data-sensitivity: sensitive_health
+      type: string
+      enum: [mapped, proposed, unmapped]
+
+    MappingConfirmer:
+      x-data-sensitivity: sensitive_health
+      type: string
+      enum: [content_team, manager]
+
+    MappedIngredient:
+      x-data-sensitivity: sensitive_health
+      type: object
+      additionalProperties: false
+      required: [ingredientId, displayName]
+      properties:
+        ingredientId: { $ref: "#/components/schemas/ReferenceId" }
+        displayName: { $ref: "#/components/schemas/LocalizedText" }
+
+    HardRuleMapping:
+      description: >-
+        How a free-text or medical-exclusion rule maps to reference ingredients.
+        `ingredients` is empty when `unmapped`. `confirmedBy` is set only when
+        `mapped`.
+      x-data-sensitivity: sensitive_health
+      type: object
+      additionalProperties: false
+      required: [status, ingredients, confirmedBy, updatedAt]
+      properties:
+        status: { $ref: "#/components/schemas/MappingStatus" }
+        ingredients:
+          type: array
+          items: { $ref: "#/components/schemas/MappedIngredient" }
+        confirmedBy:
+          oneOf:
+            - $ref: "#/components/schemas/MappingConfirmer"
+            - type: "null"
+        updatedAt:
+          type: string
+          format: date-time
+
+    HardRule:
+      description: >-
+        SRS 18.1 Hard rule, never overridden (PRF-03, SAF-12). `allergen` is set
+        only for `allergy`; `freeText` is required for `free_text` and optional
+        for `medical_exclusion`; `mapping` is set only for those two types.
+        Stored encrypted with the health-data key (DAT-02).
+      x-data-sensitivity: sensitive_health
+      type: object
+      additionalProperties: false
+      required: [id, type, allergen, freeText, mapping, createdAt]
+      properties:
+        id: { $ref: "#/components/schemas/Id" }
+        type: { $ref: "#/components/schemas/HardRuleType" }
+        allergen:
+          oneOf:
+            - $ref: "#/components/schemas/StandardAllergen"
+            - type: "null"
+        freeText:
+          type: [string, "null"]
+          maxLength: 200
+        mapping:
+          oneOf:
+            - $ref: "#/components/schemas/HardRuleMapping"
+            - type: "null"
+        createdAt:
+          type: string
+          format: date-time
+
+    HardRuleCreate:
+      description: >-
+        `allergen` is required for `allergy` and not allowed otherwise.
+        `freeText` is required for `free_text`, optional for
+        `medical_exclusion` and not allowed otherwise. No condition names are
+        asked for a medical exclusion. `mappedIngredientIds` (free text and
+        medical exclusion only) records the manager's confirmed match at entry;
+        without it the rule is saved as `unmapped`.
+      x-data-sensitivity: sensitive_health
+      type: object
+      additionalProperties: false
+      required: [type]
+      properties:
+        type: { $ref: "#/components/schemas/HardRuleType" }
+        allergen: { $ref: "#/components/schemas/StandardAllergen" }
+        freeText:
+          type: string
+          minLength: 1
+          maxLength: 200
+        mappedIngredientIds:
+          type: array
+          minItems: 1
+          maxItems: 20
+          uniqueItems: true
+          items: { $ref: "#/components/schemas/ReferenceId" }
+
+    HardRuleMappingConfirmation:
+      x-data-sensitivity: sensitive_health
+      type: object
+      additionalProperties: false
+      required: [ingredientIds]
+      properties:
+        ingredientIds:
+          type: array
+          minItems: 1
+          maxItems: 20
+          uniqueItems: true
+          items: { $ref: "#/components/schemas/ReferenceId" }
+
+    RulesConsentStatus:
+      description: >-
+        Health-data consent state for the member's hard rules (QUESTIONS #36).
+        Only `given` allows rules; for every other state there are no rules and
+        clients show "rules not saved", never "Safe".
+      x-data-sensitivity: personal
+      type: string
+      enum: [none, given, declined, withdrawn]
+
+    RulesConsentState:
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required: [status, consentRecordId, decidedAt, textVersion, deletionDueBy]
+      properties:
+        status: { $ref: "#/components/schemas/RulesConsentStatus" }
+        consentRecordId:
+          description: The latest health-data consent record, or null for `none`.
+          oneOf:
+            - $ref: "#/components/schemas/Id"
+            - type: "null"
+        decidedAt:
+          type: [string, "null"]
+          format: date-time
+        textVersion:
+          oneOf:
+            - $ref: "#/components/schemas/ConsentTextVersion"
+            - type: "null"
+        deletionDueBy:
+          description: For `withdrawn`, when stored rules will have been deleted (SET-04).
+          type: [string, "null"]
+          format: date-time
+
+    ProfileRules:
+      description: >-
+        A member's hard rules and consent state. `consent.status: given` with
+        empty `items` means the member has no hard rules. When rules cannot be
+        read the server fails the request instead (QUESTIONS #39).
+      x-data-sensitivity: sensitive_health
+      type: object
+      additionalProperties: false
+      required: [consent, items]
+      properties:
+        consent: { $ref: "#/components/schemas/RulesConsentState" }
+        items:
+          description: Empty unless `consent.status` is `given`.
+          type: array
+          items: { $ref: "#/components/schemas/HardRule" }
+
+    StandardAllergenList:
+      x-data-sensitivity: public
+      type: object
+      additionalProperties: false
+      required: [ruleSetVersion, items]
+      properties:
+        ruleSetVersion:
+          description: Cek Aman rule-set version the list comes from (DAT-06).
+          type: string
+        items:
+          description: Display order (PRF-04).
+          type: array
+          items: { $ref: "#/components/schemas/StandardAllergen" }
+
+    # ------------------------------------------------------------ Consent
+    ConsentPurpose:
+      description: >-
+        `health_data` covers all hard rules (QUESTIONS #13).
+        `guardian_confirmation` records the manager's confirmation as parent
+        or guardian of a child profile (SET-10).
+      x-data-sensitivity: public
+      type: string
+      enum: [health_data, guardian_confirmation]
+
+    ConsentDecision:
+      x-data-sensitivity: personal
+      type: string
+      enum: [given, declined]
+
+    ConsentTextVersion:
+      x-data-sensitivity: public
+      type: string
+      pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+      example: health-data-draft-1
+
+    ConsentTextSection:
+      x-data-sensitivity: public
+      type: object
+      additionalProperties: false
+      required: [heading, body]
+      properties:
+        heading: { type: string }
+        body:
+          description: Plain text; paragraphs separated by blank lines.
+          type: string
+
+    ConsentText:
+      x-data-sensitivity: public
+      type: object
+      additionalProperties: false
+      required: [purpose, version, language, title, sections, effectiveDate, isDraft]
+      properties:
+        purpose: { $ref: "#/components/schemas/ConsentPurpose" }
+        version: { $ref: "#/components/schemas/ConsentTextVersion" }
+        language: { $ref: "#/components/schemas/Language" }
+        title: { type: string }
+        sections:
+          type: array
+          items: { $ref: "#/components/schemas/ConsentTextSection" }
+        effectiveDate:
+          type: string
+          format: date
+        isDraft:
+          description: True until the text is approved by legal review.
+          type: boolean
+
+    HealthDataConsentDecision:
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required: [decision, textVersion, language]
+      properties:
+        decision: { $ref: "#/components/schemas/ConsentDecision" }
+        textVersion: { $ref: "#/components/schemas/ConsentTextVersion" }
+        language:
+          description: Language of the text the manager was shown.
+          allOf:
+            - $ref: "#/components/schemas/Language"
+
+    ConsentRecord:
+      description: SRS 18.1 Consent record (SET-03).
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required:
+        [
+          id,
+          profileId,
+          purpose,
+          decision,
+          textVersion,
+          language,
+          decidedAt,
+          recordedByAccountId,
+          withdrawnAt,
+          deletionDueBy,
+        ]
+      properties:
+        id: { $ref: "#/components/schemas/Id" }
+        profileId: { $ref: "#/components/schemas/Id" }
+        purpose: { $ref: "#/components/schemas/ConsentPurpose" }
+        decision: { $ref: "#/components/schemas/ConsentDecision" }
+        textVersion: { $ref: "#/components/schemas/ConsentTextVersion" }
+        language: { $ref: "#/components/schemas/Language" }
+        decidedAt:
+          type: string
+          format: date-time
+        recordedByAccountId:
+          description: The manager account that recorded the decision.
+          allOf:
+            - $ref: "#/components/schemas/Id"
+        withdrawnAt:
+          type: [string, "null"]
+          format: date-time
+        deletionDueBy:
+          description: Set on withdrawal of `health_data` consent (SET-04).
+          type: [string, "null"]
+          format: date-time
+
+    ConsentRecordList:
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          description: Newest first.
+          type: array
+          items: { $ref: "#/components/schemas/ConsentRecord" }
