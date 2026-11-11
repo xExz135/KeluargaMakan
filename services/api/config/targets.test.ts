@@ -24,6 +24,13 @@ describe("targets config", () => {
     expect(defaultTargets.suggestions.latencyP90Ms.value).toBe(5_000);
   });
 
+  it("DAT-05 DAT-04 SET-04 retention and deletion windows use the SRS target values (QUESTIONS #19)", () => {
+    expect(defaultTargets.dataManagement.safetyLogRetentionYears.value).toBe(2);
+    expect(defaultTargets.dataManagement.mealHistoryRetentionYears.value).toBe(2);
+    expect(defaultTargets.dataManagement.mealHistoryRetentionYears.srsId).toBe("DAT-04");
+    expect(defaultTargets.dataManagement.healthConsentWithdrawalDeletionDays.value).toBe(30);
+  });
+
   it("AI-09 has no plan limit until the business model sets one", () => {
     expect(defaultTargets.aiCost.monthlyLimitPerHousehold.value).toBeNull();
   });

@@ -8,6 +8,16 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "db:migrate": "node dist/src/db/cli/migrate.js"
+  },
+  "dependencies": {
+    "@keluargamakan/cek-aman": "workspace:*",
+    "pg": "8.23.1"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.5.15",
+    "@types/pg": "8.23.1",
+    "vitest": "5.1.0"
   }
 }
