@@ -20,8 +20,13 @@ const _publicPaths = {
   '/v1/auth/refresh',
 };
 
-/// Adds a timeout to every request. Timeouts surface as
-/// [http.ClientException], so they read as network failures.
+/// Adds a timeout to every request and turns redirects off. Timeouts
+/// surface as [http.ClientException], so they read as network failures.
+///
+/// The API never redirects. A redirect means a misconfigured proxy or a
+/// captive portal, and following it could carry the bearer token or a
+/// sign-in code to another host (security review L3). The 3xx answer is
+/// returned as is, and ApiCaller treats it as a failure.
 final class TimeoutClient extends http.BaseClient {
   TimeoutClient(this._inner, this.timeout);
 
@@ -30,7 +35,7 @@ final class TimeoutClient extends http.BaseClient {
 
   @override
   Future<http.StreamedResponse> send(http.BaseRequest request) => _inner
-      .send(request)
+      .send(request..followRedirects = false)
       .timeout(
         timeout,
         onTimeout: () =>
@@ -100,7 +105,7 @@ final class AuthenticatingClient extends http.BaseClient {
         : http.Request(original.method, original.url);
     copy
       ..headers.addAll(original.headers)
-      ..followRedirects = original.followRedirects
+      ..followRedirects = false
       ..maxRedirects = original.maxRedirects
       ..persistentConnection = original.persistentConnection
       ..bodyBytes = body;
