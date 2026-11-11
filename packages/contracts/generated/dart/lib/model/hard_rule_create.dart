@@ -16,7 +16,7 @@ class HardRuleCreate {
     required this.type,
     this.allergen = const Optional.absent(),
     this.freeText = const Optional.absent(),
-    this.mappedIngredientIds = const Optional.present(const {}),
+    this.mappedIngredientIds = const Optional.absent(),
   });
 
   final HardRuleType type;
@@ -37,6 +37,13 @@ class HardRuleCreate {
   ///
   final Optional<String?> freeText;
 
+  /// Absent or null for an unmapped rule. When present, at least one reference ingredient ID; an empty list is rejected.
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
   final Optional<Set<String>?> mappedIngredientIds;
 
   @override
@@ -52,7 +59,7 @@ class HardRuleCreate {
     (type.hashCode) +
     (allergen == null ? 0 : allergen!.hashCode) +
     (freeText == null ? 0 : freeText!.hashCode) +
-    (mappedIngredientIds.hashCode);
+    (mappedIngredientIds == null ? 0 : mappedIngredientIds!.hashCode);
 
   @override
   String toString() => 'HardRuleCreate[type=$type, allergen=$allergen, freeText=$freeText, mappedIngredientIds=$mappedIngredientIds]';
@@ -111,7 +118,7 @@ class HardRuleCreate {
         freeText: json.containsKey(r'freeText') ? Optional.present(mapValueOfType<String>(json, r'freeText')) : const Optional.absent(),
         mappedIngredientIds: json.containsKey(r'mappedIngredientIds') ? Optional.present(json[r'mappedIngredientIds'] is Iterable
             ? (json[r'mappedIngredientIds'] as Iterable).cast<String>().toSet()
-            : const {}) : const Optional.absent(),
+            : null) : const Optional.absent(),
       );
     }
     return null;

@@ -103,6 +103,8 @@ describe("generated output covers the whole contract", () => {
       // Plain string aliases (Id, TimeZone, ...) become `String` in Dart.
       const s = SPEC.components.schemas[name];
       if (s?.type === "string" && !s.enum) continue;
+      // Array aliases (MappedIngredientIds) become `Set<String>` or `List` in Dart.
+      if (s?.type === "array") continue;
       expect(
         () => readFileSync(new URL(`lib/model/${snake(name)}.dart`, dartDir)),
         name,

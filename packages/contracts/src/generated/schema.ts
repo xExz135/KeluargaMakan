@@ -32,7 +32,7 @@ export interface paths {
         put?: never;
         /**
          * Verify a sign-in code and start a session
-         * @description Verifies the code for a challenge (ACC-01). On first sign-in a manager account is created with no household (`account.householdId` is null); the client then creates the household. On a later sign-in, including on a new device, the existing household is returned unchanged (ACC-13). Wrong codes count towards an attempt limit from configuration.
+         * @description Verifies the code for a challenge (ACC-01). On first sign-in a manager account is created with no household (`account.householdId` is null); the client then creates the household. On a later sign-in, including on a new device, the existing household is returned unchanged (ACC-13). Each code works once. Wrong codes count towards an attempt limit from configuration; verification is also rate-limited per device. A 503 leaves the code and its attempt count unchanged.
          */
         post: operations["verifySignInCode"];
         delete?: never;
@@ -72,7 +72,7 @@ export interface paths {
         put?: never;
         /**
          * Exchange a refresh token for new tokens
-         * @description Rotates the refresh token. Each refresh token works once; reusing an old one revokes the whole session and returns 401 `refresh_token_invalid`.
+         * @description Rotates the refresh token. Each refresh token works once. If the response to a refresh is lost, the client may repeat the refresh with the same token within a grace window from configuration: it gets a new pair, and the pair from the lost response stops working. Reusing a token after the grace window, after the pair it was exchanged for has been used, or reusing a token that was replaced that way, revokes the whole session and returns 401 `refresh_token_invalid`. A 429 or 503 (for example `service_unavailable` after a concurrent change) leaves the session and the token unchanged; retry later.
          */
         post: operations["refreshSession"];
         delete?: never;
@@ -92,7 +92,7 @@ export interface paths {
         put?: never;
         /**
          * Sign out on this device
-         * @description Revokes the current session (its access and refresh tokens). Household data is kept on the server, so the user can sign in again on any device (ACC-13). The client clears its local session afterwards.
+         * @description Revokes the current session (its access and refresh tokens). Household data is kept on the server, so the user can sign in again on any device (ACC-13). The client clears its local session afterwards. Signing out an already revoked session returns 401, which the client treats as signed out.
          */
         post: operations["signOut"];
         delete?: never;
@@ -800,13 +800,16 @@ export interface components {
             /** Format: date-time */
             createdAt: string;
         };
-        /** @description `allergen` is required for `allergy` and not allowed otherwise. `freeText` is required for `free_text`, optional for `medical_exclusion` and not allowed otherwise. No condition names are asked for a medical exclusion. `mappedIngredientIds` (free text and medical exclusion only) records the manager's confirmed match at entry; without it the rule is saved as `unmapped`. */
+        /** @description `allergen` is required for `allergy` and not allowed otherwise. `freeText` is required for `free_text`, optional for `medical_exclusion` and not allowed otherwise. No condition names are asked for a medical exclusion. `mappedIngredientIds` (free text and medical exclusion only) records the manager's confirmed match at entry. When it is absent or null the rule is saved as `unmapped` (PRF-08); it is nullable so generated clients leave it out by default instead of sending an empty list. */
         HardRuleCreate: {
             type: components["schemas"]["HardRuleType"];
             allergen?: components["schemas"]["StandardAllergen"];
             freeText?: string;
-            mappedIngredientIds?: components["schemas"]["ReferenceId"][];
+            /** @description Absent or null for an unmapped rule. When present, at least one reference ingredient ID; an empty list is rejected. */
+            mappedIngredientIds?: components["schemas"]["MappedIngredientIds"] | null;
         };
+        /** @description Reference ingredients a free-text or medical-exclusion rule maps to (PRF-08). */
+        MappedIngredientIds: components["schemas"]["ReferenceId"][];
         HardRuleMappingConfirmation: {
             ingredientIds: components["schemas"]["ReferenceId"][];
         };
@@ -1030,6 +1033,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["ServiceUnavailable"];
             default: components["responses"]["UnexpectedError"];
         };
     };
@@ -1086,6 +1090,8 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["ServiceUnavailable"];
             default: components["responses"]["UnexpectedError"];
         };
     };
@@ -1106,6 +1112,7 @@ export interface operations {
                 content?: never;
             };
             401: components["responses"]["Unauthorized"];
+            503: components["responses"]["ServiceUnavailable"];
             default: components["responses"]["UnexpectedError"];
         };
     };
@@ -1151,6 +1158,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             409: components["responses"]["Conflict"];
+            503: components["responses"]["ServiceUnavailable"];
             default: components["responses"]["UnexpectedError"];
         };
     };
@@ -1182,6 +1190,7 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             409: components["responses"]["Conflict"];
+            503: components["responses"]["ServiceUnavailable"];
             default: components["responses"]["UnexpectedError"];
         };
     };
@@ -1210,6 +1219,7 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             409: components["responses"]["Conflict"];
+            503: components["responses"]["ServiceUnavailable"];
             default: components["responses"]["UnexpectedError"];
         };
     };

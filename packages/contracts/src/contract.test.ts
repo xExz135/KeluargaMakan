@@ -198,6 +198,17 @@ describe("accounts and households", () => {
     expect(operation("getHousehold").operation["x-requirements"]).toContain("ACC-13");
   });
 
+  it("ACC-13 refresh documents the grace window, family revocation and retryable errors", () => {
+    const refresh = operation("refreshSession").operation;
+    expect(refresh.description).toMatch(/grace window/);
+    expect(refresh.description).toMatch(/revokes the\s+whole session/);
+    expect(refresh.responses["429"]?.$ref).toBe("#/components/responses/TooManyRequests");
+    expect(refresh.responses["503"]?.$ref).toBe("#/components/responses/ServiceUnavailable");
+    expect(operation("verifySignInCode").operation.responses["503"]?.$ref).toBe(
+      "#/components/responses/ServiceUnavailable",
+    );
+  });
+
   it("ACC-03 one manager account per household; members are profiles, not accounts", () => {
     expect(schema("AccountRole").enum).toEqual(["manager"]);
     expect(schema("Household").required).toEqual(
@@ -337,6 +348,14 @@ describe("hard rules", () => {
     expect(operation("rejectHardRuleMapping").method).toBe("delete");
     expect(operation("confirmHardRuleMapping").path).toBe(operation("rejectHardRuleMapping").path);
     expect(Object.keys(schema("HardRuleCreate").properties ?? {})).toContain("mappedIngredientIds");
+    // T-017: an unmapped rule leaves the list out (or null); generated clients
+    // must not default it to an empty list, which the server rejects.
+    const mapped = schema("HardRuleCreate").properties?.["mappedIngredientIds"];
+    expect(mapped?.oneOf?.map((option) => option.$ref ?? option.type)).toEqual([
+      "#/components/schemas/MappedIngredientIds",
+      "null",
+    ]);
+    expect(schema("MappedIngredientIds")).toMatchObject({ type: "array", minItems: 1 });
     // The client can never set a mapping status itself.
     expect(Object.keys(schema("HardRuleCreate").properties ?? {})).not.toContain("mapping");
   });

@@ -18,7 +18,7 @@ class AuthApi {
 
   /// Exchange a refresh token for new tokens
   ///
-  /// Rotates the refresh token. Each refresh token works once; reusing an old one revokes the whole session and returns 401 `refresh_token_invalid`.
+  /// Rotates the refresh token. Each refresh token works once. If the response to a refresh is lost, the client may repeat the refresh with the same token within a grace window from configuration: it gets a new pair, and the pair from the lost response stops working. Reusing a token after the grace window, after the pair it was exchanged for has been used, or reusing a token that was replaced that way, revokes the whole session and returns 401 `refresh_token_invalid`. A 429 or 503 (for example `service_unavailable` after a concurrent change) leaves the session and the token unchanged; retry later.
   ///
   /// Note: This method returns the HTTP [Response].
   ///
@@ -53,7 +53,7 @@ class AuthApi {
 
   /// Exchange a refresh token for new tokens
   ///
-  /// Rotates the refresh token. Each refresh token works once; reusing an old one revokes the whole session and returns 401 `refresh_token_invalid`.
+  /// Rotates the refresh token. Each refresh token works once. If the response to a refresh is lost, the client may repeat the refresh with the same token within a grace window from configuration: it gets a new pair, and the pair from the lost response stops working. Reusing a token after the grace window, after the pair it was exchanged for has been used, or reusing a token that was replaced that way, revokes the whole session and returns 401 `refresh_token_invalid`. A 429 or 503 (for example `service_unavailable` after a concurrent change) leaves the session and the token unchanged; retry later.
   ///
   /// Parameters:
   ///
@@ -189,7 +189,7 @@ class AuthApi {
 
   /// Sign out on this device
   ///
-  /// Revokes the current session (its access and refresh tokens). Household data is kept on the server, so the user can sign in again on any device (ACC-13). The client clears its local session afterwards.
+  /// Revokes the current session (its access and refresh tokens). Household data is kept on the server, so the user can sign in again on any device (ACC-13). The client clears its local session afterwards. Signing out an already revoked session returns 401, which the client treats as signed out.
   ///
   /// Note: This method returns the HTTP [Response].
   Future<Response> signOutWithHttpInfo({ Future<void>? abortTrigger, }) async {
@@ -220,7 +220,7 @@ class AuthApi {
 
   /// Sign out on this device
   ///
-  /// Revokes the current session (its access and refresh tokens). Household data is kept on the server, so the user can sign in again on any device (ACC-13). The client clears its local session afterwards.
+  /// Revokes the current session (its access and refresh tokens). Household data is kept on the server, so the user can sign in again on any device (ACC-13). The client clears its local session afterwards. Signing out an already revoked session returns 401, which the client treats as signed out.
   Future<void> signOut({ Future<void>? abortTrigger, }) async {
     final response = await signOutWithHttpInfo(abortTrigger: abortTrigger,);
     if (response.statusCode >= HttpStatus.badRequest) {
@@ -230,7 +230,7 @@ class AuthApi {
 
   /// Verify a sign-in code and start a session
   ///
-  /// Verifies the code for a challenge (ACC-01). On first sign-in a manager account is created with no household (`account.householdId` is null); the client then creates the household. On a later sign-in, including on a new device, the existing household is returned unchanged (ACC-13). Wrong codes count towards an attempt limit from configuration.
+  /// Verifies the code for a challenge (ACC-01). On first sign-in a manager account is created with no household (`account.householdId` is null); the client then creates the household. On a later sign-in, including on a new device, the existing household is returned unchanged (ACC-13). Each code works once. Wrong codes count towards an attempt limit from configuration; verification is also rate-limited per device. A 503 leaves the code and its attempt count unchanged.
   ///
   /// Note: This method returns the HTTP [Response].
   ///
@@ -265,7 +265,7 @@ class AuthApi {
 
   /// Verify a sign-in code and start a session
   ///
-  /// Verifies the code for a challenge (ACC-01). On first sign-in a manager account is created with no household (`account.householdId` is null); the client then creates the household. On a later sign-in, including on a new device, the existing household is returned unchanged (ACC-13). Wrong codes count towards an attempt limit from configuration.
+  /// Verifies the code for a challenge (ACC-01). On first sign-in a manager account is created with no household (`account.householdId` is null); the client then creates the household. On a later sign-in, including on a new device, the existing household is returned unchanged (ACC-13). Each code works once. Wrong codes count towards an attempt limit from configuration; verification is also rate-limited per device. A 503 leaves the code and its attempt count unchanged.
   ///
   /// Parameters:
   ///
