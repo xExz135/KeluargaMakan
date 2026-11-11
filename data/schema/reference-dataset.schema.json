@@ -8,6 +8,10 @@
   "required": ["schema", "version", "ingredients"],
   "properties": {
     "$schema": { "type": "string" },
+    "$comment": {
+      "description": "A note for people; ignored by the build. Test fixture files carry the TEST FIXTURE marker here, which is never allowed in data/reference/.",
+      "type": "string"
+    },
     "schema": { "const": "keluargamakan.reference.ingredients/1" },
     "version": {
       "description": "Reference data version recorded with every safety result.",

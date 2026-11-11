@@ -1,0 +1,242 @@
+{
+  "$comment": "TEST FIXTURE: not real safety or nutrition data. Fictional records for the reference importer tests (T-013). Every value is invented; IDs use the fx_ prefix.",
+  "schema": "keluargamakan.reference.ingredients/1",
+  "version": "TEST-FIXTURE-reference-import-1",
+  "ingredients": [
+    {
+      "id": "fx_imp_terasi",
+      "displayName": {
+        "id": "Terasi fiksi",
+        "en": "Fiction shrimp paste"
+      },
+      "localNames": ["belacan fiksi"],
+      "category": "fixture-condiment",
+      "components": {
+        "verification": "verified",
+        "ingredientIds": ["fx_imp_udang"]
+      },
+      "allergens": {
+        "verification": "verified",
+        "contains": ["shrimp"],
+        "mayContain": []
+      },
+      "halal": {
+        "verification": "verified",
+        "value": "halal",
+        "nonHalalSources": []
+      },
+      "diet": {
+        "verification": "verified",
+        "vegetarian": "not_suitable",
+        "vegan": "not_suitable"
+      },
+      "brandVaries": false,
+      "brandVariants": [],
+      "tkpiCode": null
+    },
+    {
+      "id": "fx_imp_petis",
+      "displayName": {
+        "id": "Petis fiksi",
+        "en": "Fiction petis"
+      },
+      "localNames": [],
+      "category": "fixture-condiment",
+      "components": {
+        "verification": "unverified",
+        "ingredientIds": ["fx_imp_udang"]
+      },
+      "allergens": {
+        "verification": "unverified",
+        "contains": ["shrimp"],
+        "mayContain": []
+      },
+      "halal": {
+        "verification": "unverified",
+        "value": "uncertain",
+        "nonHalalSources": []
+      },
+      "diet": {
+        "verification": "unverified",
+        "vegetarian": "unknown",
+        "vegan": "unknown"
+      },
+      "brandVaries": false,
+      "brandVariants": [],
+      "tkpiCode": null
+    },
+    {
+      "id": "fx_imp_kecap",
+      "displayName": {
+        "id": "Kecap fiksi",
+        "en": "Fiction sweet soy sauce"
+      },
+      "localNames": [],
+      "category": "fixture-condiment",
+      "components": {
+        "verification": "verified",
+        "ingredientIds": ["fx_imp_kedelai"]
+      },
+      "allergens": {
+        "verification": "verified",
+        "contains": ["soy"],
+        "mayContain": ["wheat"]
+      },
+      "halal": {
+        "verification": "verified",
+        "value": "halal",
+        "nonHalalSources": []
+      },
+      "diet": {
+        "verification": "verified",
+        "vegetarian": "suitable",
+        "vegan": "suitable"
+      },
+      "brandVaries": true,
+      "brandVariants": [
+        {
+          "brandId": "fx_imp_merek_a",
+          "brandName": "Merek Fiksi A",
+          "verified": true,
+          "components": {
+            "verification": "verified",
+            "ingredientIds": ["fx_imp_kedelai"]
+          },
+          "allergens": {
+            "verification": "verified",
+            "contains": ["soy"],
+            "mayContain": []
+          },
+          "halal": {
+            "verification": "verified",
+            "value": "halal",
+            "nonHalalSources": []
+          },
+          "diet": {
+            "verification": "verified",
+            "vegetarian": "suitable",
+            "vegan": "suitable"
+          }
+        },
+        {
+          "brandId": "fx_imp_merek_b",
+          "brandName": "Merek Fiksi B",
+          "verified": false,
+          "components": {
+            "verification": "unverified",
+            "ingredientIds": ["fx_imp_kedelai", "fx_imp_gandum"]
+          },
+          "allergens": {
+            "verification": "unverified",
+            "contains": ["soy", "wheat"],
+            "mayContain": []
+          },
+          "halal": {
+            "verification": "unverified",
+            "value": "unknown",
+            "nonHalalSources": []
+          },
+          "diet": {
+            "verification": "unverified",
+            "vegetarian": "unknown",
+            "vegan": "unknown"
+          }
+        }
+      ],
+      "tkpiCode": null
+    },
+    {
+      "id": "fx_imp_angciu",
+      "displayName": {
+        "id": "Angciu fiksi",
+        "en": "Fiction Shaoxing wine"
+      },
+      "localNames": [],
+      "category": "fixture-condiment",
+      "components": {
+        "verification": "verified",
+        "ingredientIds": ["fx_imp_alkohol"]
+      },
+      "allergens": {
+        "verification": "verified",
+        "contains": [],
+        "mayContain": []
+      },
+      "halal": {
+        "verification": "verified",
+        "value": "not_halal",
+        "nonHalalSources": ["alcohol"]
+      },
+      "diet": {
+        "verification": "verified",
+        "vegetarian": "suitable",
+        "vegan": "suitable"
+      },
+      "brandVaries": false,
+      "brandVariants": [],
+      "tkpiCode": null
+    },
+    {
+      "id": "fx_imp_gelatin",
+      "displayName": {
+        "id": "Gelatin fiksi",
+        "en": "Fiction gelatin"
+      },
+      "localNames": [],
+      "category": "fixture-other",
+      "components": {
+        "verification": "unverified",
+        "ingredientIds": []
+      },
+      "allergens": {
+        "verification": "verified",
+        "contains": [],
+        "mayContain": []
+      },
+      "halal": {
+        "verification": "verified",
+        "value": "uncertain",
+        "nonHalalSources": []
+      },
+      "diet": {
+        "verification": "verified",
+        "vegetarian": "not_suitable",
+        "vegan": "not_suitable"
+      },
+      "brandVaries": false,
+      "brandVariants": [],
+      "tkpiCode": null
+    },
+    {
+      "id": "fx_imp_kaldu",
+      "displayName": {
+        "id": "Kaldu bubuk fiksi",
+        "en": "Fiction bouillon powder"
+      },
+      "localNames": [],
+      "category": "fixture-condiment",
+      "components": {
+        "verification": "unverified",
+        "ingredientIds": ["fx_imp_gandum"]
+      },
+      "allergens": {
+        "verification": "unverified",
+        "contains": [],
+        "mayContain": ["wheat", "milk"]
+      },
+      "halal": {
+        "verification": "unverified",
+        "value": "unknown",
+        "nonHalalSources": []
+      },
+      "diet": {
+        "verification": "unverified",
+        "vegetarian": "uncertain",
+        "vegan": "uncertain"
+      },
+      "brandVaries": false,
+      "brandVariants": [],
+      "tkpiCode": null
+    }
+  ]
+}

@@ -1,0 +1,193 @@
+{
+  "$comment": "TEST FIXTURE: not real safety or nutrition data. Fictional records for the reference importer tests (T-013). Every value is invented; IDs use the fx_ prefix.",
+  "schema": "keluargamakan.reference.ingredients/1",
+  "version": "TEST-FIXTURE-reference-import-1",
+  "ingredients": [
+    {
+      "id": "fx_imp_udang",
+      "displayName": {
+        "id": "Udang fiksi",
+        "en": "Fiction shrimp"
+      },
+      "localNames": ["rebon fiksi"],
+      "category": "fixture-seafood",
+      "components": {
+        "verification": "verified",
+        "ingredientIds": []
+      },
+      "allergens": {
+        "verification": "verified",
+        "contains": ["shrimp"],
+        "mayContain": []
+      },
+      "halal": {
+        "verification": "verified",
+        "value": "halal",
+        "nonHalalSources": []
+      },
+      "diet": {
+        "verification": "verified",
+        "vegetarian": "not_suitable",
+        "vegan": "not_suitable"
+      },
+      "brandVaries": false,
+      "brandVariants": [],
+      "tkpiCode": null
+    },
+    {
+      "id": "fx_imp_babi",
+      "displayName": {
+        "id": "Babi fiksi",
+        "en": "Fiction pork"
+      },
+      "localNames": [],
+      "category": "fixture-meat",
+      "components": {
+        "verification": "verified",
+        "ingredientIds": []
+      },
+      "allergens": {
+        "verification": "verified",
+        "contains": [],
+        "mayContain": []
+      },
+      "halal": {
+        "verification": "verified",
+        "value": "not_halal",
+        "nonHalalSources": ["pork"]
+      },
+      "diet": {
+        "verification": "verified",
+        "vegetarian": "not_suitable",
+        "vegan": "not_suitable"
+      },
+      "brandVaries": false,
+      "brandVariants": [],
+      "tkpiCode": null
+    },
+    {
+      "id": "fx_imp_gandum",
+      "displayName": {
+        "id": "Gandum fiksi",
+        "en": "Fiction wheat"
+      },
+      "localNames": [],
+      "category": "fixture-grain",
+      "components": {
+        "verification": "verified",
+        "ingredientIds": []
+      },
+      "allergens": {
+        "verification": "verified",
+        "contains": ["wheat"],
+        "mayContain": []
+      },
+      "halal": {
+        "verification": "verified",
+        "value": "halal",
+        "nonHalalSources": []
+      },
+      "diet": {
+        "verification": "verified",
+        "vegetarian": "suitable",
+        "vegan": "suitable"
+      },
+      "brandVaries": false,
+      "brandVariants": [],
+      "tkpiCode": null
+    },
+    {
+      "id": "fx_imp_kedelai",
+      "displayName": {
+        "id": "Kedelai fiksi",
+        "en": "Fiction soybean"
+      },
+      "localNames": [],
+      "category": "fixture-legume",
+      "components": {
+        "verification": "verified",
+        "ingredientIds": []
+      },
+      "allergens": {
+        "verification": "verified",
+        "contains": ["soy"],
+        "mayContain": []
+      },
+      "halal": {
+        "verification": "verified",
+        "value": "halal",
+        "nonHalalSources": []
+      },
+      "diet": {
+        "verification": "verified",
+        "vegetarian": "suitable",
+        "vegan": "suitable"
+      },
+      "brandVaries": false,
+      "brandVariants": [],
+      "tkpiCode": null
+    },
+    {
+      "id": "fx_imp_alkohol",
+      "displayName": {
+        "id": "Alkohol masak fiksi",
+        "en": "Fiction cooking alcohol"
+      },
+      "localNames": [],
+      "category": "fixture-other",
+      "components": {
+        "verification": "verified",
+        "ingredientIds": []
+      },
+      "allergens": {
+        "verification": "verified",
+        "contains": [],
+        "mayContain": []
+      },
+      "halal": {
+        "verification": "verified",
+        "value": "not_halal",
+        "nonHalalSources": ["alcohol"]
+      },
+      "diet": {
+        "verification": "verified",
+        "vegetarian": "suitable",
+        "vegan": "suitable"
+      },
+      "brandVaries": false,
+      "brandVariants": [],
+      "tkpiCode": null
+    },
+    {
+      "id": "fx_imp_bawang",
+      "displayName": {
+        "id": "Bawang fiksi",
+        "en": "Fiction shallot"
+      },
+      "localNames": ["brambang fiksi"],
+      "category": "fixture-vegetable",
+      "components": {
+        "verification": "verified",
+        "ingredientIds": []
+      },
+      "allergens": {
+        "verification": "verified",
+        "contains": [],
+        "mayContain": []
+      },
+      "halal": {
+        "verification": "verified",
+        "value": "halal",
+        "nonHalalSources": []
+      },
+      "diet": {
+        "verification": "verified",
+        "vegetarian": "suitable",
+        "vegan": "suitable"
+      },
+      "brandVaries": false,
+      "brandVariants": [],
+      "tkpiCode": null
+    }
+  ]
+}
