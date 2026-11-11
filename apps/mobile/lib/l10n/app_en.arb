@@ -19,5 +19,19 @@
   "settingsTheme": "Theme",
   "settingsThemeSystem": "Follow system",
   "settingsThemeLight": "Light",
-  "settingsThemeDark": "Dark"
+  "settingsThemeDark": "Dark",
+  "errorGenericTitle": "Something went wrong",
+  "errorGenericBody": "Please try again in a moment.",
+  "errorApiValidationFailed": "Something you entered isn't right. Please check it.",
+  "errorFieldRequired": "Required.",
+  "errorFieldTooLong": "Too long. Up to {max} characters.",
+  "errorFieldInvalid": "This doesn't look right.",
+  "errorFieldDuplicate": "Already added.",
+  "errorApiSignedOut": "Please sign in again",
+  "errorApiSignedOutBody": "For security, your session ended. Your household data is still saved in your account.",
+  "errorApiForbidden": "You don't have access to this.",
+  "errorApiNotFound": "This is no longer here. It may have been deleted on another phone.",
+  "errorApiRateLimited": "Too many tries. Try again in {minutes, plural, =1{1 minute} other{{minutes} minutes} }.",
+  "errorRulesUnavailableTitle": "Food rules can't be opened right now",
+  "errorRulesUnavailableBody": "Ideas and Cek Aman wait until the food rules can be opened again. Try again shortly."
 }

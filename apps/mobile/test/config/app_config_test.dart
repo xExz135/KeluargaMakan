@@ -40,6 +40,7 @@ void main() {
         'ui.snackbarActionMs',
         'settings.defaultServings',
         'nav.planTabEnabled',
+        'api.requestTimeoutMs',
       ]);
     });
 
