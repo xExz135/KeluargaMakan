@@ -3,7 +3,7 @@
 #
 
 name: 'keluargamakan_api'
-version: '0.1.0'
+version: '0.1.1'
 description: 'Generated KeluargaMakan API client. Do not edit.'
 homepage: 'https://github.com/xExz135/KeluargaMakan'
 publish_to: none

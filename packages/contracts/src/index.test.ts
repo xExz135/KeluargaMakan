@@ -10,9 +10,9 @@ describe("contracts package", () => {
     expect(CONTRACTS_PACKAGE).toBe("@keluargamakan/contracts");
   });
 
-  it("ships an OpenAPI 3.1 document at version 0.1.0", () => {
+  it("ships an OpenAPI 3.1 document at version 0.1.1", () => {
     expect(SPEC.openapi).toMatch(/^3\.1\.\d+$/);
-    expect(SPEC.info.version).toBe("0.1.0");
+    expect(SPEC.info.version).toBe("0.1.1");
   });
 
   it("keeps CONTRACT_VERSION, package.json and the Dart pubspec in step with info.version", () => {
