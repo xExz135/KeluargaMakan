@@ -36,6 +36,14 @@ function record(
 
 /** The contradictory records only, so a test can check each one is rejected. */
 export const malformedIngredients: readonly ReferenceIngredient[] = [
+  // SAF-08: marked halal, yet lists alcohol as a non-halal source.
+  record("fx_bad_halal_with_alcohol", "Saus masak fiksi", "Fiction cooking sauce", {
+    halal: { verification: "verified", value: "halal", nonHalalSources: ["alcohol"] },
+  }),
+  // SAF-08: marked halal, yet lists a non-halal animal source.
+  record("fx_bad_halal_with_animal", "Kaldu fiksi", "Fiction stock", {
+    halal: { verification: "verified", value: "halal", nonHalalSources: ["non_halal_animal"] },
+  }),
   // PRF-03: vegan "suitable" while vegetarian is only uncertain.
   record("fx_bad_vegan_veg_uncertain", "Perisa fiksi", "Fiction flavouring", {
     diet: { verification: "verified", vegetarian: "uncertain", vegan: "suitable" },

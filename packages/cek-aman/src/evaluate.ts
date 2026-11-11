@@ -284,14 +284,18 @@ function evaluateAllergy(allergen: string, finding: Finding): PartialReason[] {
   return out;
 }
 
-/** SAF-08: alcohol, pork or non-halal animal fails; anything not verified halal is uncertain. */
+/**
+ * SAF-08: alcohol, pork or non-halal animal fails; anything not verified halal
+ * is uncertain. A listed non-halal source fails the rule whatever the stated
+ * value or verification says, so contradictory data (for example "halal" with
+ * "pork") is Not safe, never Safe.
+ */
 function evaluateHalal(finding: Finding): PartialReason[] {
   const { halal } = finding.data;
-  if (halal.value === "not_halal") {
-    return halal.sources.length === 0
-      ? [notSafe(finding, "halal_not_halal", null)]
-      : halal.sources.map((source) => notSafe(finding, "halal_not_halal", source));
+  if (halal.sources.length > 0) {
+    return halal.sources.map((source) => notSafe(finding, "halal_not_halal", source));
   }
+  if (halal.value === "not_halal") return [notSafe(finding, "halal_not_halal", null)];
   if (halal.value !== "halal" || !halal.verified) {
     return [checkLabel(finding, "halal_uncertain", halal.value)];
   }

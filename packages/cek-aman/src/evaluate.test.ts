@@ -452,6 +452,70 @@ describe("SAF-08 halal", () => {
       ["halal_uncertain", "unknown"],
     ]);
   });
+
+  it("SAF-08 a listed non-halal source fails the halal rule whatever the stated value says", () => {
+    const reference = [
+      halal("a", { verification: "verified", value: "halal", nonHalalSources: ["alcohol"] }),
+      halal("b", { verification: "verified", value: "uncertain", nonHalalSources: ["pork"] }),
+      halal("c", {
+        verification: "unverified",
+        value: "unknown",
+        nonHalalSources: ["non_halal_animal"],
+      }),
+      // A malformed list that still names a source fails rather than being ignored.
+      halal("d", { verification: "verified", value: "halal", nonHalalSources: ["pork", 7] }),
+    ];
+    const result = evaluate(
+      input({
+        reference,
+        recipe: ["a", "b", "c", "d"],
+        members: [member("m", rules.halal()), member("other", rules.allergy("egg"))],
+      }),
+    );
+    const [halalMember, otherMember] = result.perMember;
+    expect(halalMember!.status).toBe("not_safe");
+    expect(
+      halalMember!.reasons.map((r) => [r.ingredient!.ingredientId, r.kind, r.code, r.detail]),
+    ).toEqual([
+      ["a", "contains", "halal_not_halal", "alcohol"],
+      ["b", "contains", "halal_not_halal", "pork"],
+      ["c", "contains", "halal_not_halal", "non_halal_animal"],
+      ["d", "contains", "halal_not_halal", "pork"],
+    ]);
+    // Halal data never affects a member without a halal rule.
+    expect(otherMember).toMatchObject({ status: "safe", reasons: [] });
+  });
+
+  it("SAF-08 a non-halal source on a component fails the halal rule", () => {
+    const reference = [
+      halal("wine", { verification: "verified", value: "halal", nonHalalSources: ["alcohol"] }),
+      ing("sauce", { components: { verification: "verified", ingredientIds: ["wine"] } }),
+    ];
+    const result = one(
+      input({ reference, recipe: ["sauce"], members: [member("m", rules.halal())] }),
+    );
+    expect(result.status).toBe("not_safe");
+    expect(result.reasons).toEqual([
+      expect.objectContaining({ kind: "component", componentPath: ["wine"], detail: "alcohol" }),
+    ]);
+  });
+
+  it("SAF-08 a missing or malformed non-halal source list is check_label, never safe", () => {
+    const reference = [
+      halal("a", { verification: "verified", value: "halal" }),
+      halal("b", { verification: "verified", value: "halal", nonHalalSources: "none" }),
+      halal("c", { verification: "verified", value: "halal", nonHalalSources: [7] }),
+    ];
+    const result = one(
+      input({ reference, recipe: ["a", "b", "c"], members: [member("m", rules.halal())] }),
+    );
+    expect(result.status).toBe("check_label");
+    expect(result.reasons.map((r) => [r.code, r.detail])).toEqual([
+      ["halal_uncertain", "halal"],
+      ["halal_uncertain", "halal"],
+      ["halal_uncertain", "halal"],
+    ]);
+  });
 });
 
 describe("PRF-03 vegetarian and vegan", () => {

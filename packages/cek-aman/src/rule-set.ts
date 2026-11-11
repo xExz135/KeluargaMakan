@@ -3,8 +3,13 @@ import { STANDARD_ALLERGENS, type StandardAllergen } from "./vocabulary.js";
 /**
  * Version of the rule logic in this package (SAF-14). Bump it whenever any
  * evaluation behavior changes, and record the change in docs/DECISIONS.md.
+ *
+ * 1.1.0: a vegan rule uses the worse of the vegetarian and vegan values; any
+ * listed non-halal source fails a halal rule whatever the stated value; a
+ * missing or malformed non-halal source list counts as unverified; only own
+ * properties of input objects are read. All changes are stricter than 1.0.0.
  */
-export const RULE_SET_VERSION = "cek-aman-rules/1.0.0";
+export const RULE_SET_VERSION = "cek-aman-rules/1.1.0";
 
 type AllergenTable = Readonly<Record<StandardAllergen, readonly StandardAllergen[]>>;
 

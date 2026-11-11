@@ -26,6 +26,7 @@ export interface NormalizedAllergens {
 export interface NormalizedHalal {
   readonly verified: boolean;
   readonly value: HalalValue;
+  /** Every listed source, even from a malformed list: any source fails a halal rule (SAF-08). */
   readonly sources: readonly string[];
 }
 
@@ -97,10 +98,13 @@ function readAllergens(raw: unknown): NormalizedAllergens {
 
 function readHalal(raw: unknown): NormalizedHalal {
   const data = isObject(raw) ? raw : {};
+  const listed = own(data, "nonHalalSources");
+  const items = ownItems(listed);
   return {
-    verified: own(data, "verification") === "verified",
+    // A missing or malformed source list means the halal data are not usable.
+    verified: stringList(listed) !== null && own(data, "verification") === "verified",
     value: oneOf(HALAL_VALUES, own(data, "value"), "unknown"),
-    sources: stringList(own(data, "nonHalalSources")) ?? [],
+    sources: (items ?? []).filter((item): item is string => typeof item === "string"),
   };
 }
 
