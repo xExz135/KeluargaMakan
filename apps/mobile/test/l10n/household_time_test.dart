@@ -60,5 +60,39 @@ void main() {
         HouseholdTimeZone.wib,
       );
     });
+
+    test('NFR-16 Household.timeZone IANA names map to WIB, WITA and WIT; '
+        'anything else is WIB (F4)', () {
+      expect(HouseholdTimeZone.fromIana('Asia/Jakarta'), HouseholdTimeZone.wib);
+      expect(
+        HouseholdTimeZone.fromIana('Asia/Pontianak'),
+        HouseholdTimeZone.wib,
+      );
+      expect(
+        HouseholdTimeZone.fromIana('Asia/Makassar'),
+        HouseholdTimeZone.wita,
+      );
+      expect(
+        HouseholdTimeZone.fromIana('Asia/Jayapura'),
+        HouseholdTimeZone.wit,
+      );
+      for (final other in [
+        'Asia/Singapore',
+        'Europe/Amsterdam',
+        'asia/jakarta',
+        'Asia/Ujung_Pandang',
+        '',
+        null,
+      ]) {
+        expect(HouseholdTimeZone.fromIana(other), HouseholdTimeZone.wib);
+      }
+    });
+
+    test('NFR-16 each zone has the IANA name sent when creating a '
+        'household', () {
+      for (final zone in HouseholdTimeZone.values) {
+        expect(HouseholdTimeZone.fromIana(zone.ianaName), zone);
+      }
+    });
   });
 }

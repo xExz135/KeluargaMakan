@@ -1,8 +1,9 @@
 // Dates and times in the household's time zone (NFR-16).
 //
 // Indonesia has three zones with fixed offsets and no daylight saving time,
-// so a fixed UTC offset is exact. The household's zone will come from the
-// account (API); until then it is derived from the device offset.
+// so a fixed UTC offset is exact. The household's zone comes from
+// `Household.timeZone` (an IANA name) once the household is loaded; before
+// that it is derived from the device offset.
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
@@ -25,7 +26,38 @@ enum HouseholdTimeZone {
   /// Indonesian offset.
   static HouseholdTimeZone fromOffset(Duration offset) =>
       values.firstWhere((zone) => zone.utcOffset == offset, orElse: () => wib);
+
+  /// The zone for a `Household.timeZone` IANA name (PR #6 review F4). The
+  /// contract accepts any IANA name; only Indonesia's four canonical zone
+  /// names are mapped, and anything else falls back to WIB.
+  static HouseholdTimeZone fromIana(String? name) => switch (name) {
+    'Asia/Jakarta' || 'Asia/Pontianak' => wib,
+    'Asia/Makassar' => wita,
+    'Asia/Jayapura' => wit,
+    _ => wib,
+  };
+
+  /// The IANA name sent when the app creates a household from this zone.
+  String get ianaName => switch (this) {
+    wib => 'Asia/Jakarta',
+    wita => 'Asia/Makassar',
+    wit => 'Asia/Jayapura',
+  };
 }
+
+/// The zone of the loaded household, or null before a household is known.
+/// Set by the household repository.
+final class KnownHouseholdTimeZone extends Notifier<HouseholdTimeZone?> {
+  @override
+  HouseholdTimeZone? build() => null;
+
+  void set(HouseholdTimeZone? zone) => state = zone;
+}
+
+final knownHouseholdTimeZoneProvider =
+    NotifierProvider<KnownHouseholdTimeZone, HouseholdTimeZone?>(
+      KnownHouseholdTimeZone.new,
+    );
 
 /// Formats instants as the household sees them.
 final class HouseholdDateFormatter {
@@ -59,7 +91,9 @@ final class HouseholdDateFormatter {
 }
 
 final householdTimeZoneProvider = Provider<HouseholdTimeZone>(
-  (ref) => HouseholdTimeZone.fromOffset(DateTime.now().timeZoneOffset),
+  (ref) =>
+      ref.watch(knownHouseholdTimeZoneProvider) ??
+      HouseholdTimeZone.fromOffset(DateTime.now().timeZoneOffset),
 );
 
 final householdDateFormatterProvider = Provider<HouseholdDateFormatter>(
