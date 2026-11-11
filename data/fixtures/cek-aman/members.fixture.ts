@@ -44,6 +44,22 @@ export const fixtureMembers = {
     memberId: "fx-member-keponakan",
     hardRules: [{ ruleId: "fx-rule-keponakan-vegan", type: "vegan" }],
   },
+  /** Halal plus a shrimp allergy: the common multi-rule household case. */
+  pakde: {
+    memberId: "fx-member-pakde",
+    hardRules: [
+      { ruleId: "fx-rule-pakde-halal", type: "halal" },
+      { ruleId: "fx-rule-pakde-shrimp", type: "allergy", allergen: "shrimp" },
+    ],
+  },
+  /** Halal plus a shellfish allergy. */
+  bude: {
+    memberId: "fx-member-bude",
+    hardRules: [
+      { ruleId: "fx-rule-bude-halal", type: "halal" },
+      { ruleId: "fx-rule-bude-shellfish", type: "allergy", allergen: "shellfish" },
+    ],
+  },
   nenek: {
     memberId: "fx-member-nenek",
     hardRules: [
