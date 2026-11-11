@@ -19,6 +19,7 @@
     "test:safety": "pnpm --filter @keluargamakan/safety-regression run test",
     "check:fixtures": "node scripts/check-fixture-refs.mjs",
     "validate:reference": "node scripts/validate-reference.mjs",
+    "build:reference": "node scripts/build-reference.mjs",
     "check:contracts": "pnpm --filter @keluargamakan/contracts run check",
     "audit:deps": "pnpm audit --audit-level=high"
   },
