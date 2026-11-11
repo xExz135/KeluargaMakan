@@ -23,7 +23,12 @@ import {
   withdrawHealthConsent,
   ConsentNotActiveError,
 } from "./consent.js";
-import { encryptField, decryptField } from "./crypto/data-key-cipher.js";
+import {
+  CIPHERTEXT_OVERHEAD_BYTES,
+  MIN_BUCKET_BYTES,
+  decryptField,
+  encryptField,
+} from "./crypto/data-key-cipher.js";
 import {
   DecryptionError,
   KeyServiceError,
@@ -39,6 +44,7 @@ import {
   purgeExpiredSafetyLogs,
 } from "./deletion.js";
 import {
+  ConcurrentUpdateError,
   ConsentRequiredError,
   DatabaseError,
   GuardianConfirmationRequiredError,
@@ -57,7 +63,9 @@ import {
   listProfileRules,
   loadRulesForEvaluation,
 } from "./hard-rules.js";
+import { HARD_RULE_PADDED_BYTES } from "./hard-rule-codec.js";
 import { HealthDataKeys } from "./health-data-keys.js";
+import { HEALTH_DATA_LOCK_TIMEOUT_MS, lockMembers } from "./locks.js";
 import { MigrationError, migrate } from "./migrate.js";
 import { MIGRATIONS } from "./migrations/index.js";
 import { insertSafetyLog, readSafetyLog } from "./safety-log.js";
@@ -872,6 +880,7 @@ for (const target of DATABASE_TARGETS) {
             key.dataKey,
             JSON.stringify({ v: 1, type: "halal", override: true }),
             context,
+            HARD_RULE_PADDED_BYTES,
           ),
         ]);
         const error = await expectRejects(
@@ -1532,6 +1541,7 @@ for (const target of DATABASE_TARGETS) {
           key.dataKey,
           leaked,
           `hard_rule:${rule.id}:${home.managerProfileId}:${home.householdId}`,
+          HARD_RULE_PADDED_BYTES,
         ),
       ]);
       const ruleError = await expectRejects(
@@ -1554,7 +1564,7 @@ for (const target of DATABASE_TARGETS) {
         [
           logId,
           key.keyId,
-          encryptField(key.dataKey, leaked, `safety_log_member:${logId}:0:${key.keyId}`),
+          encryptField(key.dataKey, leaked, `safety_log_member:${logId}:0:${key.keyId}`, 1024),
         ],
       );
       const logError = await expectRejects(
@@ -1562,6 +1572,335 @@ for (const target of DATABASE_TARGETS) {
         InvalidDataError,
       );
       expect(inspect(logError, { depth: 5 })).not.toContain("shrimp-secret");
+    });
+
+    describe("N1 ciphertext lengths reveal nothing", () => {
+      const lengthsOf = async (sql: string, params: readonly unknown[]) =>
+        (await db.query<{ n: number }>(sql, params)).rows.map((row) => Number(row.n));
+
+      it("N1 every rule type and allergen encrypts to one length (probe R3)", async () => {
+        const home = await seedHousehold(db);
+        await giveConsent(home, home.managerProfileId);
+        const add = (rule: Parameters<typeof insertHardRule>[2]["rule"]) =>
+          insertHardRule(db, keys, {
+            householdId: home.householdId,
+            profileId: home.managerProfileId,
+            rule,
+            mappingConfirmedBy: "manager",
+          });
+        for (const allergen of [
+          "peanut",
+          "tree_nut",
+          "shellfish",
+          "shrimp",
+          "fish",
+          "egg",
+          "milk",
+          "soy",
+          "wheat",
+          "gluten",
+          "sesame",
+        ] as const) {
+          await add({ type: "allergy", allergen });
+        }
+        await add({ type: "halal" });
+        await add({ type: "vegetarian" });
+        await add({ type: "vegan" });
+        await add({ type: "free_text", freeText: "x" });
+        await add({ type: "free_text", freeText: "\u0001".repeat(200) });
+        await add({
+          type: "medical_exclusion",
+          freeText: "y".repeat(200),
+          mappedIngredientIds: Array.from({ length: 20 }, (_, i) =>
+            `fixture_${String(i).padStart(2, "0")}`.padEnd(100, "x"),
+          ),
+        });
+        const lengths = await lengthsOf(
+          `SELECT octet_length(details_enc) AS n FROM hard_rule WHERE profile_id = $1`,
+          [home.managerProfileId],
+        );
+        expect(lengths).toHaveLength(17);
+        expect([...new Set(lengths)]).toEqual([CIPHERTEXT_OVERHEAD_BYTES + HARD_RULE_PADDED_BYTES]);
+        const listed = await listProfileRules(db, keys, home.householdId, home.managerProfileId);
+        expect(listed.items).toHaveLength(17);
+      });
+
+      it("N1 the database refuses a hard rule whose ciphertext is not the fixed length", async () => {
+        const home = await seedHousehold(db);
+        await giveConsent(home, home.managerProfileId);
+        const rule = await insertHardRule(db, keys, {
+          householdId: home.householdId,
+          profileId: home.managerProfileId,
+          rule: { type: "halal" },
+          mappingConfirmedBy: null,
+        });
+        expect(
+          await dbErrorCode(
+            db.query(`UPDATE hard_rule SET details_enc = $2 WHERE id = $1`, [
+              rule.id,
+              randomBytes(100),
+            ]),
+          ),
+        ).toBe("23514");
+      });
+
+      it("N1 members of one log share one details length, whatever their status (probe R4)", async () => {
+        const home = await seedHousehold(db);
+        const a = await addProfile(db, home, "adult");
+        const b = await addProfile(db, home, "adult");
+        for (const [profile, allergen] of [
+          [a, "shrimp"],
+          [b, "sesame"],
+        ] as const) {
+          await giveConsent(home, profile);
+          await insertHardRule(db, keys, {
+            householdId: home.householdId,
+            profileId: profile,
+            rule: { type: "allergy", allergen },
+            mappingConfirmedBy: null,
+          });
+        }
+        const members = await loadRulesForEvaluation(db, keys, home.householdId, [a, b]);
+        const { result, logRecord } = evaluateWithLog(
+          {
+            ingredients: [{ ingredientId: "fixture_paste", rawName: "terasi fiksi" }],
+            recordedBrands: [],
+            members: members.map((member) => ({
+              memberId: member.profileId,
+              hardRules: member.hardRules ?? [],
+            })),
+            reference: {
+              schema: "keluargamakan.reference.ingredients/1",
+              version: "fixture-ref-1",
+              ingredients: [fixtureIngredient("fixture_paste", ["shrimp"])],
+            },
+          },
+          {
+            householdId: home.householdId,
+            subject: { kind: "suggestion", id: "fixture_recipe", version: null },
+            evaluatedAt: new Date().toISOString(),
+          },
+        );
+        expect(result.perMember.map((member) => member.status)).toEqual(["not_safe", "safe"]);
+        const logId = await insertSafetyLog(db, keys, logRecord);
+        const lengths = await lengthsOf(
+          `SELECT octet_length(details_enc) AS n FROM safety_log_member WHERE log_id = $1 ORDER BY member_index`,
+          [logId],
+        );
+        expect(lengths).toHaveLength(2);
+        expect(lengths[0]).toBe(lengths[1]);
+        expect(lengths[0]).toBe(CIPHERTEXT_OVERHEAD_BYTES + MIN_BUCKET_BYTES);
+        const log = await readSafetyLog(db, keys, home.householdId, logId);
+        expect(log.members.map((member) => member.details?.status)).toEqual(["not_safe", "safe"]);
+      });
+
+      it("N1 the database refuses log details of a different length in the same log", async () => {
+        const home = await seedHousehold(db);
+        const a = await addProfile(db, home, "adult");
+        const b = await addProfile(db, home, "adult");
+        const keysById = new Map<string, Awaited<ReturnType<HealthDataKeys["getOrCreate"]>>>();
+        for (const profile of [a, b]) {
+          await giveConsent(home, profile);
+          keysById.set(profile, await keys.getOrCreate(db, home.householdId, profile));
+        }
+        const { rows } = await db.query<{ id: string }>(
+          `INSERT INTO safety_log (household_id, log_format, subject_kind, subject_id, evaluated_at,
+                                   rule_set_version, reference_version)
+           VALUES ($1, 'keluargamakan.safety-log/1', 'suggestion', 'fixture_recipe', now(), 'r1', 'd1')
+           RETURNING id`,
+          [home.householdId],
+        );
+        const logId = rows[0]?.id ?? "";
+        const insertMember = (index: number, profile: string, bucket: number) => {
+          const key = keysById.get(profile);
+          if (key === undefined) throw new Error("no key");
+          return db.query(
+            `INSERT INTO safety_log_member (log_id, member_index, member_key_id, details_enc)
+             VALUES ($1, $2, $3, $4)`,
+            [
+              logId,
+              index,
+              key.keyId,
+              encryptField(
+                key.dataKey,
+                "{}",
+                `safety_log_member:${logId}:${index}:${key.keyId}`,
+                bucket,
+              ),
+            ],
+          );
+        };
+        await insertMember(0, a, 1024);
+        expect(await dbErrorCode(insertMember(1, b, 2048))).toBe("KM004");
+        // Not a power-of-two bucket: refused by the CHECK (first member of a fresh log).
+        await db.query(`DELETE FROM safety_log WHERE id = $1`, [logId]);
+        expect(await dbErrorCode(insertMember(0, b, 1000))).toBe("23514");
+      });
+    });
+
+    describe("N2 no key service call while a member lock is held", () => {
+      it("N2 rule writes, mapping confirmation and the safety log call the key service before locking", async () => {
+        let locked = false;
+        const spy = (inner: SqlExecutor): SqlExecutor => {
+          const self: SqlExecutor = {
+            query<R extends object>(text: string, params?: readonly unknown[]) {
+              if (/FOR (NO KEY )?UPDATE/.test(text)) locked = true;
+              return inner.query<R>(text, params);
+            },
+            execScript: (sql) => inner.execScript(sql),
+            transaction: <T>(fn: (tx: SqlExecutor) => Promise<T>) =>
+              inner.transaction(async (tx) => {
+                try {
+                  return await fn(spy(tx));
+                } finally {
+                  locked = false;
+                }
+              }),
+          };
+          return self;
+        };
+        const calls: string[] = [];
+        const health = provider.kek("health");
+        const watched: KeyEncryptionKey = {
+          purpose: "health",
+          keyRef: health.keyRef,
+          wrap: (dek, ctx) => {
+            calls.push(locked ? "wrap under lock" : "wrap");
+            return health.wrap(dek, ctx);
+          },
+          unwrap: (wrapped, ctx) => {
+            calls.push(locked ? "unwrap under lock" : "unwrap");
+            return health.unwrap(wrapped, ctx);
+          },
+        };
+        const spyDb = spy(db);
+        const spyKeys = new HealthDataKeys(withHealthKek(watched));
+        const home = await seedHousehold(db);
+        await giveConsent(home, home.managerProfileId);
+        await insertHardRule(spyDb, spyKeys, {
+          householdId: home.householdId,
+          profileId: home.managerProfileId,
+          rule: { type: "free_text", freeText: "fiksi" },
+          mappingConfirmedBy: null,
+        });
+        const second = await insertHardRule(spyDb, spyKeys, {
+          householdId: home.householdId,
+          profileId: home.managerProfileId,
+          rule: { type: "free_text", freeText: "fiksi lain" },
+          mappingConfirmedBy: null,
+        });
+        await confirmRuleMapping(spyDb, spyKeys, {
+          householdId: home.householdId,
+          profileId: home.managerProfileId,
+          ruleId: second.id,
+          ingredientIds: ["fixture_a"],
+          confirmedBy: "manager",
+        });
+        const members = await loadRulesForEvaluation(spyDb, spyKeys, home.householdId, [
+          home.managerProfileId,
+        ]);
+        const { logRecord } = evaluateWithLog(
+          {
+            ingredients: [{ ingredientId: "fixture_a", rawName: "fiksi" }],
+            recordedBrands: [],
+            members: [{ memberId: home.managerProfileId, hardRules: members[0]?.hardRules ?? [] }],
+            reference: {
+              schema: "keluargamakan.reference.ingredients/1",
+              version: "fixture-ref-1",
+              ingredients: [fixtureIngredient("fixture_a", [])],
+            },
+          },
+          {
+            householdId: home.householdId,
+            subject: { kind: "suggestion", id: "fixture_recipe", version: null },
+            evaluatedAt: new Date().toISOString(),
+          },
+        );
+        const logId = await insertSafetyLog(spyDb, spyKeys, logRecord);
+        expect(
+          (await readSafetyLog(db, keys, home.householdId, logId)).members[0]?.details,
+        ).not.toBeNull();
+        expect(calls.length).toBeGreaterThanOrEqual(5);
+        expect(calls.filter((call) => call.includes("under lock"))).toEqual([]);
+      });
+
+      it("N2 member locks wait at most the configured lock timeout", async () => {
+        const home = await seedHousehold(db);
+        const timeout = await db.transaction(async (tx) => {
+          await lockMembers(tx, home.householdId, [home.managerProfileId]);
+          return (await tx.query<{ lock_timeout: string }>(`SHOW lock_timeout`)).rows[0]
+            ?.lock_timeout;
+        });
+        expect(timeout).toBe(`${HEALTH_DATA_LOCK_TIMEOUT_MS / 1000}s`);
+        // SET LOCAL: the session default is back after the transaction.
+        expect(
+          (await db.query<{ lock_timeout: string }>(`SHOW lock_timeout`)).rows[0]?.lock_timeout,
+        ).toBe("0");
+      });
+
+      it("N2 a key that changed between prepare and claim is a retryable conflict, never a silent write", async () => {
+        const home = await seedHousehold(db);
+        const profile = await addProfile(db, home, "adult");
+        await giveConsent(home, profile);
+        const stale = await keys.prepare(db, home.householdId, profile);
+        expect(stale.kind).toBe("new");
+        await keys.getOrCreate(db, home.householdId, profile); // another writer created the key
+        await expectRejects(
+          db.transaction(async (tx) => {
+            await lockMembers(tx, home.householdId, [profile]);
+            return keys.claim(tx, home.householdId, profile, stale);
+          }),
+          ConcurrentUpdateError,
+        );
+        const existing = await keys.prepare(db, home.householdId, profile);
+        expect(existing.kind).toBe("existing");
+        await withdrawHealthConsent(db, {
+          householdId: home.householdId,
+          profileId: profile,
+          withdrawnAt: new Date(Date.now() + 60_000),
+          deletionWindowDays: 30,
+        });
+        await giveConsent(home, profile);
+        await keys.getOrCreate(db, home.householdId, profile); // a new key after re-consent
+        await expectRejects(
+          db.transaction(async (tx) => {
+            await lockMembers(tx, home.householdId, [profile]);
+            return keys.claim(tx, home.householdId, profile, existing);
+          }),
+          ConcurrentUpdateError,
+        );
+      });
+
+      it("N2 N4 lock timeouts, deadlocks and serialization failures are retryable errors", () => {
+        for (const code of ["55P03", "40P01", "40001"]) {
+          const error = translateDbError(
+            Object.assign(new Error("deadlock detected, Key (phone)=(+62...)"), { code }),
+          );
+          expect(error, code).toBeInstanceOf(ConcurrentUpdateError);
+          expect((error as ConcurrentUpdateError).retryable).toBe(true);
+          expect(inspect(error)).not.toContain("+62");
+        }
+      });
+    });
+
+    it("N4 household deletion locks every member in ID order before the cascade", async () => {
+      const home = await seedHousehold(db);
+      await addProfile(db, home, "adult");
+      await addProfile(db, home, "elderly");
+      const statements: string[] = [];
+      const recording = (inner: SqlExecutor): SqlExecutor => ({
+        query<R extends object>(text: string, params?: readonly unknown[]) {
+          statements.push(text.replace(/\s+/g, " ").trim());
+          return inner.query<R>(text, params);
+        },
+        execScript: (sql) => inner.execScript(sql),
+        transaction: (fn) => inner.transaction((tx) => fn(recording(tx))),
+      });
+      expect(await deleteHousehold(recording(db), home.householdId)).toBe(true);
+      const lockAt = statements.findIndex((text) => /ORDER BY id FOR UPDATE/.test(text));
+      const deleteAt = statements.findIndex((text) => text.startsWith("DELETE FROM household"));
+      expect(lockAt).toBeGreaterThanOrEqual(0);
+      expect(lockAt).toBeLessThan(deleteAt);
     });
 
     it("L2 database errors reach logs without contact details, values or the driver error", async () => {

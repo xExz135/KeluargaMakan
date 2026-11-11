@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  FREE_TEXT_MAX,
+  HARD_RULE_BODY_MAX_BYTES,
+  HARD_RULE_PADDED_BYTES,
+  MAPPED_INGREDIENTS_MAX,
   RuleBodyError,
   decodeRuleBody,
   encodeRuleBody,
@@ -185,5 +189,38 @@ describe("PRF-08 SAF-09 conversion to the Cek Aman rule shape", () => {
       mapping: { status: "mapped", ingredientIds: ["a"], confirmedBy: null, updatedAt: at },
     });
     expect(forged).toMatchObject({ mapping: { status: "unmapped" } });
+  });
+});
+
+describe("N1 every valid rule body fits the fixed padded size", () => {
+  it("N1 the largest valid body fits HARD_RULE_PADDED_BYTES with room to spare", () => {
+    // Worst case: 200 characters that JSON escapes to 6 bytes each, 20 mapped
+    // IDs of the maximum 100 characters, the longest type, status and confirmer.
+    const worst: HardRuleBody = {
+      v: 1,
+      type: "medical_exclusion",
+      allergen: null,
+      freeText: "\u0001".repeat(FREE_TEXT_MAX),
+      mapping: {
+        status: "mapped",
+        ingredientIds: Array.from({ length: MAPPED_INGREDIENTS_MAX }, (_, i) =>
+          `a${String(i).padStart(2, "0")}`.padEnd(100, "z"),
+        ),
+        confirmedBy: "content_team",
+        updatedAt: "2026-11-11T00:00:00.000Z",
+      },
+    };
+    const json = encodeRuleBody(worst);
+    const bytes = Buffer.byteLength(json, "utf8");
+    expect(bytes).toBeGreaterThan(3_000);
+    expect(bytes).toBeLessThanOrEqual(HARD_RULE_BODY_MAX_BYTES);
+    expect(HARD_RULE_BODY_MAX_BYTES).toBe(HARD_RULE_PADDED_BYTES - 4);
+    // Astral characters (4 UTF-8 bytes per 2 UTF-16 units) and lone surrogates
+    // (escaped to 6 bytes) are not worse than control characters.
+    for (const freeText of ["😀".repeat(100), "\ud800".repeat(FREE_TEXT_MAX)]) {
+      expect(Buffer.byteLength(encodeRuleBody({ ...worst, freeText }), "utf8")).toBeLessThanOrEqual(
+        bytes,
+      );
+    }
   });
 });

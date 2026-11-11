@@ -9,7 +9,7 @@ import {
   type SafetyStatus,
 } from "@keluargamakan/cek-aman";
 
-import { decryptField, encryptField } from "./crypto/data-key-cipher.js";
+import { bucketFor, decryptField, encryptField } from "./crypto/data-key-cipher.js";
 import { InvalidDataError, NotFoundError, withDbErrors } from "./errors.js";
 import type { SqlExecutor } from "./executor.js";
 import type { HealthDataKeys } from "./health-data-keys.js";
@@ -160,9 +160,6 @@ interface MemberStateRow {
   profile_id: string;
   consent_active: boolean;
   k_id: string | null;
-  k_household_id: string | null;
-  k_key_ref: string | null;
-  k_wrapped_key: Uint8Array | null;
   rule_ids: string[];
 }
 
@@ -177,6 +174,36 @@ export async function insertSafetyLog(
 ): Promise<string> {
   validate(record);
   const memberIds = record.members.map((member) => member.memberId);
+
+  // N2: unwrap the members' existing keys before any lock or transaction, so a
+  // slow key service never holds a member lock. Under the lock below, a key
+  // is used only if it is still the member's current key.
+  const preloaded = await keys.loadForProfiles(db, record.householdId, memberIds);
+
+  const ingredientIds = record.ingredients.map((item) => item.ingredientId);
+  const recordedBrands = record.recordedBrands.map((brand) => ({
+    ingredientId: brand.ingredientId,
+    brandId: brand.brandId,
+  }));
+  const detailsJson = record.members.map((member) =>
+    JSON.stringify({
+      v: DETAILS_VERSION,
+      status: member.status,
+      reasonCodes: [...new Set(member.reasons.map((reason) => reason.code))],
+      ingredientIds,
+      recordedBrands,
+      rules: member.rules.map(stripRule),
+      reasons: member.reasons.map(stripReason),
+    } satisfies SafetyLogMemberDetails & { v: number }),
+  );
+  // N1: every member of this log is padded to the same power-of-two bucket.
+  let bucket: number;
+  try {
+    bucket = bucketFor(detailsJson);
+  } catch {
+    throw new InvalidDataError("safety log details are too large");
+  }
+
   return withDbErrors(() =>
     db.transaction(async (tx) => {
       // H4: decide on details under the member lock, from the current state.
@@ -186,8 +213,7 @@ export async function insertSafetyLog(
         const { rows } = await tx.query<MemberStateRow>(
           `SELECT p.id AS profile_id,
                   health_consent_active(p.id) AS consent_active,
-                  k.id AS k_id, k.household_id AS k_household_id,
-                  k.key_ref AS k_key_ref, k.wrapped_key AS k_wrapped_key,
+                  k.id AS k_id,
                   COALESCE(
                     (SELECT array_agg(h.id::text) FROM hard_rule h WHERE h.profile_id = p.id),
                     '{}'::text[]
@@ -220,23 +246,20 @@ export async function insertSafetyLog(
       const logId = rows[0]?.id;
       if (logId === undefined) throw new Error("safety log insert returned no row");
 
-      const ingredientIds = record.ingredients.map((item) => item.ingredientId);
-      const recordedBrands = record.recordedBrands.map((brand) => ({
-        ingredientId: brand.ingredientId,
-        brandId: brand.brandId,
-      }));
-
       for (const [index, member] of record.members.entries()) {
         const state = states.get(member.memberId);
         if (state === undefined) throw new NotFoundError("profile");
         const current = new Set(state.rule_ids);
         const rulesStillStored = member.rules.every((rule) => current.has(rule.ruleId));
+        const key = preloaded.get(member.memberId);
+        const json = detailsJson[index];
         if (
           !state.consent_active ||
           state.k_id === null ||
-          state.k_key_ref === null ||
-          state.k_wrapped_key === null ||
-          !rulesStillStored
+          key === undefined ||
+          key.keyId !== state.k_id ||
+          !rulesStillStored ||
+          json === undefined
         ) {
           await tx.query(
             `INSERT INTO safety_log_member (log_id, member_index, member_key_id, details_enc, redacted_at)
@@ -245,22 +268,6 @@ export async function insertSafetyLog(
           );
           continue;
         }
-        const key = await keys.unwrap({
-          id: state.k_id,
-          profile_id: member.memberId,
-          household_id: state.k_household_id ?? record.householdId,
-          key_ref: state.k_key_ref,
-          wrapped_key: state.k_wrapped_key,
-        });
-        const details: SafetyLogMemberDetails & { v: number } = {
-          v: DETAILS_VERSION,
-          status: member.status,
-          reasonCodes: [...new Set(member.reasons.map((reason) => reason.code))],
-          ingredientIds,
-          recordedBrands,
-          rules: member.rules.map(stripRule),
-          reasons: member.reasons.map(stripReason),
-        };
         await tx.query(
           `INSERT INTO safety_log_member (log_id, member_index, member_key_id, details_enc)
            VALUES ($1, $2, $3, $4)`,
@@ -268,11 +275,7 @@ export async function insertSafetyLog(
             logId,
             index,
             key.keyId,
-            encryptField(
-              key.dataKey,
-              JSON.stringify(details),
-              memberContext(logId, index, key.keyId),
-            ),
+            encryptField(key.dataKey, json, memberContext(logId, index, key.keyId), bucket),
           ],
         );
       }
@@ -344,19 +347,23 @@ export async function readSafetyLog(
   logId: string,
 ): Promise<StoredSafetyLog> {
   if (!isUuid(householdId) || !isUuid(logId)) throw new NotFoundError("safety log");
-  const { rows } = await db.query<LogRow>(
-    `SELECT id, household_id, log_format, subject_kind, subject_id, subject_version, evaluated_at,
-            rule_set_version, reference_version
-       FROM safety_log WHERE id = $1 AND household_id = $2`,
-    [logId, householdId],
+  const { rows } = await withDbErrors(() =>
+    db.query<LogRow>(
+      `SELECT id, household_id, log_format, subject_kind, subject_id, subject_version, evaluated_at,
+              rule_set_version, reference_version
+         FROM safety_log WHERE id = $1 AND household_id = $2`,
+      [logId, householdId],
+    ),
   );
   const log = rows[0];
   if (log === undefined) throw new NotFoundError("safety log");
   const members = (
-    await db.query<MemberRow>(
-      `SELECT member_index, member_key_id, details_enc
-         FROM safety_log_member WHERE log_id = $1 ORDER BY member_index`,
-      [logId],
+    await withDbErrors(() =>
+      db.query<MemberRow>(
+        `SELECT member_index, member_key_id, details_enc
+           FROM safety_log_member WHERE log_id = $1 ORDER BY member_index`,
+        [logId],
+      ),
     )
   ).rows;
   const keyMap = await keys.loadByKeyIds(

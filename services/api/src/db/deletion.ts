@@ -1,6 +1,7 @@
 import { withDbErrors } from "./errors.js";
 import type { SqlExecutor } from "./executor.js";
 import { isUuid } from "./ids.js";
+import { lockProfilesForDeletion } from "./locks.js";
 
 /**
  * Data-layer pieces of SET-04, SET-07, SET-08, DAT-04 (via QUESTIONS #19) and
@@ -38,6 +39,8 @@ export async function deleteProfile(
   if (!isUuid(householdId) || !isUuid(profileId)) return false;
   return withDbErrors(() =>
     db.transaction(async (tx) => {
+      // N4: take the member lock first, in the writers' order.
+      if ((await lockProfilesForDeletion(tx, householdId, profileId)) === 0) return false;
       const { rowCount } = await tx.query(
         `DELETE FROM profile WHERE id = $1 AND household_id = $2`,
         [profileId, householdId],
@@ -54,6 +57,10 @@ export async function deleteHousehold(db: SqlExecutor, householdId: string): Pro
   if (!isUuid(householdId)) return false;
   return withDbErrors(() =>
     db.transaction(async (tx) => {
+      // N4: lock every member in ID order before the cascade, so this cannot
+      // deadlock against a safety log write that holds several member locks.
+      // A deadlock or lock timeout surfaces as the retryable ConcurrentUpdateError.
+      await lockProfilesForDeletion(tx, householdId, null);
       const { rowCount } = await tx.query(`DELETE FROM household WHERE id = $1`, [householdId]);
       await tx.query(`SET CONSTRAINTS ALL IMMEDIATE`);
       return rowCount === 1;
@@ -69,8 +76,9 @@ export async function deleteHousehold(db: SqlExecutor, householdId: string): Pro
  * wrong and must be reported.
  */
 export async function enforceHealthConsent(db: SqlExecutor): Promise<number> {
-  const { rowCount } = await db.query(
-    `DELETE FROM health_data_key k
+  const { rowCount } = await withDbErrors(() =>
+    db.query(
+      `DELETE FROM health_data_key k
       USING (
         SELECT DISTINCT ON (profile_id) profile_id, decision, withdrawn_at
           FROM consent_record
@@ -79,6 +87,7 @@ export async function enforceHealthConsent(db: SqlExecutor): Promise<number> {
       ) latest
       WHERE latest.profile_id = k.profile_id
         AND (latest.decision = 'declined' OR latest.withdrawn_at IS NOT NULL)`,
+    ),
   );
   return rowCount;
 }
@@ -101,9 +110,10 @@ export async function purgeExpiredSafetyLogs(
   now: Date,
   retentionYears: number,
 ): Promise<number> {
-  const { rowCount } = await db.query(`DELETE FROM safety_log WHERE evaluated_at < $1`, [
-    yearsBefore(now, retentionYears),
-  ]);
+  const cutoff = yearsBefore(now, retentionYears);
+  const { rowCount } = await withDbErrors(() =>
+    db.query(`DELETE FROM safety_log WHERE evaluated_at < $1`, [cutoff]),
+  );
   return rowCount;
 }
 
@@ -117,6 +127,8 @@ export async function purgeExpiredMeals(
   retentionYears: number,
 ): Promise<number> {
   const cutoff = yearsBefore(now, retentionYears).toISOString().slice(0, 10);
-  const { rowCount } = await db.query(`DELETE FROM meal WHERE eaten_on < $1::date`, [cutoff]);
+  const { rowCount } = await withDbErrors(() =>
+    db.query(`DELETE FROM meal WHERE eaten_on < $1::date`, [cutoff]),
+  );
   return rowCount;
 }

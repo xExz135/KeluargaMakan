@@ -16,6 +16,7 @@ import {
 import { decryptField, encryptField } from "./crypto/data-key-cipher.js";
 import { DecryptionError, KeyServiceError } from "./crypto/key-provider.js";
 import {
+  ConcurrentUpdateError,
   ConsentRequiredError,
   InvalidDataError,
   MappingNotApplicableError,
@@ -25,6 +26,7 @@ import {
 } from "./errors.js";
 import type { SqlExecutor } from "./executor.js";
 import {
+  HARD_RULE_PADDED_BYTES,
   RuleBodyError,
   decodeRuleBody,
   encodeRuleBody,
@@ -198,12 +200,18 @@ interface DecryptedMember {
   readonly rules: readonly HardRuleRecord[];
 }
 
-/** Reads and decrypts every rule of the given members from one snapshot, or throws. */
+/**
+ * Reads and decrypts every rule of the given members from one snapshot, or
+ * throws. With `known`, keys are taken only from that map (unwrapped before a
+ * lock was taken, N2): a member whose stored key differs throws the retryable
+ * `ConcurrentUpdateError` instead of calling the key service under the lock.
+ */
 async function readMembers(
   db: SqlExecutor,
   keys: HealthDataKeys,
   householdId: string,
   profileIds: readonly string[],
+  known?: ReadonlyMap<string, MemberDataKey>,
 ): Promise<Map<string, DecryptedMember>> {
   const ids = [...new Set(profileIds)];
   if (!isUuid(householdId) || ids.length === 0 || !ids.every(isUuid)) {
@@ -229,16 +237,24 @@ async function readMembers(
       if (row.k_id === null || row.k_key_ref === null || row.k_wrapped_key === null) {
         throw new RulesUnavailableError("inconsistent");
       }
-      try {
-        key = await keys.unwrap({
-          id: row.k_id,
-          profile_id: profileId,
-          household_id: row.k_household_id ?? householdId,
-          key_ref: row.k_key_ref,
-          wrapped_key: row.k_wrapped_key,
-        });
-      } catch (error) {
-        throw toUnavailable(error);
+      if (known !== undefined) {
+        const preloaded = known.get(profileId);
+        if (preloaded === undefined || preloaded.keyId !== row.k_id) {
+          throw new ConcurrentUpdateError();
+        }
+        key = preloaded;
+      } else {
+        try {
+          key = await keys.unwrap({
+            id: row.k_id,
+            profile_id: profileId,
+            household_id: row.k_household_id ?? householdId,
+            key_ref: row.k_key_ref,
+            wrapped_key: row.k_wrapped_key,
+          });
+        } catch (error) {
+          throw toUnavailable(error);
+        }
       }
     }
     const memberKey = key;
@@ -420,38 +436,43 @@ export async function insertHardRule(
   const now = input.now ?? new Date();
   const body = buildBody(input.rule, input.mappingConfirmedBy, now);
   const json = encode(body);
-  return withDbErrors(() =>
-    db.transaction(async (tx) => {
-      await lockMembers(tx, input.householdId, [input.profileId]);
-      const consentRecordId = await activeConsentId(tx, input.householdId, input.profileId);
-      const key = await keys.getOrCreate(tx, input.householdId, input.profileId);
-      const id = randomUUID();
-      const details = encryptField(
-        key.dataKey,
-        json,
-        ruleContext(id, input.profileId, input.householdId),
-      );
-      const { rows } = await tx.query<{ created_at: Date; updated_at: Date }>(
-        `INSERT INTO hard_rule
+  return withKeyRetry(async () => {
+    // N2: key service work first, outside the transaction and the lock.
+    const prepared = await keys.prepare(db, input.householdId, input.profileId);
+    return withDbErrors(() =>
+      db.transaction(async (tx) => {
+        await lockMembers(tx, input.householdId, [input.profileId]);
+        const consentRecordId = await activeConsentId(tx, input.householdId, input.profileId);
+        const key = await keys.claim(tx, input.householdId, input.profileId, prepared);
+        const id = randomUUID();
+        const details = encryptField(
+          key.dataKey,
+          json,
+          ruleContext(id, input.profileId, input.householdId),
+          HARD_RULE_PADDED_BYTES,
+        );
+        const { rows } = await tx.query<{ created_at: Date; updated_at: Date }>(
+          `INSERT INTO hard_rule
            (id, household_id, profile_id, health_key_id, consent_record_id, details_enc, created_at, updated_at)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $7)
          RETURNING created_at, updated_at`,
-        [id, input.householdId, input.profileId, key.keyId, consentRecordId, details, now],
-      );
-      const row = rows[0];
-      if (row === undefined) throw new Error("hard rule insert returned no row");
-      return {
-        id,
-        profileId: input.profileId,
-        type: body.type,
-        allergen: body.allergen,
-        freeText: body.freeText,
-        mapping: body.mapping,
-        createdAt: row.created_at,
-        updatedAt: row.updated_at,
-      };
-    }),
-  );
+          [id, input.householdId, input.profileId, key.keyId, consentRecordId, details, now],
+        );
+        const row = rows[0];
+        if (row === undefined) throw new Error("hard rule insert returned no row");
+        return {
+          id,
+          profileId: input.profileId,
+          type: body.type,
+          allergen: body.allergen,
+          freeText: body.freeText,
+          mapping: body.mapping,
+          createdAt: row.created_at,
+          updatedAt: row.updated_at,
+        };
+      }),
+    );
+  });
 }
 
 /**
@@ -471,46 +492,69 @@ export async function confirmRuleMapping(
   },
 ): Promise<HardRuleRecord> {
   const now = input.now ?? new Date();
-  return withDbErrors(() =>
-    db.transaction(async (tx) => {
-      await lockMembers(tx, input.householdId, [input.profileId]);
-      const current = (await listProfileRules(tx, keys, input.householdId, input.profileId)).items;
-      const rule = current.find((item) => item.id === input.ruleId);
-      if (rule === undefined) throw new NotFoundError("hard rule");
-      if (rule.type !== "free_text" && rule.type !== "medical_exclusion") {
-        throw new MappingNotApplicableError();
-      }
-      const body: HardRuleBody = {
-        v: 1,
-        type: rule.type,
-        allergen: null,
-        freeText: rule.freeText,
-        mapping: {
-          status: "mapped",
-          ingredientIds: [...input.ingredientIds],
-          confirmedBy: input.confirmedBy,
-          updatedAt: now.toISOString(),
-        },
-      };
-      const json = encode(body);
-      const consentRecordId = await activeConsentId(tx, input.householdId, input.profileId);
-      const key = await keys.getOrCreate(tx, input.householdId, input.profileId);
-      const details = encryptField(
-        key.dataKey,
-        json,
-        ruleContext(rule.id, input.profileId, input.householdId),
-      );
-      const { rows } = await tx.query<{ updated_at: Date }>(
-        `UPDATE hard_rule
+  return withKeyRetry(async () => {
+    // N2: unwrap the member's key before the transaction and the lock.
+    const prepared = await keys.prepare(db, input.householdId, input.profileId);
+    const known = new Map([[input.profileId, prepared.key]]);
+    return withDbErrors(() =>
+      db.transaction(async (tx) => {
+        await lockMembers(tx, input.householdId, [input.profileId]);
+        const member = (
+          await readMembers(tx, keys, input.householdId, [input.profileId], known)
+        ).get(input.profileId);
+        const current = member?.rules ?? [];
+        const rule = current.find((item) => item.id === input.ruleId);
+        if (rule === undefined) throw new NotFoundError("hard rule");
+        if (rule.type !== "free_text" && rule.type !== "medical_exclusion") {
+          throw new MappingNotApplicableError();
+        }
+        const body: HardRuleBody = {
+          v: 1,
+          type: rule.type,
+          allergen: null,
+          freeText: rule.freeText,
+          mapping: {
+            status: "mapped",
+            ingredientIds: [...input.ingredientIds],
+            confirmedBy: input.confirmedBy,
+            updatedAt: now.toISOString(),
+          },
+        };
+        const json = encode(body);
+        const consentRecordId = await activeConsentId(tx, input.householdId, input.profileId);
+        const key = await keys.claim(tx, input.householdId, input.profileId, prepared);
+        const details = encryptField(
+          key.dataKey,
+          json,
+          ruleContext(rule.id, input.profileId, input.householdId),
+          HARD_RULE_PADDED_BYTES,
+        );
+        const { rows } = await tx.query<{ updated_at: Date }>(
+          `UPDATE hard_rule
             SET details_enc = $4, consent_record_id = $5, health_key_id = $6, updated_at = $7
           WHERE id = $1 AND profile_id = $2 AND household_id = $3
           RETURNING updated_at`,
-        [rule.id, input.profileId, input.householdId, details, consentRecordId, key.keyId, now],
-      );
-      if (rows[0] === undefined) throw new NotFoundError("hard rule");
-      return { ...rule, mapping: body.mapping, updatedAt: rows[0].updated_at };
-    }),
-  );
+          [rule.id, input.profileId, input.householdId, details, consentRecordId, key.keyId, now],
+        );
+        if (rows[0] === undefined) throw new NotFoundError("hard rule");
+        return { ...rule, mapping: body.mapping, updatedAt: rows[0].updated_at };
+      }),
+    );
+  });
+}
+
+/**
+ * Runs a prepare-then-claim write, once more if the member's key changed
+ * between the two (N2). A second conflict is returned to the caller as the
+ * retryable `ConcurrentUpdateError`.
+ */
+async function withKeyRetry<T>(run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } catch (error) {
+    if (!(error instanceof ConcurrentUpdateError)) throw error;
+    return run();
+  }
 }
 
 export async function deleteHardRule(
@@ -520,9 +564,12 @@ export async function deleteHardRule(
   ruleId: string,
 ): Promise<boolean> {
   if (!isUuid(householdId) || !isUuid(profileId) || !isUuid(ruleId)) return false;
-  const { rowCount } = await db.query(
-    `DELETE FROM hard_rule WHERE id = $1 AND profile_id = $2 AND household_id = $3`,
-    [ruleId, profileId, householdId],
+  const { rowCount } = await withDbErrors(() =>
+    db.query(`DELETE FROM hard_rule WHERE id = $1 AND profile_id = $2 AND household_id = $3`, [
+      ruleId,
+      profileId,
+      householdId,
+    ]),
   );
   return rowCount === 1;
 }
