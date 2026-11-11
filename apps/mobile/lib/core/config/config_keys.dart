@@ -96,6 +96,16 @@ abstract final class ConfigKeys {
     status: ConfigStatus.decided,
   );
 
+  /// How long an API request may wait for an answer before it counts as a
+  /// network failure.
+  static const apiRequestTimeoutMs = ConfigKey<int>(
+    'api.requestTimeoutMs',
+    20000,
+    requirementIds: ['NFR-05'],
+    status: ConfigStatus.decided,
+    min: 1000,
+  );
+
   static const List<ConfigKey<Object>> all = [
     minTouchTargetDp,
     cookMinTouchTargetDp,
@@ -107,6 +117,7 @@ abstract final class ConfigKeys {
     snackbarActionMs,
     defaultServings,
     planTabEnabled,
+    apiRequestTimeoutMs,
   ];
 }
 
