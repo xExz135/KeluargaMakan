@@ -15,11 +15,12 @@ android {
     }
 
     defaultConfig {
-        // Placeholder until the owner confirms the Play Store ID; it cannot change after release.
+        // Confirmed by the owner (DECISIONS 2026-11-11); permanent after the first
+        // Play Store release.
         applicationId = "id.keluargamakan.app"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        // Android 10 (API 29), QUESTIONS #11 safer default (NFR-17).
+        // Android 10 (API 29), owner decision 2026-11-11 (QUESTIONS #11, NFR-17).
         minSdk = 29
         targetSdk = flutter.targetSdkVersion
         // Uses the version code from pubspec.yaml. When using split APKs, 1000 * ABI_VERSION
