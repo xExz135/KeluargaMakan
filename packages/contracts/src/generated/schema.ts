@@ -12,7 +12,7 @@ export interface paths {
         put?: never;
         /**
          * Send a sign-in code to a phone number or email
-         * @description Sends a one-time verification code (ACC-01). The response is the same whether or not an account exists for the destination, so it cannot be used to discover accounts. Code length, expiry and the resend wait come from configuration. Requests are rate-limited per destination and per device; a limited request returns 429 with `Retry-After`.
+         * @description Sends a one-time verification code (ACC-01). The response is the same whether or not an account exists for the destination, so it cannot be used to discover accounts. Code length, expiry and the resend wait come from configuration. Requests are rate-limited per client address, per destination (hourly and daily), and while the destination has reached its limit of wrong codes; a limited request returns 429 with `Retry-After`.
          */
         post: operations["requestSignInCode"];
         delete?: never;
@@ -32,7 +32,7 @@ export interface paths {
         put?: never;
         /**
          * Verify a sign-in code and start a session
-         * @description Verifies the code for a challenge (ACC-01). On first sign-in a manager account is created with no household (`account.householdId` is null); the client then creates the household. On a later sign-in, including on a new device, the existing household is returned unchanged (ACC-13). Each code works once. Wrong codes count towards an attempt limit from configuration; verification is also rate-limited per device. A 503 leaves the code and its attempt count unchanged.
+         * @description Verifies the code for a challenge (ACC-01). On first sign-in a manager account is created with no household (`account.householdId` is null); the client then creates the household. On a later sign-in, including on a new device, the existing household is returned unchanged (ACC-13). Each code works once. Wrong codes count towards an attempt limit from configuration, and wrong codes across all of a destination's codes are capped per day (429 with `Retry-After`). Verification is also rate-limited per client address. A 503 leaves the code and its attempt count unchanged.
          */
         post: operations["verifySignInCode"];
         delete?: never;
