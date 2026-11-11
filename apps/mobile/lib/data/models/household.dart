@@ -36,6 +36,9 @@ final class HouseholdInfo {
 
   /// WIB, WITA or WIT; any other IANA name is WIB (PR #6 review F4).
   HouseholdTimeZone get timeZone => HouseholdTimeZone.fromIana(timeZoneName);
+
+  @override
+  String toString() => 'HouseholdInfo($id)';
 }
 
 /// The standard allergen list in display order (PRF-04). Codes this app

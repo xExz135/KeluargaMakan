@@ -85,8 +85,10 @@ final class Ok<T> extends ApiResult<T> {
 
   final T value;
 
+  /// Only the type: the value can hold tokens or hard rules, and the
+  /// generated models print every field (security review L2).
   @override
-  String toString() => 'Ok($value)';
+  String toString() => 'Ok<$T>';
 }
 
 final class Err<T> extends ApiResult<T> {

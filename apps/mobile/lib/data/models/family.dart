@@ -8,6 +8,7 @@
 //   the member gets the neutral chip, never "Aman" (contract-alignment.md 1).
 // - [RulesNotLoaded]: the profile came from the on-device cache, which holds
 //   no health data. Nothing about the member's rules is known.
+// toString never prints names or rule contents (security review L2).
 // None of these is a safety result. Only Cek Aman results from the API (or
 // their cache, T-058) decide what is safe.
 
@@ -61,6 +62,9 @@ final class RulesSaved extends MemberRules {
   final api.RulesConsentState consent;
 
   bool get hasNoRules => items.isEmpty;
+
+  @override
+  String toString() => 'RulesSaved(${items.length} rules)';
 }
 
 /// No rules are stored, because consent is not given.
@@ -82,6 +86,9 @@ final class RulesNotSaved extends MemberRules {
   RulesChip get chip => status == ConsentStatus.none
       ? RulesChip.rulesNotSet
       : RulesChip.rulesNotSaved;
+
+  @override
+  String toString() => 'RulesNotSaved(${status.name})';
 }
 
 /// Rules are not on the phone (cached profile). Treat as unknown.
@@ -132,6 +139,9 @@ final class FamilyMember {
 
   /// Null for a cached profile.
   final MemberDetails? details;
+
+  @override
+  String toString() => 'FamilyMember($id, $rules)';
 }
 
 @immutable
@@ -148,4 +158,7 @@ final class FamilyProfiles {
   /// The configured limit (PRF-02), or null when read from the cache.
   final int? maxProfiles;
   final DataSource source;
+
+  @override
+  String toString() => 'FamilyProfiles(${members.length} members)';
 }
