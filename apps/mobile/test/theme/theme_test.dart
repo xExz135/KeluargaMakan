@@ -187,8 +187,8 @@ void main() {
             expect(tester.takeException(), isNull, reason: tab);
           }
 
-          // Not clamped: tab labels and titles render at the full 200%.
-          expect(renderedScale(tester, tabs.first), 2.0);
+          // Not clamped: titles render at the full 200%. (Nav labels are the
+          // one exception: they shrink to fit, see nav_label_fit_test.dart.)
           expect(renderedScale(tester, 'Keluarga Saya'), 2.0);
 
           await tapNav(tester, tabs.first);
