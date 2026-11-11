@@ -1,0 +1,48 @@
+name: keluargamakan
+description: "KeluargaMakan Android app"
+publish_to: "none"
+
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.13.7
+  # Read by subosito/flutter-action (flutter-version-file) in CI.
+  flutter: 3.47.9
+
+# Versions are pinned exactly. As with pnpm's minimumReleaseAge in this repo,
+# do not pick a version published less than 3 days ago (NFR-10).
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  flutter_riverpod: 3.5.0
+  go_router: 18.1.3
+  intl: 0.20.3
+  shared_preferences: 2.5.6
+
+dev_dependencies:
+  flutter_lints: 6.0.0
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true
+  generate: true
+  assets:
+    - assets/fonts/OFL.txt
+  # Plus Jakarta Sans static TTFs (tokotype/PlusJakartaSans at commit
+  # 18d1cd2), SIL Open Font License 1.1. design-system.md 3.
+  fonts:
+    - family: PlusJakartaSans
+      fonts:
+        - asset: assets/fonts/PlusJakartaSans-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/PlusJakartaSans-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/PlusJakartaSans-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/PlusJakartaSans-Bold.ttf
+          weight: 700
+        - asset: assets/fonts/PlusJakartaSans-ExtraBold.ttf
+          weight: 800

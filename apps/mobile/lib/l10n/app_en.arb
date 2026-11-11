@@ -1,0 +1,23 @@
+{
+  "@@locale": "en",
+  "commonAppName": "KeluargaMakan",
+  "commonClose": "Close",
+  "navHome": "Home",
+  "navKitchen": "Dapur Saya",
+  "navRecipes": "Recipes",
+  "navPlan": "Plan",
+  "navFamily": "Keluarga",
+  "navSettings": "Settings",
+  "homeHeroTitle": "What to cook today?",
+  "kitchenTitle": "Dapur Saya",
+  "familyTitle": "Keluarga Saya",
+  "settingsTitle": "Settings",
+  "settingsGroupGeneral": "General",
+  "settingsLanguage": "Language",
+  "settingsLanguageId": "Bahasa Indonesia",
+  "settingsLanguageEn": "English",
+  "settingsTheme": "Theme",
+  "settingsThemeSystem": "Follow system",
+  "settingsThemeLight": "Light",
+  "settingsThemeDark": "Dark"
+}
