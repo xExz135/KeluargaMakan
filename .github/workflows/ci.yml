@@ -2,8 +2,9 @@ name: CI
 
 # Stages run in the order required for every PR; each stage blocks the next.
 #   1 lint, format, type checks   2 unit tests   3 Cek Aman safety regression
-#   4 contract check   5 fixture guard   6 secret and dependency scans
-#   7 AI eval (when prompts or model config change)   8 Android build
+#   4 contract check   5 fixture guard and reference data validation
+#   6 secret and dependency scans   7 AI eval (when prompts or model config
+#   change)   8 Android build
 # Branch protection should require "CI passed" and
 # "Cek Aman safety regression (required)".
 #
@@ -13,7 +14,16 @@ name: CI
 # Every job below its first `needs:` therefore carries an explicit `if:`, and
 # "CI passed" requires each mandatory job to report success, not just
 # "not failed". Stages 5 and 6 run even when an earlier stage failed, so a
-# leaked secret or fixture reference is always reported.
+# leaked secret, a fixture reference or invalid reference data is always
+# reported.
+#
+# Mobile jobs (Dart lint, Dart tests with the generated Dart client check,
+# Android build) run only when apps/mobile/pubspec.yaml exists AND the
+# repository variable MOBILE_CI_ENABLED is "true", and then on every push to
+# main and manual run, and on pull requests that change the "mobile" paths
+# in the detect job. When they run they must succeed; when they are off they
+# must be skipped. A Flutter project with the variable unset is reported as a
+# warning on every run.
 #
 # Android only (docs/DECISIONS.md, 2026-11-10): there is no iOS job.
 # Runners are pinned to ubuntu-24.04 so a change to the ubuntu-latest label
@@ -54,17 +64,43 @@ jobs:
               - "services/ai/config/**"
               - "services/ai/**/model_config*"
               - "tests/ai-eval/**"
-      # Mobile stays off until the Flutter project exists AND the repository
-      # variable MOBILE_CI_ENABLED is set to "true".
+            # The app, the generated Dart API client it consumes, and the CI
+            # definition that builds them.
+            mobile:
+              - "apps/mobile/**"
+              - "packages/contracts/**"
+              - ".github/workflows/ci.yml"
+              - ".github/actions/**"
+      # Mobile jobs run when all of these hold:
+      #   - the Flutter project exists (apps/mobile/pubspec.yaml)
+      #   - the repository variable MOBILE_CI_ENABLED is "true"
+      #   - this is a push to main or a manual run (always), or a pull request
+      #     that changes one of the "mobile" paths above
       - id: mobile
         env:
           MOBILE_CI_ENABLED: ${{ vars.MOBILE_CI_ENABLED }}
+          EVENT_NAME: ${{ github.event_name }}
+          MOBILE_CHANGED: ${{ steps.filter.outputs.mobile }}
         run: |
-          if [ -f apps/mobile/pubspec.yaml ] && [ "$MOBILE_CI_ENABLED" = "true" ]; then
+          on() {
             echo "enabled=true" >> "$GITHUB_OUTPUT"
-          else
+            echo "Mobile CI on ($1): Dart lint, Dart tests, the Dart client check and the Android build must succeed."
+          }
+          off() {
             echo "enabled=false" >> "$GITHUB_OUTPUT"
-            echo "Mobile CI skipped (no Flutter project or MOBILE_CI_ENABLED not set)."
+            echo "Mobile CI skipped: $1."
+          }
+          if [ ! -f apps/mobile/pubspec.yaml ]; then
+            off "apps/mobile has no Flutter project"
+          elif [ "$MOBILE_CI_ENABLED" != "true" ]; then
+            off "MOBILE_CI_ENABLED is not \"true\""
+            echo "::warning::apps/mobile/pubspec.yaml exists but the repository variable MOBILE_CI_ENABLED is not \"true\": Dart lint, Dart tests, the Dart client check and the Android build did NOT run."
+          elif [ "$EVENT_NAME" != "pull_request" ]; then
+            on "$EVENT_NAME runs every mobile job"
+          elif [ "$MOBILE_CHANGED" = "true" ]; then
+            on "the pull request changes mobile paths"
+          else
+            off "the pull request changes no mobile paths"
           fi
 
   # ---------- Stage 1: lint, format and type checks ----------
@@ -108,6 +144,7 @@ jobs:
         with:
           flutter-version-file: apps/mobile/pubspec.yaml
           cache: true
+      # Also generates the localization code that analyze reads.
       - run: flutter pub get
       - run: dart format --output=none --set-exit-if-changed .
       - run: flutter analyze
@@ -177,8 +214,16 @@ jobs:
         with:
           flutter-version-file: apps/mobile/pubspec.yaml
           cache: true
+      # Also generates the localization code (flutter.generate: true).
       - run: flutter pub get
       - run: flutter test
+      # Generated Dart API client (packages/contracts/generated/dart): pub get,
+      # analyze and the smoke program, with the Dart SDK that Flutter provides.
+      # Needs pub.dev access; writes only to a temporary directory.
+      - uses: ./.github/actions/setup-node-workspace
+      - name: Verify the generated Dart API client
+        working-directory: .
+        run: pnpm --filter @keluargamakan/contracts run verify:dart
 
   # ---------- Stage 3: Cek Aman safety regression (NFR-07) ----------
   safety-regression:
@@ -198,19 +243,43 @@ jobs:
     name: "4 Contract check"
     needs: safety-regression
     # Explicit `if:` so the skipped Dart jobs upstream do not skip this job.
-    # Always applicable: with no generator yet it still fails on drift in
-    # packages/contracts.
     if: ${{ !failure() && !cancelled() }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # The OpenAPI Generator jar (Dart client) needs Java 11 or later.
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: "17"
       - uses: ./.github/actions/setup-node-workspace
-      # Regenerates clients from packages/contracts/openapi.yaml (when a
-      # generator exists) and fails if the committed output differs.
+      # Cache key = the generator version and SHA-256 pinned in generate.mjs.
+      # generate.mjs re-checks the jar's SHA-256 before every run, so a cached
+      # jar that does not match is refused, never executed.
+      - name: Read the pinned OpenAPI Generator version
+        id: generator
+        run: |
+          script=packages/contracts/scripts/generate.mjs
+          block="$(sed -n '/^export const OPENAPI_GENERATOR = {/,/^};/p' "$script")"
+          version="$(sed -nE 's/^ *version: "([^"]+)",$/\1/p' <<<"$block")"
+          sha256="$(sed -nE 's/^ *sha256: "([0-9a-f]{64})",$/\1/p' <<<"$block")"
+          if [ -z "$version" ] || [ -z "$sha256" ]; then
+            echo "::error file=$script::could not read OPENAPI_GENERATOR version and sha256"
+            exit 1
+          fi
+          echo "OpenAPI Generator $version ($sha256)"
+          echo "key=openapi-generator-${version}-${sha256}" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: packages/contracts/node_modules/.cache/openapi-generator
+          key: ${{ steps.generator.outputs.key }}
+      # Regenerates the TypeScript and Dart clients from
+      # packages/contracts/openapi.yaml and fails on any drift: modified,
+      # deleted or new untracked files.
       - run: pnpm check:contracts
 
-  # ---------- Stage 5: fixture guard ----------
+  # ---------- Stage 5: fixture guard and reference data validation ----------
   fixture-guard:
     name: "5 Fixture guard"
     needs: contracts
@@ -224,6 +293,24 @@ jobs:
         with:
           node-version-file: .nvmrc
       - run: node scripts/check-fixture-refs.mjs
+
+  # SAF-06, SAF-13 (security finding H1): every file in data/reference/ must
+  # pass data/schema/ and the cross-record checks before it can reach Cek Aman.
+  reference-data:
+    name: "5 Reference data validation (required)"
+    needs: contracts
+    # Runs on every push and PR, even if an earlier stage failed.
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-node-workspace
+      - run: pnpm validate:reference
+      # TODO(T-014): enable once the content team's real data is in
+      # data/reference/. `build:reference` fails while the folder is empty, so
+      # it stays commented until then. When enabled, keep it in this job.
+      # - run: pnpm build:reference
 
   # ---------- Stage 6: secret and dependency scans (NFR-10) ----------
   secret-scan:
@@ -290,6 +377,10 @@ jobs:
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.mobile == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    env:
+      # NDK used by Flutter 3.47.9 (android/app/build.gradle.kts reads
+      # flutter.ndkVersion). Bump together with the Flutter version.
+      ANDROID_NDK_VERSION: 28.2.13676358
     defaults:
       run:
         working-directory: apps/mobile
@@ -303,14 +394,45 @@ jobs:
         with:
           flutter-version-file: apps/mobile/pubspec.yaml
           cache: true
+      - name: Install Android NDK if the runner lacks it
+        shell: bash
+        run: |
+          sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          if [ -z "$sdk" ]; then
+            echo "::error::ANDROID_HOME is not set on this runner"
+            exit 1
+          fi
+          ndk="$sdk/ndk/$ANDROID_NDK_VERSION"
+          if [ -f "$ndk/source.properties" ]; then
+            echo "NDK $ANDROID_NDK_VERSION already installed"
+          else
+            # `yes` answers any license prompt; `|| true` keeps its SIGPIPE
+            # exit from failing the pipeline under pipefail.
+            { yes 2>/dev/null || true; } \
+              | "$sdk/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$ANDROID_NDK_VERSION" > /dev/null
+            test -f "$ndk/source.properties"
+            echo "Installed NDK $ANDROID_NDK_VERSION"
+          fi
+      # android/gradle.properties asks for an 8 GB Gradle heap (fine on a
+      # workstation). GitHub's standard runners for private repositories have
+      # about 7 GB of RAM, so CI caps it. The user-level file overrides the
+      # project file; nothing in the repository changes.
+      - name: Cap Gradle memory for the runner
+        shell: bash
+        run: |
+          mkdir -p "$HOME/.gradle"
+          echo "org.gradle.jvmargs=-Xmx4G -XX:MaxMetaspaceSize=2G -XX:ReservedCodeCacheSize=512m -XX:+HeapDumpOnOutOfMemoryError" \
+            >> "$HOME/.gradle/gradle.properties"
       - run: flutter pub get
-      # Unsigned CI build only. Release signing and store upload are a human gate.
+      # Unsigned debug build only. Release signing and store upload are a
+      # human gate.
       - run: flutter build apk --debug
 
   # ---------- Gate ----------
   # Mandatory jobs must report "success"; "skipped" fails the gate. Conditional
   # jobs must succeed when their detect output turns them on and must be
-  # skipped when it is off. lint-infra is excluded while it is
+  # skipped when it is off: ai-eval follows detect.outputs.ai_eval and the
+  # mobile jobs follow detect.outputs.mobile. lint-infra is excluded while it is
   # continue-on-error (see above).
   ci-passed:
     name: CI passed
@@ -326,6 +448,7 @@ jobs:
       - safety-regression
       - contracts
       - fixture-guard
+      - reference-data
       - secret-scan
       - dependency-scan
       - ai-eval
@@ -339,7 +462,7 @@ jobs:
           NEEDS: ${{ toJSON(needs) }}
           REQUIRED: >-
             detect lint-ts lint-python test-ts test-python safety-regression
-            contracts fixture-guard secret-scan dependency-scan
+            contracts fixture-guard reference-data secret-scan dependency-scan
           MOBILE_JOBS: lint-dart test-dart mobile-android
         run: |
           set -euo pipefail
