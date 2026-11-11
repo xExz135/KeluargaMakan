@@ -2,6 +2,7 @@ import pg from "pg";
 
 import { apiConfigFromEnv } from "../config/api.js";
 import { resolveAppEnv } from "./app-env.js";
+import { parseTrustedProxies } from "./auth/client-address.js";
 import { createCodeSender } from "./auth/code-sender.js";
 import { loadAuthSecrets } from "./auth/secrets.js";
 import { pgExecutor } from "./db/executor.js";
@@ -19,6 +20,12 @@ async function main(): Promise<void> {
   const databaseUrl = env["DATABASE_URL"];
   if (databaseUrl === undefined || databaseUrl === "") throw new Error("DATABASE_URL is required");
 
+  if (env["TRUST_PROXY"] !== undefined) {
+    // Security review T-017 H1: a boolean trusts the client-written entry.
+    throw new Error(
+      "TRUST_PROXY is no longer read; set TRUSTED_PROXY_CIDRS to the load balancer ranges",
+    );
+  }
   const pool = new pg.Pool({ connectionString: databaseUrl });
   const app = await createApp({
     db: pgExecutor(pool),
@@ -30,7 +37,7 @@ async function main(): Promise<void> {
       jsonLogger.info("dev_sign_in_code", { challengeId: message.challengeId, code: message.code }),
     ),
     logger: jsonLogger,
-    trustProxy: env["TRUST_PROXY"] === "true",
+    trustedProxies: parseTrustedProxies(env["TRUSTED_PROXY_CIDRS"], env["APP_ENV"]),
   });
 
   const port = Number(env["PORT"] ?? "3000");

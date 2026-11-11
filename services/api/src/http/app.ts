@@ -27,8 +27,23 @@ export interface AppDeps {
   readonly codeSender: SignInCodeSender;
   readonly logger: ApiLogger;
   readonly clock?: Clock;
-  /** Behind a load balancer, trust its `X-Forwarded-For` for the client address (rate limits). */
-  readonly trustProxy?: boolean;
+  /**
+   * Proxy hops whose `X-Forwarded-For` entry is skipped when finding the
+   * client address (security review H1): CIDR ranges from
+   * `parseTrustedProxies`. Empty (the default) trusts no proxy. `true`
+   * (trust every hop) is accepted only from `parseTrustedProxies` in local
+   * and test.
+   */
+  readonly trustedProxies?: readonly string[] | true;
+}
+
+function trustProxyOption(trusted: readonly string[] | true | undefined): boolean | string[] {
+  if (trusted === true) return true;
+  if (trusted === undefined || trusted.length === 0) return false;
+  // Fastify (proxy-addr) walks X-Forwarded-For from the right and stops at
+  // the first address outside these ranges, so client-written entries on the
+  // left are never used.
+  return [...trusted];
 }
 
 /** Request bodies in this API are small JSON documents. */
@@ -101,7 +116,7 @@ export async function createApp(deps: AppDeps): Promise<NestFastifyApplication> 
 
   const adapter = new FastifyAdapter({
     bodyLimit: BODY_LIMIT_BYTES,
-    trustProxy: deps.trustProxy ?? false,
+    trustProxy: trustProxyOption(deps.trustedProxies),
     // Request IDs are always generated here; a client-supplied ID is ignored.
     requestIdHeader: false,
     genReqId: () => randomUUID(),

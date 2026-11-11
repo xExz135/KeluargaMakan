@@ -103,12 +103,15 @@ export async function startHarness(
     readonly codeSender?: SignInCodeSender;
     /** Share another harness's secrets so its tokens are recognised. */
     readonly secrets?: AuthSecrets;
+    readonly trustedProxies?: readonly string[] | true;
+    /** APP_ENV the config floors are checked for (default `test`). */
+    readonly appEnv?: string;
   } = {},
 ): Promise<Harness> {
   const clock = new TestClock();
   const logger = new CapturingLogger();
   const sender = new DevCodeSender({ appEnv: "test" });
-  const config = resolveApiConfig(options.config ?? {});
+  const config = resolveApiConfig(options.config ?? {}, { appEnv: options.appEnv ?? "test" });
   const secrets = options.secrets ?? randomSecrets();
   const app = await createApp({
     db,
@@ -117,6 +120,7 @@ export async function startHarness(
     codeSender: options.codeSender ?? sender,
     logger,
     clock,
+    ...(options.trustedProxies === undefined ? {} : { trustedProxies: options.trustedProxies }),
   });
   const fastify = app.getHttpAdapter().getInstance();
   return {

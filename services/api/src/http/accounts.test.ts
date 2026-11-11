@@ -6,6 +6,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import { CodeSenderUnavailableError, type SignInCodeSender } from "../auth/code-sender.js";
 import { purgeExpiredSignInRecords } from "../auth/auth-service.js";
+import { canonicalDestination } from "../auth/destination.js";
 import type { SqlExecutor } from "../db/executor.js";
 import { migrate } from "../db/migrate.js";
 import { DATABASE_TARGETS, type TestDatabase } from "../db/testing/databases.js";
@@ -133,9 +134,7 @@ for (const target of DATABASE_TARGETS) {
       const requested = await requestCode(h, destination, channel);
       expect(requested.status, requested.raw).toBe(202);
       const { challengeId } = requested.body as { challengeId: string };
-      const code = h.sender.latestCode(
-        channel === "email" ? destination.toLowerCase() : destination,
-      );
+      const code = h.sender.latestCode(canonicalDestination(channel, destination) ?? destination);
       if (code === null) throw new Error("no code sent");
       const verified = await verify(h, challengeId, code, installationId);
       expect(verified.status, verified.raw).toBe(200);
@@ -332,6 +331,189 @@ for (const target of DATABASE_TARGETS) {
           body: { idToken: "fixture", device: device() },
         });
         expectProblem(response, 503, "sign_in_method_unavailable");
+      });
+    });
+
+    describe("H1 client addresses behind a load balancer (security review T-017)", () => {
+      const codeFrom = async (h: Harness, ip: string, forwardedFor?: string) => {
+        const response = await h.request("POST", "/v1/auth/code/request", {
+          body: { channel: "phone", destination: fakePhone(), language: "id" },
+          ip,
+          ...(forwardedFor === undefined ? {} : { headers: { "x-forwarded-for": forwardedFor } }),
+        });
+        return response.status;
+      };
+
+      const limited = { rateLimits: { codeRequestPerClient: { limit: 2, windowSeconds: 3600 } } };
+
+      it("H1 P1 a spoofed leftmost X-Forwarded-For entry does not change the client behind a trusted proxy", async () => {
+        const h = await another({ config: limited, trustedProxies: ["10.0.0.0/8"] });
+        const statuses: number[] = [];
+        for (let i = 0; i < 6; i += 1) {
+          statuses.push(await codeFrom(h, "10.0.0.1", `203.0.113.${i}, 198.51.100.7`));
+        }
+        expect(statuses).toEqual([202, 202, 429, 429, 429, 429]);
+      });
+
+      it("H1 different real clients behind the same trusted proxy have their own limits", async () => {
+        const h = await another({ config: limited, trustedProxies: ["10.0.0.0/8"] });
+        const statuses: number[] = [];
+        for (let i = 0; i < 4; i += 1) {
+          statuses.push(await codeFrom(h, "10.0.0.1", `198.51.100.${20 + i}`));
+        }
+        expect(statuses).toEqual([202, 202, 202, 202]);
+      });
+
+      it("H1 X-Forwarded-For from an untrusted peer is ignored", async () => {
+        const h = await another({ config: limited });
+        const statuses: number[] = [];
+        for (let i = 0; i < 4; i += 1) {
+          statuses.push(await codeFrom(h, "198.51.100.9", `203.0.113.${i}`));
+        }
+        expect(statuses).toEqual([202, 202, 429, 429]);
+      });
+
+      it("H1 IPv6 clients share a limit per /64", async () => {
+        const h = await another({ config: limited });
+        expect(await codeFrom(h, "2001:db8:1:2::a")).toBe(202);
+        expect(await codeFrom(h, "2001:db8:1:2:ffff::b")).toBe(202);
+        expect(await codeFrom(h, "2001:db8:1:2::c")).toBe(429);
+        expect(await codeFrom(h, "2001:db8:1:3::a")).toBe(202);
+      });
+    });
+
+    describe("M1 wrong codes and requests are capped per destination across challenges", () => {
+      it("M1 P3 wrong codes across all of a destination's challenges stop at the daily cap", async () => {
+        const h = await another();
+        const phone = fakePhone();
+        const cap = h.config.rateLimits.codeVerifyFailuresPerDestination.limit;
+        let wrong = 0;
+        let refused = 0;
+        // Like probe P3: keep asking for codes and guessing for two days.
+        for (let hour = 0; hour < 48; hour += 1) {
+          const requested = await requestCode(h, phone);
+          if (requested.status === 202) {
+            const { challengeId } = requested.body as { challengeId: string };
+            for (let guess = 0; guess < 6; guess += 1) {
+              const response = await verify(h, challengeId, String(100000 + guess));
+              const code = (response.body as { code?: string }).code;
+              if (code === "code_invalid" || code === "code_attempts_exceeded") wrong += 1;
+              if (response.status === 429 || code === "code_attempts_exceeded") break;
+            }
+          } else {
+            expectProblem(requested, 429, "rate_limited");
+            refused += 1;
+          }
+          h.clock.advance(3600);
+        }
+        // At most the cap per rolling day, so at most about two caps over two days.
+        expect(wrong).toBeLessThanOrEqual(2 * cap + h.config.signInCode.maxAttempts);
+        expect(refused).toBeGreaterThan(0);
+      });
+
+      it("M1 at the cap a pending code is no longer checked and no new code is sent, until the window moves on", async () => {
+        const h = await another({
+          config: {
+            signInCode: { resendWaitSeconds: 1 },
+            rateLimits: { codeVerifyFailuresPerDestination: { limit: 3, windowSeconds: 86_400 } },
+          },
+        });
+        const phone = fakePhone();
+        const first = (await requestCode(h, phone)).body as { challengeId: string };
+        expectProblem(await verify(h, first.challengeId, "000000"), 400, "code_invalid");
+        expectProblem(await verify(h, first.challengeId, "000001"), 400, "code_invalid");
+        h.clock.advance(1);
+        const second = (await requestCode(h, phone)).body as { challengeId: string };
+        const code = h.sender.latestCode(phone) ?? "";
+        expectProblem(await verify(h, second.challengeId, "000002"), 400, "code_invalid");
+        // The cap is reached: even the right code is not checked.
+        const capped = await verify(h, second.challengeId, code);
+        expectProblem(capped, 429, "rate_limited");
+        expect(Number(capped.headers["retry-after"])).toBeGreaterThan(0);
+        h.clock.advance(1);
+        expectProblem(await requestCode(h, phone), 429, "rate_limited");
+        // Another destination is not affected.
+        expect((await requestCode(h, fakePhone())).status).toBe(202);
+        h.clock.advance(86_400 + 7_200);
+        const later = (await requestCode(h, phone)).body as { challengeId: string };
+        expect((await verify(h, later.challengeId, h.sender.latestCode(phone) ?? "")).status).toBe(
+          200,
+        );
+      });
+
+      it("M1 code requests per destination are capped per day", async () => {
+        const h = await another({
+          config: {
+            signInCode: { resendWaitSeconds: 1 },
+            rateLimits: {
+              codeRequestPerDestination: { limit: 2, windowSeconds: 3600 },
+              codeRequestPerDestinationDaily: { limit: 3, windowSeconds: 86_400 },
+            },
+          },
+        });
+        const phone = fakePhone();
+        const statuses: number[] = [];
+        for (let i = 0; i < 5; i += 1) {
+          statuses.push((await requestCode(h, phone)).status);
+          h.clock.advance(2 * 3600);
+        }
+        expect(statuses).toEqual([202, 202, 202, 429, 429]);
+      });
+    });
+
+    describe("L1 destinations are canonical before limits and storage", () => {
+      it("L1 +620… and +62… are the same destination (one challenge, one resend wait)", async () => {
+        const h = await another();
+        const phone = fakePhone().replace("+62", "+620");
+        expect((await requestCode(h, phone)).status).toBe(202);
+        expectProblem(await requestCode(h, phone.replace("+620", "+62")), 429, "rate_limited");
+        const { rows } = await db.query<{ destination: string }>(
+          `SELECT destination FROM sign_in_challenge WHERE destination = $1`,
+          [phone.replace("+620", "+62")],
+        );
+        expect(rows).toHaveLength(1);
+      });
+
+      it("L1 an email with a trailing dot on the domain is the same account", async () => {
+        const email = fakeEmail();
+        const first = await signIn(api, `${email}.`, "email");
+        api.clock.advance(api.config.signInCode.resendWaitSeconds);
+        const requested = await requestCode(api, email.toUpperCase(), "email");
+        const { challengeId } = requested.body as { challengeId: string };
+        const verified = await verify(api, challengeId, api.sender.latestCode(email) ?? "");
+        expect((verified.body as SessionBody).account.id).toBe(first.account.id);
+      });
+
+      it("L1 Gmail dots and +tags share the destination's rate limit but stay separate addresses", async () => {
+        const h = await another({
+          config: { rateLimits: { codeRequestPerDestination: { limit: 1, windowSeconds: 3600 } } },
+        });
+        const local = `ibu${randomUUID().slice(0, 6)}`;
+        expect((await requestCode(h, `${local}+dapur@gmail.com`, "email")).status).toBe(202);
+        expectProblem(
+          await requestCode(h, `${local.slice(0, 2)}.${local.slice(2)}@googlemail.com`, "email"),
+          429,
+          "rate_limited",
+        );
+        expect(h.sender.latestCode(`${local}+dapur@gmail.com`)).not.toBeNull();
+      });
+
+      it("L1 NUL, control and bidi characters are 400, not 500, and are not echoed", async () => {
+        for (const destination of [
+          "korban\u0000x@example.invalid",
+          "kor\u0007ban@example.invalid",
+          "korban@ex\u202Eample.invalid",
+          "korb\u0430n@example.invalid",
+        ]) {
+          const response = await api.request("POST", "/v1/auth/code/request", {
+            body: { channel: "email", destination, language: "id" },
+          });
+          expectProblem(response, 400, "validation_failed");
+          expect(response.body).toMatchObject({
+            errors: [{ pointer: "/destination", code: "invalid_format" }],
+          });
+          expect(response.raw).not.toContain("korb");
+        }
       });
     });
 

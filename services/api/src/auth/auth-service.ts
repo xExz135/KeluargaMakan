@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import type { ApiConfig } from "../../config/api.js";
-import { ApiError, rateLimited, unauthenticated } from "../api-error.js";
+import { ApiError, rateLimited, unauthenticated, validationFailed } from "../api-error.js";
 import { withDbErrors } from "../db/errors.js";
 import type { SqlExecutor } from "../db/executor.js";
 import { isUuid } from "../db/ids.js";
@@ -9,7 +9,8 @@ import { signAccessToken, verifyAccessToken } from "./access-token.js";
 import { readAccount, type AccountView, type SignInMethod } from "./accounts.js";
 import type { SignInCodeSender } from "./code-sender.js";
 import { constantTimeEqual, keyedHash, randomDigits, randomToken } from "./crypto.js";
-import type { SignInChannel } from "./destination.js";
+import { clientRateKey } from "./client-address.js";
+import { canonicalDestination, destinationRateKey, type SignInChannel } from "./destination.js";
 import { RateLimiter } from "./rate-limiter.js";
 import type { AuthSecrets } from "./secrets.js";
 
@@ -133,23 +134,50 @@ export class AuthService {
    * whether or not an account exists for the destination. Only the latest
    * challenge per destination exists, and a new one is refused (429) until
    * the resend wait has passed.
+   *
+   * Limits (security review H1, M1): per client address (IPv6 by /64), per
+   * destination per hour and per day, and no new code while the destination
+   * has reached its wrong-code cap. Destination limits use the rate key, so
+   * `a+x@…` or Gmail dots do not get their own budget.
    */
   async requestCode(
     input: {
       readonly channel: SignInChannel;
-      /** Already normalized (`normalizeDestination`). */
       readonly destination: string;
       readonly language: "id" | "en";
     },
-    client: string,
+    clientAddress: string,
   ): Promise<SignInCodeChallenge> {
     const now = this.#clock.now();
     const { rateLimits, signInCode } = this.#config;
-    await this.#limit("code_request_client", client, rateLimits.codeRequestPerClient, now);
+    const destination = canonicalDestination(input.channel, input.destination);
+    if (destination === null) {
+      throw validationFailed([{ pointer: "/destination", code: "invalid_format" }]);
+    }
+    const rateKey = destinationRateKey(input.channel, destination);
+    await this.#limit(
+      "code_request_client",
+      clientRateKey(clientAddress),
+      rateLimits.codeRequestPerClient,
+      now,
+    );
+    const failures = await this.#limiter.check(
+      "code_verify_failure_destination",
+      rateKey,
+      rateLimits.codeVerifyFailuresPerDestination,
+      now,
+    );
+    if (!failures.allowed) throw rateLimited(failures.retryAfterSeconds);
     await this.#limit(
       "code_request_destination",
-      `${input.channel}:${input.destination}`,
+      rateKey,
       rateLimits.codeRequestPerDestination,
+      now,
+    );
+    await this.#limit(
+      "code_request_destination_daily",
+      rateKey,
+      rateLimits.codeRequestPerDestinationDaily,
       now,
     );
 
@@ -161,7 +189,7 @@ export class AuthService {
       this.#secrets.hashKey,
       "destination",
       input.channel,
-      input.destination,
+      destination,
     );
 
     const { rows } = await withDbErrors(() =>
@@ -184,7 +212,7 @@ export class AuthService {
         [
           challengeId,
           input.channel,
-          input.destination,
+          destination,
           destinationHash,
           keyedHash(this.#secrets.hashKey, "sign_in_code", challengeId, code),
           now,
@@ -208,7 +236,7 @@ export class AuthService {
       await this.#codeSender.send({
         challengeId,
         channel: input.channel,
-        destination: input.destination,
+        destination: destination,
         code,
         language: input.language,
         expiresAt,
@@ -239,13 +267,14 @@ export class AuthService {
    */
   async verifyCode(
     input: { readonly challengeId: string; readonly code: string; readonly device: DeviceInfo },
-    client: string,
+    clientAddress: string,
   ): Promise<SignedIn> {
     const now = this.#clock.now();
+    const { rateLimits } = this.#config;
     await this.#limit(
       "code_verify_client",
-      client,
-      this.#config.rateLimits.codeVerifyPerClient,
+      clientRateKey(clientAddress),
+      rateLimits.codeVerifyPerClient,
       now,
     );
     if (!isUuid(input.challengeId)) throw codeInvalid();
@@ -281,6 +310,18 @@ export class AuthService {
         await tx.query(`DELETE FROM sign_in_challenge WHERE id = $1`, [input.challengeId]);
         return { kind: "error", error: codeExpired() };
       }
+      // M1: wrong codes are capped per destination across all its challenges.
+      const rateKey = destinationRateKey(challenge.channel, challenge.destination);
+      const failures = await this.#limiter.check(
+        "code_verify_failure_destination",
+        rateKey,
+        rateLimits.codeVerifyFailuresPerDestination,
+        now,
+        tx,
+      );
+      if (!failures.allowed) {
+        return { kind: "error", error: rateLimited(failures.retryAfterSeconds) };
+      }
       if (challenge.attempts >= maxAttempts) return { kind: "error", error: attemptsExceeded() };
 
       const presented = keyedHash(
@@ -295,6 +336,13 @@ export class AuthService {
           [input.challengeId],
         );
         const attempts = Number(updated.rows[0]?.attempts ?? maxAttempts);
+        await this.#limiter.record(
+          "code_verify_failure_destination",
+          rateKey,
+          rateLimits.codeVerifyFailuresPerDestination,
+          now,
+          tx,
+        );
         return {
           kind: "error",
           error: attempts >= maxAttempts ? attemptsExceeded() : codeInvalid(),
@@ -427,9 +475,14 @@ export class AuthService {
    * a new pair and the unused pair from the lost response stops working. Any
    * other reuse revokes the whole session (token family).
    */
-  async refresh(refreshToken: string, client: string): Promise<SessionTokens> {
+  async refresh(refreshToken: string, clientAddress: string): Promise<SessionTokens> {
     const now = this.#clock.now();
-    await this.#limit("refresh_client", client, this.#config.rateLimits.refreshPerClient, now);
+    await this.#limit(
+      "refresh_client",
+      clientRateKey(clientAddress),
+      this.#config.rateLimits.refreshPerClient,
+      now,
+    );
     if (!REFRESH_TOKEN_PATTERN.test(refreshToken)) throw refreshInvalid();
     const tokenHash = keyedHash(this.#secrets.hashKey, "refresh_token", refreshToken);
     const graceMs = this.#config.sessions.refreshGraceSeconds * 1000;
@@ -626,9 +679,10 @@ export async function purgeExpiredSignInRecords(
   return withDbErrors(async () => ({
     challenges: (await db.query(`DELETE FROM sign_in_challenge WHERE expires_at <= $1`, [now]))
       .rowCount,
+    // Twice the longest window: a rolling window still counts its oldest bucket.
     rateLimits: (
       await db.query(`DELETE FROM auth_rate_limit WHERE window_start < $1`, [
-        addSeconds(now, -longestWindow),
+        addSeconds(now, -2 * longestWindow),
       ])
     ).rowCount,
     sessions: (

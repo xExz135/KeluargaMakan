@@ -43,12 +43,14 @@ export function verifyAccessToken(key: Buffer, token: string, now: Date): Access
   const parts = token.split(".");
   if (parts.length !== 3 || parts[0] !== PREFIX) return { status: "invalid" };
   const [, payload = "", signature = ""] = parts;
-  if (!/^[A-Za-z0-9_-]+$/.test(payload) || !/^[A-Za-z0-9_-]+$/.test(signature)) {
+  // L6 (security review): exactly 43 characters of canonical base64url, so
+  // one token has exactly one valid spelling (no unused low bits set).
+  if (!/^[A-Za-z0-9_-]+$/.test(payload) || !/^[A-Za-z0-9_-]{43}$/.test(signature)) {
     return { status: "invalid" };
   }
-  if (!constantTimeEqual(Buffer.from(signature, "base64url"), mac(key, payload))) {
-    return { status: "invalid" };
-  }
+  const presented = Buffer.from(signature, "base64url");
+  if (presented.toString("base64url") !== signature) return { status: "invalid" };
+  if (!constantTimeEqual(presented, mac(key, payload))) return { status: "invalid" };
   let decoded: unknown;
   try {
     decoded = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
