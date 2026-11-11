@@ -4,6 +4,8 @@ analyzer:
   exclude:
     - build/**
     - lib/l10n/generated/**
+    - lib/**/*.g.dart
+    - test/drift/*/generated/**
     - android/**
   language:
     strict-casts: true
