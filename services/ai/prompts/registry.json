@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "prompts": [
+    {
+      "id": "adapt.recipe",
+      "version": "0.1.0",
+      "sha256": "d935ab78f4577609faec5d0d39ad2f795997e91cd21e016a004e50a1f7f0ef30",
+      "active": true
+    },
+    {
+      "id": "recognize.ingredients",
+      "version": "0.1.0",
+      "sha256": "750fff678ce5109d6a656fd519485f3abc086b2e607dde687137d66c0d3cb382",
+      "active": true
+    },
+    {
+      "id": "speech.synthesize",
+      "version": "0.1.0",
+      "sha256": "3e46554299a186adc7fd975dc2f743fd121a099240c39682286533691b57e84f",
+      "active": true
+    },
+    {
+      "id": "speech.transcribe",
+      "version": "0.1.0",
+      "sha256": "67e201cdf22de1eb1fe29a81dc450019b70982a2cbf41c10415e653a669b101a",
+      "active": true
+    },
+    {
+      "id": "tweak.advice",
+      "version": "0.1.0",
+      "sha256": "1bf06efcfcb38f894d0efd2596bb83b9404d2215c1302a17d52a649d34346c1f",
+      "active": true
+    }
+  ]
+}
