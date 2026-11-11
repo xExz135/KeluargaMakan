@@ -8,6 +8,12 @@
  * change; `resolveApiConfig` rejects unknown keys and out-of-range values.
  */
 
+import { isDevelopmentEnv } from "../src/app-env.js";
+
+/**
+ * A rolling-window limit: at most `limit` events in any `windowSeconds`
+ * (counted in buckets of 1/12 of the window).
+ */
 export interface RateLimitRule {
   /** Requests allowed per window. */
   readonly limit: number;
@@ -25,8 +31,16 @@ export interface ApiConfig {
     readonly maxAttempts: number;
   };
   readonly rateLimits: {
-    /** Code requests per phone number or email address. */
+    /** Code requests per phone number or email address (short window). */
     readonly codeRequestPerDestination: RateLimitRule;
+    /** Code requests per phone number or email address per day (security review M1). */
+    readonly codeRequestPerDestinationDaily: RateLimitRule;
+    /**
+     * Wrong codes per phone number or email address across all its challenges
+     * (security review M1). When reached, no new code is sent and no pending
+     * code is checked for that destination until the window has moved on.
+     */
+    readonly codeVerifyFailuresPerDestination: RateLimitRule;
     /** Code requests per client address. */
     readonly codeRequestPerClient: RateLimitRule;
     /** Code verifications per client address. */
@@ -69,6 +83,8 @@ export const defaultApiConfig: ApiConfig = deepFreeze({
   },
   rateLimits: {
     codeRequestPerDestination: { limit: 5, windowSeconds: 60 * 60 },
+    codeRequestPerDestinationDaily: { limit: 10, windowSeconds: DAY },
+    codeVerifyFailuresPerDestination: { limit: 10, windowSeconds: DAY },
     codeRequestPerClient: { limit: 20, windowSeconds: 60 * 60 },
     codeVerifyPerClient: { limit: 30, windowSeconds: 15 * 60 },
     refreshPerClient: { limit: 60, windowSeconds: 15 * 60 },
@@ -116,6 +132,41 @@ function check(condition: boolean, message: string): void {
 
 const positiveInt = (value: number) => Number.isInteger(value) && value >= 1;
 
+/**
+ * Floors outside APP_ENV local and test (security review L5, M1). A missing
+ * or unknown APP_ENV counts as production, so these always apply there.
+ */
+export const PRODUCTION_FLOORS = Object.freeze({
+  minCodeLength: 6,
+  maxAttempts: 5,
+  /** At most this many wrong codes per destination per day. */
+  maxDailyVerifyFailures: 20,
+  /** At most this many codes per destination per day. */
+  maxDailyCodeRequests: 20,
+});
+
+function validateFloors(config: ApiConfig): void {
+  const { signInCode: code, rateLimits } = config;
+  check(
+    code.length >= PRODUCTION_FLOORS.minCodeLength,
+    "code length at least 6 outside local and test",
+  );
+  check(
+    code.maxAttempts <= PRODUCTION_FLOORS.maxAttempts,
+    "attempts at most 5 outside local and test",
+  );
+  const daily = (rule: RateLimitRule, max: number) =>
+    rule.windowSeconds >= DAY && rule.limit <= max;
+  check(
+    daily(rateLimits.codeVerifyFailuresPerDestination, PRODUCTION_FLOORS.maxDailyVerifyFailures),
+    "wrong codes per destination: at most 20 in a window of at least a day outside local and test",
+  );
+  check(
+    daily(rateLimits.codeRequestPerDestinationDaily, PRODUCTION_FLOORS.maxDailyCodeRequests),
+    "code requests per destination: at most 20 in a window of at least a day outside local and test",
+  );
+}
+
 function validate(config: ApiConfig): void {
   const { signInCode: code, rateLimits, sessions, retention } = config;
   check(Number.isInteger(code.length) && code.length >= 4 && code.length <= 8, "code length 4-8");
@@ -142,24 +193,33 @@ function validate(config: ApiConfig): void {
   check(positiveInt(retention.idempotencyKeyHours), "idempotency retention");
 }
 
-/** Defaults with the given values replaced. Unknown keys and invalid values throw. */
-export function resolveApiConfig(overrides: ApiConfigOverrides = {}): ApiConfig {
+/**
+ * Defaults with the given values replaced. Unknown keys and invalid values
+ * throw. Outside `appEnv` local and test (missing counts as production) the
+ * production floors apply too.
+ */
+export function resolveApiConfig(
+  overrides: ApiConfigOverrides = {},
+  options: { readonly appEnv?: string | undefined } = {},
+): ApiConfig {
   const config = merge(defaultApiConfig, overrides, "") as ApiConfig;
   validate(config);
+  if (!isDevelopmentEnv(options.appEnv)) validateFloors(config);
   return deepFreeze(config);
 }
 
 /** Reads optional overrides from `API_CONFIG_JSON` (for example from Secret Manager or deploy config). */
 export function apiConfigFromEnv(env: Readonly<Record<string, string | undefined>>): ApiConfig {
   const raw = env["API_CONFIG_JSON"]?.trim();
-  if (raw === undefined || raw === "") return resolveApiConfig();
+  const options = { appEnv: env["APP_ENV"] };
+  if (raw === undefined || raw === "") return resolveApiConfig({}, options);
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch {
     throw new Error("API_CONFIG_JSON is not valid JSON");
   }
-  return resolveApiConfig(parsed as ApiConfigOverrides);
+  return resolveApiConfig(parsed as ApiConfigOverrides, options);
 }
 
 function deepFreeze<T>(value: T): T {

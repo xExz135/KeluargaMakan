@@ -34,6 +34,41 @@ describe("api config (T-017)", () => {
     expect(() => resolveApiConfig({ signInCode: { length: "6" } } as never)).toThrow(/number/);
   });
 
+  it("L5 outside local and test: code length at least 6 and at most 5 attempts", () => {
+    for (const appEnv of ["production", "staging", undefined, "unknown"]) {
+      expect(() => resolveApiConfig({ signInCode: { length: 4 } }, { appEnv })).toThrow(
+        /at least 6/,
+      );
+      expect(() => resolveApiConfig({ signInCode: { maxAttempts: 6 } }, { appEnv })).toThrow(
+        /at most 5/,
+      );
+    }
+    expect(
+      resolveApiConfig({ signInCode: { length: 4, maxAttempts: 10 } }, { appEnv: "test" }),
+    ).toBeTruthy();
+    expect(() =>
+      apiConfigFromEnv({ APP_ENV: "production", API_CONFIG_JSON: '{"signInCode":{"length":4}}' }),
+    ).toThrow(/at least 6/);
+  });
+
+  it("M1 per-destination daily caps exist, with floors outside local and test", () => {
+    expect(defaultApiConfig.rateLimits.codeVerifyFailuresPerDestination.windowSeconds).toBe(86_400);
+    expect(defaultApiConfig.rateLimits.codeRequestPerDestinationDaily.windowSeconds).toBe(86_400);
+    const weak = [
+      { codeVerifyFailuresPerDestination: { limit: 100 } },
+      { codeVerifyFailuresPerDestination: { windowSeconds: 3600 } },
+      { codeRequestPerDestinationDaily: { limit: 50 } },
+      { codeRequestPerDestinationDaily: { windowSeconds: 3600 } },
+    ];
+    for (const rateLimits of weak) {
+      expect(
+        () => resolveApiConfig({ rateLimits }, { appEnv: "production" }),
+        JSON.stringify(rateLimits),
+      ).toThrow(/outside local and test/);
+      expect(resolveApiConfig({ rateLimits }, { appEnv: "local" })).toBeTruthy();
+    }
+  });
+
   it("reads overrides from API_CONFIG_JSON", () => {
     expect(apiConfigFromEnv({}).signInCode.length).toBe(6);
     expect(

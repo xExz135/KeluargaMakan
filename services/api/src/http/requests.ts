@@ -1,5 +1,5 @@
 import type { DeviceInfo } from "../auth/auth-service.js";
-import { normalizeDestination, type SignInChannel } from "../auth/destination.js";
+import { canonicalDestination, type SignInChannel } from "../auth/destination.js";
 import type {
   AvatarInput,
   HouseholdCreateInput,
@@ -30,7 +30,7 @@ export function parseSignInCodeRequest(body: unknown): {
   const language = reader.enumValue(record, "language", "", LANGUAGES, true);
   let destination: string | null = null;
   if (channel !== undefined && typeof raw === "string") {
-    destination = normalizeDestination(channel, raw);
+    destination = canonicalDestination(channel, raw);
     if (destination === null) reader.fail("/destination", "invalid_format");
   }
   reader.done();
