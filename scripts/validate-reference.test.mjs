@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, describe, it } from "node:test";
 
+import { malformedIngredients } from "../data/fixtures/cek-aman/malformed-reference.fixture.ts";
 import { fixtureMembers } from "../data/fixtures/cek-aman/members.fixture.ts";
 import { fixtureReference } from "../data/fixtures/cek-aman/reference.fixture.ts";
 import * as vocabulary from "../packages/cek-aman/src/vocabulary.ts";
@@ -75,6 +76,14 @@ describe("SAF-13 DAT-06 reference data validator", () => {
     assert.deepEqual(errors, []);
   });
 
+  it("PRF-03 DAT-06 every record of the malformed fixture is rejected by the schema", () => {
+    assert.ok(malformedIngredients.length > 0);
+    for (const record of malformedIngredients) {
+      const data = JSON.parse(JSON.stringify(record));
+      assert.notDeepEqual(schemaErrors(validators.ingredient, data), [], record.id);
+    }
+  });
+
   it("PRF-03 PRF-08 every fixture hard rule matches the hard-rule schema", () => {
     for (const member of Object.values(fixtureMembers)) {
       for (const rule of member.hardRules) {
@@ -107,6 +116,14 @@ describe("SAF-13 DAT-06 reference data validator", () => {
     [
       "PRF-03 vegan while not vegetarian",
       { diet: { verification: "verified", vegetarian: "not_suitable", vegan: "suitable" } },
+    ],
+    [
+      "PRF-03 vegan suitable while vegetarian uncertain",
+      { diet: { verification: "verified", vegetarian: "uncertain", vegan: "suitable" } },
+    ],
+    [
+      "PRF-03 vegan suitable while vegetarian unknown",
+      { diet: { verification: "verified", vegetarian: "unknown", vegan: "suitable" } },
     ],
     ["SAF-07 brand variants while brandVaries is false", { brandVariants: [variant("fx_b")] }],
     ["SAF-07 brandVaries missing", { brandVaries: undefined }],

@@ -5,6 +5,7 @@ import {
   ownItems,
   ownList,
   readSafetyData,
+  type NormalizedDiet,
   type NormalizedSafetyData,
 } from "./normalize.js";
 import { classifyRule, type ClassifiedRule, type EvaluableRule } from "./rules.js";
@@ -297,11 +298,28 @@ function evaluateHalal(finding: Finding): PartialReason[] {
   return [];
 }
 
+/** Higher is worse. When two values must both hold, the worse one applies. */
+const DIET_RANK: Readonly<Record<DietSuitability, number>> = {
+  suitable: 0,
+  uncertain: 1,
+  unknown: 1,
+  not_suitable: 2,
+};
+
+/**
+ * PRF-03: what an ingredient's diet data say for one rule. Vegan food must also
+ * be vegetarian, so a vegan rule takes the worse of the two values: not
+ * vegetarian is not vegan, and an uncertain or unknown vegetarian value is
+ * never Safe for a vegan, whatever the vegan field says.
+ */
+function dietValue(diet: "vegetarian" | "vegan", data: NormalizedDiet): DietSuitability {
+  if (diet === "vegetarian") return data.vegetarian;
+  return DIET_RANK[data.vegetarian] > DIET_RANK[data.vegan] ? data.vegetarian : data.vegan;
+}
+
 function evaluateDiet(diet: "vegetarian" | "vegan", finding: Finding): PartialReason[] {
   const data = finding.data.diet;
-  // Anything not vegetarian is not vegan either, whatever the vegan field says.
-  const value: DietSuitability =
-    diet === "vegan" && data.vegetarian === "not_suitable" ? "not_suitable" : data[diet];
+  const value = dietValue(diet, data);
   if (value === "not_suitable") return [notSafe(finding, "diet_not_suitable", diet)];
   if (value !== "suitable" || !data.verified) return [checkLabel(finding, "diet_uncertain", diet)];
   return [];

@@ -121,11 +121,22 @@
         "vegetarian": { "$ref": "common.schema.json#/$defs/dietSuitability" },
         "vegan": { "$ref": "common.schema.json#/$defs/dietSuitability" }
       },
-      "if": { "properties": { "vegetarian": { "const": "not_suitable" } } },
-      "then": {
-        "description": "Anything not vegetarian is not vegan.",
-        "properties": { "vegan": { "const": "not_suitable" } }
-      }
+      "allOf": [
+        {
+          "if": { "properties": { "vegetarian": { "const": "not_suitable" } } },
+          "then": {
+            "description": "Anything not vegetarian is not vegan.",
+            "properties": { "vegan": { "const": "not_suitable" } }
+          }
+        },
+        {
+          "if": { "properties": { "vegan": { "const": "suitable" } } },
+          "then": {
+            "description": "Vegan food is also vegetarian: vegan suitable requires vegetarian suitable.",
+            "properties": { "vegetarian": { "const": "suitable" } }
+          }
+        }
+      ]
     },
     "brandVariant": {
       "description": "SAF-07: data for one brand. Only a verified variant replaces the generic data.",
