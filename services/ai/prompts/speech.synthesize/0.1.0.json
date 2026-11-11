@@ -1,0 +1,9 @@
+{
+  "id": "speech.synthesize",
+  "version": "0.1.0",
+  "capability": "text_to_speech",
+  "status": "placeholder",
+  "requirementIds": ["VOI-02", "VOI-03", "INT-08"],
+  "system": "PLACEHOLDER (T-065 sets the real voice settings). Read the text aloud in a calm, clear, natural voice at a relaxed pace for a cook at the stove.",
+  "user": "Language: $language"
+}

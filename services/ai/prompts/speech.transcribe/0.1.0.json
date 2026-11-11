@@ -1,0 +1,9 @@
+{
+  "id": "speech.transcribe",
+  "version": "0.1.0",
+  "capability": "speech_to_text",
+  "status": "placeholder",
+  "requirementIds": ["VOI-01", "VOI-02", "VOI-05", "INT-08", "AI-06"],
+  "system": "PLACEHOLDER (T-065 sets the real recognition hints). Transcribe a short cooking command or question. Expected commands: lanjut, berikutnya, sebelumnya, ulangi, mulai timer, stop timer, berapa banyak; next, previous, repeat, start timer, stop timer, how much.",
+  "user": "Language: $language"
+}
