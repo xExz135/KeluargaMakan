@@ -292,6 +292,34 @@ export const regressionCases: readonly RegressionCase[] = [
     ingredients: [...base, "fx_kaldu_bubuk"],
     expect: { ayah: ["check_label", "halal_uncertain"] },
   },
+  {
+    id: "REG-034",
+    requirements: ["SAF-08"],
+    title: "frog meat (non-halal animal source) with a halal rule",
+    ingredients: [...base, "fx_daging_kodok"],
+    expect: {
+      ayah: ["not_safe", "halal_not_halal"],
+      tante: ["not_safe", "diet_not_suitable"],
+      ibu: ["safe"],
+      kakak: ["safe"],
+    },
+  },
+  {
+    id: "REG-035",
+    requirements: ["SAF-08", "DAT-06"],
+    title: "contradictory data: marked halal but lists alcohol is Not safe, never Safe",
+    reference: malformedReference,
+    ingredients: [...base, "fx_bad_halal_with_alcohol"],
+    expect: { ayah: ["not_safe", "halal_not_halal"], ibu: ["safe"] },
+  },
+  {
+    id: "REG-036",
+    requirements: ["SAF-08", "DAT-06"],
+    title: "contradictory data: marked halal but lists a non-halal animal source",
+    reference: malformedReference,
+    ingredients: [...base, "fx_bad_halal_with_animal"],
+    expect: { ayah: ["not_safe", "halal_not_halal"], pakde: ["not_safe", "halal_not_halal"] },
+  },
 
   // --- SAF-09 custom ingredients and unmapped rules --------------------------
   {

@@ -129,6 +129,11 @@ export const fixtureIngredients: readonly ReferenceIngredient[] = [
   }),
   ingredient("fx_ikan", "Ikan", "Fish", "seafood", { allergens: contains("fish"), diet: animal }),
   ingredient("fx_alkohol", "Alkohol", "Alcohol", "additive", { halal: notHalal("alcohol") }),
+  // SAF-08 non-halal animal source (fixture value only).
+  ingredient("fx_daging_kodok", "Daging kodok", "Frog meat", "protein", {
+    halal: notHalal("non_halal_animal"),
+    diet: animal,
+  }),
 
   // SAF-06 hidden components (fixture values only)
   ingredient("fx_terasi", "Terasi", "Shrimp paste", "condiment", {

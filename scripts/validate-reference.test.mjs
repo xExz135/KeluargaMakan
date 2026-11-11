@@ -76,7 +76,7 @@ describe("SAF-13 DAT-06 reference data validator", () => {
     assert.deepEqual(errors, []);
   });
 
-  it("PRF-03 DAT-06 every record of the malformed fixture is rejected by the schema", () => {
+  it("SAF-08 PRF-03 DAT-06 every record of the malformed fixture is rejected by the schema", () => {
     assert.ok(malformedIngredients.length > 0);
     for (const record of malformedIngredients) {
       const data = JSON.parse(JSON.stringify(record));
@@ -124,6 +124,16 @@ describe("SAF-13 DAT-06 reference data validator", () => {
     [
       "PRF-03 vegan suitable while vegetarian unknown",
       { diet: { verification: "verified", vegetarian: "unknown", vegan: "suitable" } },
+    ],
+    [
+      "SAF-08 halal with a non-halal animal source",
+      {
+        halal: {
+          verification: "verified",
+          value: "halal",
+          nonHalalSources: ["non_halal_animal"],
+        },
+      },
     ],
     ["SAF-07 brand variants while brandVaries is false", { brandVariants: [variant("fx_b")] }],
     ["SAF-07 brandVaries missing", { brandVaries: undefined }],
