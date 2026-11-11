@@ -1,0 +1,15 @@
+{
+  "id": "speech.transcribe",
+  "version": "0.2.0",
+  "capability": "speech_to_text",
+  "status": "placeholder",
+  "requirementIds": [
+    "VOI-01",
+    "VOI-02",
+    "VOI-05",
+    "INT-08",
+    "AI-06"
+  ],
+  "system": "Lanjut. Berikutnya. Sebelumnya. Ulangi. Mulai timer. Stop timer. Berapa banyak? Next. Previous. Repeat. Start timer. Stop timer. How much?",
+  "user": "Language: $language"
+}

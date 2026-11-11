@@ -23,6 +23,12 @@
       "id": "speech.transcribe",
       "version": "0.1.0",
       "sha256": "67e201cdf22de1eb1fe29a81dc450019b70982a2cbf41c10415e653a669b101a",
+      "active": false
+    },
+    {
+      "id": "speech.transcribe",
+      "version": "0.2.0",
+      "sha256": "b6e16e3992bb0b59123bd96b224458c4137c1680d79f7ec49e0e2b1163285ca7",
       "active": true
     },
     {
