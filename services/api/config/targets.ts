@@ -6,8 +6,9 @@
  * records the SRS requirement it comes from and whether the value is still a
  * target or has been confirmed by the owner.
  *
- * Only V1 figures are listed. Later-phase targets (for example KIT-13, JRM-07,
- * DAT-04) are added when their phase starts. Mobile-only targets (NFR-01,
+ * Only V1 figures are listed. Later-phase targets (for example KIT-13, JRM-07)
+ * are added when their phase starts. DAT-04 (V2) is listed because V1 keeps
+ * cooked-meal records under the same retention (QUESTIONS #19). Mobile-only targets (NFR-01,
  * NFR-02, INT-04) belong in the mobile remote config.
  */
 
@@ -47,6 +48,8 @@ export interface Targets {
     readonly healthConsentWithdrawalDeletionDays: Target<number>;
     readonly accountDeletionDays: Target<number>;
     readonly safetyLogRetentionYears: Target<number>;
+    /** Cooked-meal records (QUESTIONS #19: DAT-04 retention applies in V1). */
+    readonly mealHistoryRetentionYears: Target<number>;
     readonly backupRestoreTestIntervalMonths: Target<number>;
   };
   readonly serviceLevels: {
@@ -96,6 +99,7 @@ export const defaultTargets: Targets = deepFreeze({
     healthConsentWithdrawalDeletionDays: target(30, "days", "SET-04"),
     accountDeletionDays: target(30, "days", "SET-08"),
     safetyLogRetentionYears: target(2, "years", "DAT-05"),
+    mealHistoryRetentionYears: target(2, "years", "DAT-04"),
     backupRestoreTestIntervalMonths: target(3, "months", "DAT-07"),
   },
   serviceLevels: {
