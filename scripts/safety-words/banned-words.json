@@ -1,0 +1,126 @@
+{
+  "$comment": "NFR-14, SAF-04, INT-03 (owner decision 2026-11-11, QUESTIONS #41). Machine-readable copy of the banned safety wording in docs/design/system/safety-badges.md v1.0 section 5 (owner: ux-designer). The docs are not committed, so this file is the copy CI reads. `doc` mirrors that section exactly; `derived` is qa-engineer's stricter reading of the same page (sections 4.3, 5 'Also banned' and 7.5), not new banned words. Change it only together with the page; scripts/check-safety-words.test.mjs pins every value. Key patterns use copy-deck keys: `a.b.c` exact, `a.b.c*` any key starting with it, `a.b.*` any key under it.",
+  "schema": "keluargamakan.safety-words/1",
+  "source": {
+    "document": "docs/design/system/safety-badges.md",
+    "version": "1.0",
+    "section": "5. Banned wording"
+  },
+  "doc": {
+    "softeners": [
+      "mungkin",
+      "sebaiknya",
+      "agak",
+      "kurang",
+      "sedikit",
+      "sepertinya",
+      "disarankan",
+      "kemungkinan",
+      "cukup",
+      "relatif",
+      "may",
+      "might",
+      "maybe",
+      "probably",
+      "possibly",
+      "slightly",
+      "a bit",
+      "consider",
+      "suggest",
+      "try to avoid"
+    ],
+    "inflation": [
+      "100%",
+      "dijamin",
+      "pasti",
+      "terjamin",
+      "sepenuhnya",
+      "benar-benar",
+      "guaranteed",
+      "completely",
+      "totally",
+      "fully",
+      "certified",
+      "always safe"
+    ],
+    "overrides": [
+      "abaikan",
+      "lewati",
+      "tetap",
+      "saya yakin",
+      "saya tahu",
+      "izinkan",
+      "buka kunci",
+      "ignore",
+      "skip",
+      "override",
+      "anyway",
+      "I'm sure",
+      "unlock"
+    ],
+    "softenerKeys": [
+      "safety.state.notSafe",
+      "safety.badge.notSafe*",
+      "safety.a11y.notSafe*",
+      "safety.why.notSafeTitle",
+      "safety.why.ingredient",
+      "safety.why.rule",
+      "safety.why.component",
+      "recipe.notSafeDialog.*",
+      "cook.safetyNote.*",
+      "help.cekAman.stateNotSafe"
+    ],
+    "inflationKeys": [
+      "safety.state.safe",
+      "safety.badge.safe*",
+      "safety.a11y.safe",
+      "help.cekAman.stateSafe",
+      "help.cekAman.savedBody"
+    ],
+    "overrideKeys": [
+      "safety.*",
+      "help.cekAman.*",
+      "recipe.notSafeDialog.*",
+      "cook.safetyNote.*",
+      "cook.checkLabelNote*"
+    ],
+    "allowedInCheckLabel": ["belum pasti", "bisa mengandung", "may contain"],
+    "stateWordsNotForOtherUse": ["aman", "cek"],
+    "badgeHealthClaims": ["baik untuk", "sehat", "cocok untuk diabetes"]
+  },
+  "derived": {
+    "$comment": "Stricter reading of the same page. stateWords: the three state words (section 3.1). featureNames: the proper noun 'Cek Aman', not a verdict, removed before the other-use check. stateWordsNotForOtherUse: English state words (the page names only the Indonesian ones). notSafeKeys: Not safe strings added after section 5 was written (safety.mini.notSafe, section 6) and rule labels shown inside Not safe lines (section 4.2). checkLabelKeys: Cek label strings (sections 4.1, 4.3, 7.3, 7.5; the decision covers softeners on Cek label too). cekAmanSurfaceKeys: the safety surfaces of section 7.5 plus help.cekAman, the only keys that may use the state words. badgeKeys: badge text (state words, badges, mini marks and their screen-reader sentences).",
+    "stateWords": {
+      "safe": ["aman", "safe"],
+      "notSafe": ["tidak aman", "not safe"],
+      "checkLabel": ["cek label", "check the label"]
+    },
+    "featureNames": ["cek aman"],
+    "stateWordsNotForOtherUse": ["safe", "check the label"],
+    "notSafeKeys": ["safety.mini.notSafe*", "safety.rule.*"],
+    "checkLabelKeys": [
+      "safety.state.checkLabel",
+      "safety.badge.checkLabel*",
+      "safety.mini.checkLabel*",
+      "safety.a11y.checkLabel*",
+      "safety.reason.*",
+      "safety.rule.*",
+      "safety.why.check*",
+      "safety.why.recordBrand",
+      "cook.checkLabelNote*",
+      "help.cekAman.stateCheck*",
+      "help.cekAman.check*",
+      "recipe.halal.check*"
+    ],
+    "cekAmanSurfaceKeys": [
+      "safety.*",
+      "help.cekAman.*",
+      "recipe.notSafeDialog.*",
+      "recipe.halal.*",
+      "cook.safetyNote.*",
+      "cook.checkLabelNote*",
+      "cook.safety.*"
+    ],
+    "badgeKeys": ["safety.state.*", "safety.badge.*", "safety.mini.*", "safety.a11y.*"]
+  }
+}

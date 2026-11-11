@@ -1,0 +1,37 @@
+{
+  "$comment": "TEST FIXTURE: allowlist for scripts/check-safety-words.test.mjs (NFR-14). Not the real allowlist.",
+  "schema": "keluargamakan.safety-words-allowlist/1",
+  "entries": [
+    {
+      "key": "settingsSafeModeTitle",
+      "rule": "state-word-outside-cek-aman",
+      "terms": ["safe"],
+      "reason": "TEST FIXTURE: Android term for a device mode, not a food verdict"
+    },
+    {
+      "key": "safetyPanelStillSaved",
+      "rule": "override-in-safety-string",
+      "terms": ["anyway"],
+      "locales": ["en"],
+      "reason": "TEST FIXTURE: describes storage, not an override control"
+    },
+    {
+      "key": "planShareBody",
+      "rule": "override-in-safety-string",
+      "terms": ["ignore"],
+      "reason": "TEST FIXTURE: must never apply, the string carries Not safe"
+    },
+    {
+      "key": "planShareBody",
+      "rule": "state-word-outside-cek-aman",
+      "terms": ["safe"],
+      "reason": "TEST FIXTURE: names a Cek Aman result outside the safety surfaces"
+    },
+    {
+      "key": "removedKey",
+      "rule": "state-word-outside-cek-aman",
+      "terms": ["aman"],
+      "reason": "TEST FIXTURE: stale entry, the key does not exist"
+    }
+  ]
+}

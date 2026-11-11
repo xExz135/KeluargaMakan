@@ -1,0 +1,5 @@
+{
+  "$comment": "NFR-14 safety word check allowlist. Each entry exempts one ARB key from one rule for the listed words only, and needs a reason a reviewer can check. Only the rules in ALLOWLISTABLE_RULES (scripts/check-safety-words.mjs) can be allowlisted, and never an override word on a string that carries Tidak aman / Not safe or Cek label / Check the label. An entry that no longer matches a finding fails the check, so remove it when the string changes. Changes need qa-engineer and ux-designer review.",
+  "schema": "keluargamakan.safety-words-allowlist/1",
+  "entries": []
+}
