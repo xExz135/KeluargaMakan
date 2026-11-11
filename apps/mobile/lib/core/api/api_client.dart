@@ -26,20 +26,36 @@ import 'token_store.dart';
 
 /// Where the API lives. Set per build with
 /// `--dart-define=KM_API_BASE_URL=https://...`; no secrets here.
+///
+/// Only `https` is accepted, except in debug builds, where `http` is allowed
+/// for a local server on [localHosts] (security review M1). Android's
+/// cleartext block does not cover Dart sockets, so this check is what keeps
+/// tokens and hard rules off plain HTTP. A refused URL counts as "not
+/// configured": nothing is sent.
 final class ApiEnvironment {
-  const ApiEnvironment(this.baseUrl);
+  const ApiEnvironment(this.baseUrl, {this.debugBuild = kDebugMode});
 
   factory ApiEnvironment.fromBuild() =>
       ApiEnvironment(Uri.parse(const String.fromEnvironment(_key)));
 
   static const _key = 'KM_API_BASE_URL';
 
+  /// This machine, and the host machine as seen from the Android emulator.
+  static const localHosts = {'localhost', '127.0.0.1', '10.0.2.2'};
+
   /// Empty when no base URL was provided at build time.
   final Uri baseUrl;
 
-  bool get isConfigured =>
-      (baseUrl.isScheme('https') || baseUrl.isScheme('http')) &&
-      baseUrl.host.isNotEmpty;
+  /// True only in debug builds; release and profile builds require https.
+  final bool debugBuild;
+
+  bool get isConfigured {
+    if (baseUrl.host.isEmpty || baseUrl.userInfo.isNotEmpty) return false;
+    if (baseUrl.isScheme('https')) return true;
+    return debugBuild &&
+        baseUrl.isScheme('http') &&
+        localHosts.contains(baseUrl.host);
+  }
 
   /// The generated client appends paths such as `/v1/account`.
   String get basePath {
