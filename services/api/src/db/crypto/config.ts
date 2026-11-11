@@ -36,6 +36,15 @@ function optional(env: KeyProviderEnv, name: string): string | null {
   return value === undefined || value.trim() === "" ? null : value.trim();
 }
 
+function callTimeout(env: KeyProviderEnv): { callTimeoutMs?: number } {
+  const value = optional(env, "KMS_CALL_TIMEOUT_MS");
+  if (value === null) return {};
+  if (!/^[0-9]{1,5}$/.test(value)) {
+    throw new KeyServiceError("KMS_CALL_TIMEOUT_MS must be a whole number of milliseconds");
+  }
+  return { callTimeoutMs: Number(value) };
+}
+
 function base64Key(env: KeyProviderEnv, name: string): Buffer {
   const text = required(env, name);
   if (!/^[A-Za-z0-9+/]{43}=$/.test(text)) {
@@ -65,6 +74,7 @@ export function createKeyProvider(env: KeyProviderEnv, deps: KeyProviderDeps = {
           health: required(env, "KMS_HEALTH_DATA_KEY"),
         },
         deps.kmsClient,
+        callTimeout(env),
       );
     }
     default:

@@ -24,17 +24,46 @@ import {
 
 type Bytes = Uint8Array | string | null | undefined;
 
+/** Per-call options, as `CallOptions` in the Google client (`timeout` in milliseconds). */
+export interface KmsCallOptions {
+  readonly timeout: number;
+}
+
 export interface KmsClient {
-  encrypt(request: {
-    name: string;
-    plaintext: Uint8Array;
-    additionalAuthenticatedData: Uint8Array;
-  }): Promise<readonly [{ ciphertext?: Bytes }, ...unknown[]]>;
-  decrypt(request: {
-    name: string;
-    ciphertext: Uint8Array;
-    additionalAuthenticatedData: Uint8Array;
-  }): Promise<readonly [{ plaintext?: Bytes }, ...unknown[]]>;
+  encrypt(
+    request: {
+      name: string;
+      plaintext: Uint8Array;
+      additionalAuthenticatedData: Uint8Array;
+    },
+    options?: KmsCallOptions,
+  ): Promise<readonly [{ ciphertext?: Bytes }, ...unknown[]]>;
+  decrypt(
+    request: {
+      name: string;
+      ciphertext: Uint8Array;
+      additionalAuthenticatedData: Uint8Array;
+    },
+    options?: KmsCallOptions,
+  ): Promise<readonly [{ plaintext?: Bytes }, ...unknown[]]>;
+}
+
+/**
+ * Security re-check T-016 N2: a deadline for every Cloud KMS call, passed to
+ * the client and also enforced here, so a stuck call fails fast with
+ * `KeyServiceError` instead of waiting for the client default (up to 60 s).
+ * Not an SRS figure; operational default, overridable by `KMS_CALL_TIMEOUT_MS`.
+ */
+export const DEFAULT_KMS_CALL_TIMEOUT_MS = 2_000;
+
+class DeadlineExceeded extends Error {}
+
+function withDeadline<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new DeadlineExceeded()), ms);
+  });
+  return Promise.race([promise, deadline]).finally(() => clearTimeout(timer));
 }
 
 const CRYPTO_KEY_NAME =
@@ -65,22 +94,33 @@ class CloudKmsKek implements KeyEncryptionKey {
   readonly purpose: KeyPurpose;
   readonly keyRef: string;
   readonly #client: KmsClient;
+  readonly #timeoutMs: number;
 
-  constructor(purpose: KeyPurpose, keyName: string, client: KmsClient) {
+  constructor(purpose: KeyPurpose, keyName: string, client: KmsClient, timeoutMs: number) {
     this.purpose = purpose;
     this.keyRef = keyName;
     this.#client = client;
+    this.#timeoutMs = timeoutMs;
   }
 
   async wrap(dataKey: Uint8Array, context: string): Promise<WrappedKey> {
     let response;
     try {
-      [response] = await this.#client.encrypt({
-        name: this.keyRef,
-        plaintext: dataKey,
-        additionalAuthenticatedData: aadFor(this.purpose, context),
-      });
+      [response] = await withDeadline(
+        this.#client.encrypt(
+          {
+            name: this.keyRef,
+            plaintext: dataKey,
+            additionalAuthenticatedData: aadFor(this.purpose, context),
+          },
+          { timeout: this.#timeoutMs },
+        ),
+        this.#timeoutMs,
+      );
     } catch (cause) {
+      if (cause instanceof DeadlineExceeded) {
+        throw new KeyServiceError(`Cloud KMS encrypt timed out for the ${this.purpose} key`);
+      }
       throw new KeyServiceError(`Cloud KMS encrypt failed for the ${this.purpose} key`, { cause });
     }
     const wrapped = toBytes(response.ciphertext);
@@ -96,12 +136,21 @@ class CloudKmsKek implements KeyEncryptionKey {
     }
     let response;
     try {
-      [response] = await this.#client.decrypt({
-        name: this.keyRef,
-        ciphertext: wrapped.wrapped,
-        additionalAuthenticatedData: aadFor(this.purpose, context),
-      });
+      [response] = await withDeadline(
+        this.#client.decrypt(
+          {
+            name: this.keyRef,
+            ciphertext: wrapped.wrapped,
+            additionalAuthenticatedData: aadFor(this.purpose, context),
+          },
+          { timeout: this.#timeoutMs },
+        ),
+        this.#timeoutMs,
+      );
     } catch (cause) {
+      if (cause instanceof DeadlineExceeded) {
+        throw new KeyServiceError(`Cloud KMS decrypt timed out for the ${this.purpose} key`);
+      }
       if (isInvalidArgument(cause)) throw new DecryptionError(undefined, { cause });
       throw new KeyServiceError(`Cloud KMS decrypt failed for the ${this.purpose} key`, { cause });
     }
@@ -123,7 +172,15 @@ export class CloudKmsKeyProvider implements KeyProvider {
   readonly #general: CloudKmsKek | null;
   readonly #health: CloudKmsKek;
 
-  constructor(keyNames: CloudKmsKeyNames, client: KmsClient) {
+  constructor(
+    keyNames: CloudKmsKeyNames,
+    client: KmsClient,
+    options: { readonly callTimeoutMs?: number } = {},
+  ) {
+    const timeoutMs = options.callTimeoutMs ?? DEFAULT_KMS_CALL_TIMEOUT_MS;
+    if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 60_000) {
+      throw new KeyServiceError("the KMS call timeout must be 1 to 60000 milliseconds");
+    }
     if (!CRYPTO_KEY_NAME.test(keyNames.health)) {
       throw new KeyServiceError("KMS health key name is not a Cloud KMS crypto key name");
     }
@@ -134,8 +191,10 @@ export class CloudKmsKeyProvider implements KeyProvider {
       throw new KeyServiceError("the general and health KMS keys must differ (DAT-02)");
     }
     this.#general =
-      keyNames.general === null ? null : new CloudKmsKek("general", keyNames.general, client);
-    this.#health = new CloudKmsKek("health", keyNames.health, client);
+      keyNames.general === null
+        ? null
+        : new CloudKmsKek("general", keyNames.general, client, timeoutMs);
+    this.#health = new CloudKmsKek("health", keyNames.health, client, timeoutMs);
   }
 
   kek(purpose: KeyPurpose): KeyEncryptionKey {

@@ -24,6 +24,18 @@ export const RULE_BODY_VERSION = 1;
 export const FREE_TEXT_MAX = 200;
 export const MAPPED_INGREDIENTS_MAX = 20;
 
+/**
+ * Security re-check T-016 N1: every hard-rule body is padded to this one size
+ * before encryption, so the ciphertext length does not reveal the rule type or
+ * allergen. The largest valid body (200 characters of free text that JSON
+ * escapes to 6 bytes each, 20 mapped IDs of 100 characters, the longest type,
+ * status and confirmer) is about 3.4 KiB; a test builds it and checks it fits.
+ * A body that does not fit is refused, never truncated.
+ */
+export const HARD_RULE_PADDED_BYTES = 4096;
+/** Content bytes that fit `HARD_RULE_PADDED_BYTES` after the 4-byte length prefix. */
+export const HARD_RULE_BODY_MAX_BYTES = HARD_RULE_PADDED_BYTES - 4;
+
 export interface RuleMappingBody {
   readonly status: MappingStatus;
   readonly ingredientIds: readonly string[];
@@ -182,7 +194,11 @@ export function decodeRuleBody(json: string): HardRuleBody {
 }
 
 export function encodeRuleBody(body: HardRuleBody): string {
-  return JSON.stringify(parseRuleBody(body));
+  const json = JSON.stringify(parseRuleBody(body));
+  if (Buffer.byteLength(json, "utf8") > HARD_RULE_BODY_MAX_BYTES) {
+    throw new RuleBodyError("rule body is too large to pad");
+  }
+  return json;
 }
 
 /** The Cek Aman input shape (packages/cek-aman `HardRule`) for one stored rule. */

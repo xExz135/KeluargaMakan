@@ -2,9 +2,22 @@ import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 
 import { describe, expect, it } from "vitest";
 
-import { CloudKmsKeyProvider, type KmsClient } from "./cloud-kms-key-provider.js";
+import { seal } from "./aes-gcm.js";
+import {
+  CloudKmsKeyProvider,
+  DEFAULT_KMS_CALL_TIMEOUT_MS,
+  type KmsClient,
+} from "./cloud-kms-key-provider.js";
 import { createKeyProvider } from "./config.js";
-import { decryptField, encryptField } from "./data-key-cipher.js";
+import {
+  CIPHERTEXT_OVERHEAD_BYTES,
+  MAX_BUCKET_BYTES,
+  MIN_BUCKET_BYTES,
+  PaddingError,
+  bucketFor,
+  decryptField,
+  encryptField,
+} from "./data-key-cipher.js";
 import { DecryptionError, KeyServiceError } from "./key-provider.js";
 import { LocalKeyProvider } from "./local-key-provider.js";
 
@@ -119,7 +132,7 @@ describe("DAT-02 local key provider", () => {
 describe("DAT-02 field encryption", () => {
   it("round-trips and binds the ciphertext to its row context", () => {
     const dek = dataKey();
-    const blob = encryptField(dek, '{"type":"allergy"}', "hard_rule:1:a:h");
+    const blob = encryptField(dek, '{"type":"allergy"}', "hard_rule:1:a:h", 64);
     expect(blob.toString("utf8")).not.toContain("allergy");
     expect(decryptField(dek, blob, "hard_rule:1:a:h")).toBe('{"type":"allergy"}');
     expect(() => decryptField(dek, blob, "hard_rule:2:a:h")).toThrow(DecryptionError);
@@ -128,7 +141,7 @@ describe("DAT-02 field encryption", () => {
 
   it("rejects tampered and truncated ciphertext", () => {
     const dek = dataKey();
-    const blob = encryptField(dek, "x", "c");
+    const blob = encryptField(dek, "x", "c", 64);
     const flipped = Buffer.from(blob);
     flipped[flipped.length - 1] = (flipped[flipped.length - 1] ?? 0) ^ 0xff;
     expect(() => decryptField(dek, flipped, "c")).toThrow(DecryptionError);
@@ -137,7 +150,112 @@ describe("DAT-02 field encryption", () => {
 
   it("uses a fresh IV every time", () => {
     const dek = dataKey();
-    expect(encryptField(dek, "same", "c").equals(encryptField(dek, "same", "c"))).toBe(false);
+    expect(encryptField(dek, "same", "c", 64).equals(encryptField(dek, "same", "c", 64))).toBe(
+      false,
+    );
+  });
+});
+
+describe("N1 padding hides the plaintext length", () => {
+  /** Encrypts a hand-built padded plaintext in the v2 format (to test the decoder). */
+  function sealRaw(dek: Buffer, padded: Buffer, context: string): Buffer {
+    const sealed = seal(dek, padded, Buffer.from(`keluargamakan.field.v2|${context}`, "utf8"));
+    return Buffer.concat([Buffer.from([0x02]), sealed.iv, sealed.tag, sealed.ciphertext]);
+  }
+
+  it("N1 contents of any length encrypt to the same length", () => {
+    const dek = dataKey();
+    const lengths = new Set(
+      ["", "a", "x".repeat(500), "é".repeat(100)].map(
+        (text) => encryptField(dek, text, "c", 1024).length,
+      ),
+    );
+    expect([...lengths]).toEqual([CIPHERTEXT_OVERHEAD_BYTES + 1024]);
+    expect(decryptField(dek, encryptField(dek, "é".repeat(100), "c", 1024), "c")).toBe(
+      "é".repeat(100),
+    );
+  });
+
+  it("N1 refuses content that does not fit, never truncates", () => {
+    const dek = dataKey();
+    expect(() => encryptField(dek, "x".repeat(61), "c", 64)).toThrow(PaddingError);
+    expect(() => encryptField(dek, "x".repeat(60), "c", 64)).not.toThrow();
+    expect(() => encryptField(dek, "x", "c", 3)).toThrow(PaddingError);
+  });
+
+  it("N1 rejects non-zero padding and a length prefix that does not fit (fail closed)", () => {
+    const dek = dataKey();
+    const padded = Buffer.alloc(64);
+    padded.writeUInt32BE(2, 0);
+    padded.write("ok", 4);
+    expect(decryptField(dek, sealRaw(dek, padded, "c"), "c")).toBe("ok");
+    const dirty = Buffer.from(padded);
+    dirty[40] = 1;
+    expect(() => decryptField(dek, sealRaw(dek, dirty, "c"), "c")).toThrow(/invalid padding/);
+    const long = Buffer.from(padded);
+    long.writeUInt32BE(61, 0);
+    expect(() => decryptField(dek, sealRaw(dek, long, "c"), "c")).toThrow(/invalid padding/);
+    const invalidUtf8 = Buffer.from(padded);
+    invalidUtf8[4] = 0xff;
+    expect(() => decryptField(dek, sealRaw(dek, invalidUtf8, "c"), "c")).toThrow(DecryptionError);
+  });
+
+  it("N1 buckets are powers of two from 1 KiB and refuse oversized content", () => {
+    expect(bucketFor([])).toBe(MIN_BUCKET_BYTES);
+    expect(bucketFor(["x".repeat(1020)])).toBe(1024);
+    expect(bucketFor(["x".repeat(1021)])).toBe(2048);
+    expect(bucketFor(["x", "x".repeat(5000)])).toBe(8192);
+    expect(() => bucketFor(["x".repeat(MAX_BUCKET_BYTES)])).toThrow(PaddingError);
+  });
+});
+
+describe("N2 the Cloud KMS call deadline", () => {
+  const KMS = {
+    general: null,
+    health:
+      "projects/example-project/locations/asia-southeast2/keyRings/test/cryptoKeys/health-data",
+  };
+
+  it("N2 a stuck KMS call fails fast with a key service error, and the deadline is passed on", async () => {
+    const seen: unknown[] = [];
+    const stuck: KmsClient = {
+      encrypt: (_request, options) => {
+        seen.push(options);
+        return new Promise(() => undefined);
+      },
+      decrypt: (_request, options) => {
+        seen.push(options);
+        return new Promise(() => undefined);
+      },
+    };
+    const provider = new CloudKmsKeyProvider(KMS, stuck, { callTimeoutMs: 50 });
+    const started = Date.now();
+    await expect(provider.kek("health").wrap(dataKey(), "ctx")).rejects.toThrow(/timed out/);
+    await expect(
+      provider.kek("health").unwrap({ keyRef: KMS.health, wrapped: randomBytes(40) }, "ctx"),
+    ).rejects.toBeInstanceOf(KeyServiceError);
+    expect(Date.now() - started).toBeLessThan(2_000);
+    expect(seen).toEqual([{ timeout: 50 }, { timeout: 50 }]);
+  });
+
+  it("N2 the deadline defaults to 2 s and is configurable within bounds", () => {
+    expect(DEFAULT_KMS_CALL_TIMEOUT_MS).toBe(2_000);
+    const client = fakeKms([KMS.health]);
+    expect(() => new CloudKmsKeyProvider(KMS, client, { callTimeoutMs: 0 })).toThrow(
+      KeyServiceError,
+    );
+    expect(() =>
+      createKeyProvider(
+        { KEY_PROVIDER: "cloud_kms", KMS_HEALTH_DATA_KEY: KMS.health, KMS_CALL_TIMEOUT_MS: "soon" },
+        { kmsClient: client },
+      ),
+    ).toThrow(/KMS_CALL_TIMEOUT_MS/);
+    expect(() =>
+      createKeyProvider(
+        { KEY_PROVIDER: "cloud_kms", KMS_HEALTH_DATA_KEY: KMS.health, KMS_CALL_TIMEOUT_MS: "1500" },
+        { kmsClient: client },
+      ),
+    ).not.toThrow();
   });
 });
 

@@ -1,9 +1,10 @@
 import { randomBytes, randomUUID } from "node:crypto";
 
 import { DATA_KEY_BYTES, type KeyEncryptionKey, type KeyProvider } from "./crypto/key-provider.js";
-import { NotFoundError, SQLSTATE, translateDbError } from "./errors.js";
+import { ConcurrentUpdateError, NotFoundError, SQLSTATE, translateDbError } from "./errors.js";
 import type { SqlExecutor } from "./executor.js";
 import { isUuid } from "./ids.js";
+import { lockMembers } from "./locks.js";
 
 /**
  * Per-member data keys for health data (DAT-02). Each member gets one random
@@ -27,6 +28,16 @@ export interface MemberDataKey {
   readonly profileId: string;
   readonly dataKey: Uint8Array;
 }
+
+/** Key service work done before a rule write's transaction (`prepare`). */
+export type PreparedKey =
+  | { readonly kind: "existing"; readonly key: MemberDataKey }
+  | {
+      readonly kind: "new";
+      readonly key: MemberDataKey;
+      readonly keyRef: string;
+      readonly wrapped: Buffer;
+    };
 
 /** A `health_data_key` row as read from the database. */
 export interface StoredKeyRow {
@@ -98,31 +109,55 @@ export class HealthDataKeys {
   }
 
   /**
-   * Returns the member's key, creating it on first use. For rule writes only:
-   * the caller holds the member lock (`lockMembers`) and has checked consent;
-   * the database refuses a new key without an active consent
-   * (`ConsentRequiredError`). The safety log never creates keys.
+   * N2 (security re-check T-016): the key service work for a rule write, done
+   * BEFORE the transaction and the member lock. Unwraps the member's current
+   * key, or wraps a fresh one if the member has none. `claim` then checks under
+   * the lock that nothing changed in between, without calling the key service.
+   * Call it on the pool, not inside a transaction.
    */
-  async getOrCreate(
-    db: SqlExecutor,
-    householdId: string,
-    profileId: string,
-  ): Promise<MemberDataKey> {
+  async prepare(db: SqlExecutor, householdId: string, profileId: string): Promise<PreparedKey> {
     if (!isUuid(householdId) || !isUuid(profileId)) throw new NotFoundError("profile");
     const existing = (await this.loadForProfiles(db, householdId, [profileId])).get(profileId);
-    if (existing !== undefined) return existing;
-
+    if (existing !== undefined) return { kind: "existing", key: existing };
     const keyId = randomUUID();
     const dataKey = randomBytes(DATA_KEY_BYTES);
     const wrapped = await this.#kek.wrap(dataKey, wrapContext(keyId, profileId, householdId));
-    let inserted;
+    return {
+      kind: "new",
+      key: { keyId, profileId, dataKey },
+      keyRef: wrapped.keyRef,
+      wrapped: Buffer.from(wrapped.wrapped),
+    };
+  }
+
+  /**
+   * Under the member lock (`lockMembers`), turns a prepared key into the
+   * member's current key: an existing key must still be the current one, and
+   * a new key is stored only if the member still has none. Otherwise it throws
+   * `ConcurrentUpdateError` (retryable). The database refuses a new key without
+   * an active consent (`ConsentRequiredError`). No key service call happens here.
+   */
+  async claim(
+    tx: SqlExecutor,
+    householdId: string,
+    profileId: string,
+    prepared: PreparedKey,
+  ): Promise<MemberDataKey> {
+    const { rows } = await tx.query<{ id: string }>(
+      `SELECT id FROM health_data_key WHERE household_id = $1 AND profile_id = $2`,
+      [householdId, profileId],
+    );
+    const current = rows[0]?.id;
+    if (prepared.kind === "existing") {
+      if (current !== prepared.key.keyId) throw new ConcurrentUpdateError();
+      return prepared.key;
+    }
+    if (current !== undefined) throw new ConcurrentUpdateError();
     try {
-      inserted = await db.query(
+      await tx.query(
         `INSERT INTO health_data_key (id, household_id, profile_id, key_ref, wrapped_key)
-         VALUES ($1, $2, $3, $4, $5)
-         ON CONFLICT (profile_id) DO NOTHING
-         RETURNING id`,
-        [keyId, householdId, profileId, wrapped.keyRef, Buffer.from(wrapped.wrapped)],
+         VALUES ($1, $2, $3, $4, $5)`,
+        [prepared.key.keyId, householdId, profileId, prepared.keyRef, prepared.wrapped],
       );
     } catch (error) {
       if (
@@ -132,12 +167,33 @@ export class HealthDataKeys {
       ) {
         throw new NotFoundError("profile");
       }
+      if (
+        typeof error === "object" &&
+        error !== null &&
+        (error as { code?: unknown }).code === SQLSTATE.uniqueViolation
+      ) {
+        throw new ConcurrentUpdateError();
+      }
       throw translateDbError(error);
     }
-    if (inserted.rowCount === 1) return { keyId, profileId, dataKey };
-    // Created concurrently by another request: use that one.
-    const created = (await this.loadForProfiles(db, householdId, [profileId])).get(profileId);
-    if (created === undefined) throw new NotFoundError("profile");
-    return created;
+    return prepared.key;
+  }
+
+  /**
+   * Returns the member's key, creating it on first use: `prepare` outside the
+   * transaction, then `claim` under the member lock. The database refuses a
+   * new key without an active consent (`ConsentRequiredError`). The safety
+   * log never creates keys.
+   */
+  async getOrCreate(
+    db: SqlExecutor,
+    householdId: string,
+    profileId: string,
+  ): Promise<MemberDataKey> {
+    const prepared = await this.prepare(db, householdId, profileId);
+    return db.transaction(async (tx) => {
+      await lockMembers(tx, householdId, [profileId]);
+      return this.claim(tx, householdId, profileId, prepared);
+    });
   }
 }

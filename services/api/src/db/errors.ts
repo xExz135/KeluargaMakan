@@ -13,7 +13,8 @@ export type DataErrorCode =
   | "manager_profile_not_deletable"
   | "mapping_not_applicable"
   | "not_found"
-  | "invalid_data";
+  | "invalid_data"
+  | "retry_later";
 
 export class DataLayerError extends Error {
   readonly code: DataErrorCode;
@@ -98,13 +99,38 @@ export class InvalidDataError extends DataLayerError {
   }
 }
 
-/** SQLSTATEs raised by the triggers in the migrations. */
+/**
+ * Security re-check T-016 N2, N4: a lock wait that timed out, a deadlock, or a
+ * concurrent change to a member's key. Nothing was written; retry the whole
+ * operation. Callers must never turn this into a safety result (Q39: 503 for
+ * the whole meal).
+ */
+export class ConcurrentUpdateError extends DataLayerError {
+  readonly retryable = true;
+
+  constructor() {
+    super("retry_later", "A concurrent change or lock wait stopped the operation; retry it");
+  }
+}
+
+/** SQLSTATEs raised by the triggers in the migrations, and others the data layer handles. */
 export const SQLSTATE = {
   consentRequired: "KM001",
   guardianConfirmationRequired: "KM002",
   immutable: "KM003",
+  paddingMismatch: "KM004",
   foreignKeyViolation: "23503",
+  uniqueViolation: "23505",
+  serializationFailure: "40001",
+  deadlockDetected: "40P01",
+  lockNotAvailable: "55P03",
 } as const;
+
+const RETRYABLE: readonly string[] = [
+  SQLSTATE.serializationFailure,
+  SQLSTATE.deadlockDetected,
+  SQLSTATE.lockNotAvailable,
+];
 
 /** Constraint that keeps the manager's profile from being deleted on its own. */
 export const MANAGER_PROFILE_CONSTRAINT = "household_manager_profile_fkey";
@@ -153,6 +179,7 @@ export class DatabaseError extends Error {
 export function translateDbError(error: unknown): unknown {
   const code = field(error, "code");
   if (typeof code !== "string" || !SQLSTATE_PATTERN.test(code)) return error;
+  if (RETRYABLE.includes(code)) return new ConcurrentUpdateError();
   if (code === SQLSTATE.consentRequired) return new ConsentRequiredError();
   if (code === SQLSTATE.guardianConfirmationRequired) {
     return new GuardianConfirmationRequiredError();

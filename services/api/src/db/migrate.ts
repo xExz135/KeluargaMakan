@@ -67,6 +67,11 @@ export async function migrate(
   validateMigrationList(migrations);
   return db.transaction(async (tx) => {
     await tx.query(`SELECT pg_advisory_xact_lock(${ADVISORY_LOCK_KEY})`);
+    // Security re-check T-016 N6: functions pin `search_path FROM CURRENT`, so
+    // make the current value explicit: the target schema, with pg_temp last.
+    await tx.query(
+      `SELECT set_config('search_path', quote_ident(current_schema()) || ', pg_temp', true)`,
+    );
     await tx.execScript(`
       CREATE TABLE IF NOT EXISTS ${MIGRATION_TABLE} (
         version integer PRIMARY KEY,
