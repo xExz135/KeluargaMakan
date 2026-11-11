@@ -670,7 +670,10 @@ for (const target of DATABASE_TARGETS) {
 
         it("Q39 a different or rotated-away health key surfaces as rules_unavailable", async () => {
           const otherKeys = new HealthDataKeys(
-            new LocalKeyProvider({ general: randomBytes(32), health: randomBytes(32) }),
+            new LocalKeyProvider(
+              { general: randomBytes(32), health: randomBytes(32) },
+              { appEnv: "test" },
+            ),
           );
           for (const read of [
             () => loadRulesForEvaluation(db, otherKeys, home.householdId, [profile]),

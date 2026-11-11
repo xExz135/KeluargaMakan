@@ -1,5 +1,7 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 
+import { isDevelopmentEnv } from "../../app-env.js";
+
 import { IV_BYTES, TAG_BYTES, open, seal } from "./aes-gcm.js";
 import {
   DecryptionError,
@@ -15,7 +17,8 @@ import {
  * Development and test key provider. Each purpose has its own 32-byte KEK,
  * given by the caller (from `LOCAL_GENERAL_DATA_KEK` and
  * `LOCAL_HEALTH_DATA_KEK`, or random keys made in a test). No key material is
- * ever committed. It refuses to run in production and refuses the same key for
+ * ever committed. It runs only when `APP_ENV` is `local` or `test` (a missing
+ * or unknown `APP_ENV` counts as production) and refuses the same key for
  * both purposes, so key separation (DAT-02) holds in every environment.
  *
  * Wrapped key format: 0x01 | purpose byte | IV (12) | tag (16) | ciphertext.
@@ -89,16 +92,22 @@ class LocalKek implements KeyEncryptionKey {
 export type LocalKeyMaterial = Readonly<Record<KeyPurpose, Uint8Array>>;
 
 export interface LocalKeyProviderOptions {
-  /** `NODE_ENV`; the local provider is refused in production. */
-  readonly nodeEnv?: string | undefined;
+  /**
+   * `APP_ENV`. Required on purpose: the local provider runs only in `local` and
+   * `test`; anything else, including a missing value, counts as production
+   * (security review T-016 M1).
+   */
+  readonly appEnv: string | undefined;
 }
 
 export class LocalKeyProvider implements KeyProvider {
   readonly #keks: Record<KeyPurpose, LocalKek>;
 
-  constructor(keys: LocalKeyMaterial, options: LocalKeyProviderOptions = {}) {
-    if (options.nodeEnv === "production") {
-      throw new KeyServiceError("the local key provider must not be used in production");
+  constructor(keys: LocalKeyMaterial, options: LocalKeyProviderOptions) {
+    if (!isDevelopmentEnv(options.appEnv)) {
+      throw new KeyServiceError(
+        "the local key provider runs only with APP_ENV=local or APP_ENV=test",
+      );
     }
     for (const purpose of KEY_PURPOSES) {
       if (keys[purpose].byteLength !== 32) {

@@ -114,29 +114,35 @@ class CloudKmsKek implements KeyEncryptionKey {
 }
 
 export interface CloudKmsKeyNames {
-  readonly general: string;
+  /** Optional until API code uses the general key (least privilege). */
+  readonly general: string | null;
   readonly health: string;
 }
 
 export class CloudKmsKeyProvider implements KeyProvider {
-  readonly #keks: Record<KeyPurpose, CloudKmsKek>;
+  readonly #general: CloudKmsKek | null;
+  readonly #health: CloudKmsKek;
 
   constructor(keyNames: CloudKmsKeyNames, client: KmsClient) {
-    for (const purpose of ["general", "health"] as const) {
-      if (!CRYPTO_KEY_NAME.test(keyNames[purpose])) {
-        throw new KeyServiceError(`KMS ${purpose} key name is not a Cloud KMS crypto key name`);
-      }
+    if (!CRYPTO_KEY_NAME.test(keyNames.health)) {
+      throw new KeyServiceError("KMS health key name is not a Cloud KMS crypto key name");
+    }
+    if (keyNames.general !== null && !CRYPTO_KEY_NAME.test(keyNames.general)) {
+      throw new KeyServiceError("KMS general key name is not a Cloud KMS crypto key name");
     }
     if (keyNames.general === keyNames.health) {
       throw new KeyServiceError("the general and health KMS keys must differ (DAT-02)");
     }
-    this.#keks = {
-      general: new CloudKmsKek("general", keyNames.general, client),
-      health: new CloudKmsKek("health", keyNames.health, client),
-    };
+    this.#general =
+      keyNames.general === null ? null : new CloudKmsKek("general", keyNames.general, client);
+    this.#health = new CloudKmsKek("health", keyNames.health, client);
   }
 
   kek(purpose: KeyPurpose): KeyEncryptionKey {
-    return this.#keks[purpose];
+    if (purpose === "health") return this.#health;
+    if (this.#general === null) {
+      throw new KeyServiceError("the general KMS key is not configured");
+    }
+    return this.#general;
   }
 }
