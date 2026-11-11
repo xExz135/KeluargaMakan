@@ -298,6 +298,36 @@ void main() {
     expect(repo.isSignedIn, isFalse);
   });
 
+  test('NFR-08 API requests never follow redirects, and a 3xx answer is a '
+      'failure', () async {
+    final c = await signedIn(
+      (_) => http.Response(
+        '',
+        302,
+        headers: {'location': 'https://elsewhere.example/v1/account'},
+      ),
+    );
+    final result = await c.read(authRepositoryProvider).getAccount();
+    expect(failureOf(result), isA<DecodeFailure>());
+    expect(requests, hasLength(1));
+    expect(requests.single.followRedirects, isFalse);
+  });
+
+  test('NFR-08 the refresh call and the repeated request do not follow '
+      'redirects either', () async {
+    final c = await signedIn((r) {
+      if (r.url.path == '/v1/auth/refresh') {
+        return jsonResponse(tokensJson('2'));
+      }
+      return r.headers['authorization'] == 'Bearer access-2'
+          ? jsonResponse(accountJson())
+          : problemResponse('access_token_expired', 401);
+    });
+    await c.read(authRepositoryProvider).getAccount();
+    expect(requests, hasLength(3));
+    expect(requests.map((r) => r.followRedirects), everyElement(isFalse));
+  });
+
   test('ACC-13 tokens are never printed', () {
     expect(testTokens.toString(), isNot(contains('access-1')));
   });
