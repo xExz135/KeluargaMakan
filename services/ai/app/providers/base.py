@@ -32,7 +32,22 @@ from typing import Protocol, runtime_checkable
 from app.config import Capability, ProviderConfig
 
 
-class ProviderUnavailableError(Exception):
+class ProviderError(Exception):
+    """Base for provider failures. Carries diagnostics that hold no content: the
+    HTTP status and the provider's machine-readable error code (for Google the
+    `error.status` enum such as INVALID_ARGUMENT, plus an ErrorInfo `reason`;
+    for Groq `error.code` or `error.type`). Never the error message text, which
+    can echo the request."""
+
+    def __init__(
+        self, message: str, *, http_status: int | None = None, reason: str | None = None
+    ) -> None:
+        super().__init__(message)
+        self.http_status = http_status
+        self.reason = reason
+
+
+class ProviderUnavailableError(ProviderError):
     """The provider could not answer. Message must not contain user content."""
 
 
@@ -46,7 +61,7 @@ class ProviderQuotaExceededError(ProviderUnavailableError):
     unavailable" with the feature's fallback (AI-08)."""
 
 
-class ProviderOutputError(Exception):
+class ProviderOutputError(ProviderError):
     """The provider answered, but not with usable output: text that is not a JSON
     object, an answer cut off at the token limit, or an answer the provider
     blocked. The caller rejects it ("output rejected"); it is never repaired or

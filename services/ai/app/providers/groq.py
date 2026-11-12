@@ -212,7 +212,11 @@ def _schema_refusal(response: httpx2.Response) -> Exception | None:
     if code == "json_validate_failed" or (
         isinstance(message, str) and "does not match the expected schema" in message
     ):
-        return ProviderOutputError(f"{NAME}: output did not match the schema")
+        return ProviderOutputError(
+            f"{NAME}: output did not match the schema",
+            http_status=400,
+            reason="json_validate_failed",
+        )
     return None
 
 

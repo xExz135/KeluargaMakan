@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import logging
 import traceback
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -547,28 +548,38 @@ def test_ai09_a_429_wait_hint_blocks_the_slot_locally(hint: str) -> None:
 # ---------- requested output schema ----------
 
 
+def _schema_keywords(node: Any) -> set[str]:
+    """JSON Schema keywords used anywhere in a schema (property names excluded)."""
+    found: set[str] = set()
+    if isinstance(node, list):
+        for item in node:
+            found |= _schema_keywords(item)
+    elif isinstance(node, dict):
+        for key, value in node.items():
+            found.add(key)
+            if key == "properties":
+                for sub in value.values():
+                    found |= _schema_keywords(sub)
+            else:
+                found |= _schema_keywords(value)
+    return found
+
+
+# Gemini compiles the response schema into a state machine and answers 400
+# INVALID_ARGUMENT when it is too large; array bounds copy the item schema per
+# position and numeric bounds add states. maxItems=200 on the recognition
+# candidates got every vision request rejected in the owner's live smoke test.
+STATE_HEAVY_KEYWORDS = ("minItems", "maxItems", "minimum", "maximum", "description")
+
+
 @pytest.mark.parametrize("prompt_id", ["recognize.ingredients", "adapt.recipe", "tweak.advice"])
 def test_int06_output_schema_is_portable_and_closed(prompt_id: str) -> None:
     schema = output_schema("gemini", prompt_id)
-
-    def keywords(node: Any) -> set[str]:
-        found: set[str] = set()
-        if isinstance(node, list):
-            for item in node:
-                found |= keywords(item)
-        elif isinstance(node, dict):
-            for key, value in node.items():
-                found.add(key)
-                if key == "properties":
-                    for sub in value.values():
-                        found |= keywords(sub)
-                else:
-                    found |= keywords(value)
-        return found
-
-    used = keywords(schema)
+    used = _schema_keywords(schema)
     for keyword in ("$ref", "$defs", "pattern", "default", "title", "exclusiveMinimum", "const"):
         assert keyword not in used
+    for keyword in STATE_HEAVY_KEYWORDS:
+        assert keyword not in used, keyword
     assert schema["type"] == "object"
     assert schema["additionalProperties"] is False
     # Each call gets its own copy.
@@ -582,3 +593,141 @@ def test_int06_unknown_prompt_has_no_schema_and_is_not_sent() -> None:
     exc = _raises(_gemini_language(apis).complete(prompt, OPTIONS))
     assert type(exc) is ProviderUnavailableError
     assert apis.requests == []
+
+
+def test_int06_vision_request_schema_has_no_state_heavy_bounds() -> None:
+    """Regression: the live vision call failed with 400 INVALID_ARGUMENT while
+    language passed, because the recognition schema carried maxItems=200."""
+    apis = FakeApis().on("gemini", gemini_ok(recognition_output()))
+    _run(_gemini_call(apis))
+    (request,) = apis.requests
+    sent = json.loads(request.content)["generationConfig"]["responseJsonSchema"]
+    used = _schema_keywords(sent)
+    for keyword in STATE_HEAVY_KEYWORDS:
+        assert keyword not in used, keyword
+    # The image still travels as an inlineData part after the text part.
+    parts = json.loads(request.content)["contents"][0]["parts"]
+    assert [sorted(part) for part in parts] == [["text"], ["inlineData"]]
+
+
+def test_int06_bounds_dropped_from_the_request_are_still_enforced_on_the_answer() -> None:
+    from pydantic import ValidationError
+
+    from app.schemas.recognize import RecognitionModelOutput
+
+    too_many = {"candidates": [{"rawName": "tempe", "confidence": 0.9, "photoIndex": 0}] * 201}
+    out_of_range = {"candidates": [{"rawName": "tempe", "confidence": 1.5, "photoIndex": 0}]}
+    for output in (too_many, out_of_range):
+        with pytest.raises(ValidationError):
+            RecognitionModelOutput.model_validate(output)
+
+
+# ---------- diagnostics without content (status and error code only) ----------
+
+ECHOED_TEXT = "Invalid value at contents[0] rawName tempe kecap manis 0812-3456-7890"
+
+
+def _google_error(code: int, status_enum: object, reason: object = None) -> httpx2.Response:
+    details: list[dict[str, object]] = []
+    if reason is not None:
+        details.append(
+            {
+                "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+                "reason": reason,
+                "domain": "googleapis.com",
+                "metadata": {"service": "metadata-marker-service", "echo": ECHOED_TEXT},
+            }
+        )
+    return httpx2.Response(
+        code,
+        headers={"x-echo": VISION_KEY},
+        json={
+            "error": {
+                "code": code,
+                "message": f"{ECHOED_TEXT} key={VISION_KEY}",
+                "status": status_enum,
+                "details": details,
+            }
+        },
+    )
+
+
+@pytest.mark.parametrize(
+    ("reply", "expected"),
+    [
+        (_google_error(400, "INVALID_ARGUMENT"), "INVALID_ARGUMENT"),
+        (_google_error(400, "FAILED_PRECONDITION"), "FAILED_PRECONDITION"),
+        (
+            _google_error(400, "INVALID_ARGUMENT", "API_KEY_INVALID"),
+            "INVALID_ARGUMENT/API_KEY_INVALID",
+        ),
+        # Anything that is not an identifier is dropped, never passed on.
+        (_google_error(400, ECHOED_TEXT), None),
+        (_google_error(400, "INVALID_ARGUMENT", ECHOED_TEXT), "INVALID_ARGUMENT"),
+        (_google_error(400, {"nested": "x"}), None),
+        (httpx2.Response(400, content=ECHOED_TEXT.encode()), None),
+        (httpx2.Response(400, json={"error": ECHOED_TEXT}), None),
+    ],
+)
+def test_ai03_gemini_error_surfaces_only_status_and_error_code(
+    reply: httpx2.Response, expected: str | None, caplog: pytest.LogCaptureFixture
+) -> None:
+    apis = FakeApis().on("gemini", reply)
+    with caplog.at_level(logging.DEBUG):
+        exc = _raises(_gemini_call(apis))
+    assert isinstance(exc, ProviderUnavailableError)
+    assert exc.http_status == 400
+    assert exc.reason == expected
+    assert str(exc) == "gemini: http 400"
+    _no_key_in(exc)
+    (record,) = [r for r in caplog.records if r.name == "app.providers"]
+    assert record.fields == {  # type: ignore[attr-defined]
+        "provider": "gemini",
+        "slot": "vision",
+        "status": 400,
+        "reason": expected,
+    }
+    surfaced = "".join(traceback.format_exception(exc)) + repr(vars(exc)) + caplog.text
+    surfaced += json.dumps(record.fields)  # type: ignore[attr-defined]
+    for leaked in (ECHOED_TEXT, "tempe", "0812", "kecap", VISION_KEY, "metadata-marker"):
+        assert leaked not in surfaced
+
+
+def test_ai03_groq_error_code_is_surfaced_and_the_message_is_not() -> None:
+    reply = httpx2.Response(
+        404,
+        json={
+            "error": {
+                "message": f"The model does not exist. {ECHOED_TEXT}",
+                "type": "invalid_request_error",
+                "code": "model_not_found",
+            }
+        },
+    )
+    apis = FakeApis().on("groq_chat", reply)
+    exc = _raises(_groq_chat_call(apis))
+    assert isinstance(exc, ProviderUnavailableError)
+    assert (exc.http_status, exc.reason) == (404, "model_not_found")
+    assert ECHOED_TEXT not in repr(vars(exc)) + str(exc)
+
+
+def test_ai03_quota_and_schema_refusal_carry_their_codes() -> None:
+    apis = FakeApis().on("gemini", quota())
+    exc = _raises(_gemini_call(apis))
+    assert isinstance(exc, ProviderQuotaExceededError)
+    assert (exc.http_status, exc.reason) == (429, "RESOURCE_EXHAUSTED")
+
+    refusal = httpx2.Response(
+        400,
+        json={
+            "error": {
+                "message": "Generated JSON does not match the expected schema.",
+                "type": "invalid_request_error",
+                "code": "json_validate_failed",
+            }
+        },
+    )
+    apis = FakeApis().on("groq_chat", refusal)
+    out = _raises(_groq_chat_call(apis))
+    assert isinstance(out, ProviderOutputError)
+    assert (out.http_status, out.reason) == (400, "json_validate_failed")

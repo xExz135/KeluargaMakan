@@ -28,6 +28,7 @@ import functools
 import json
 import logging
 import math
+import re
 import ssl
 import time
 from collections import deque
@@ -223,14 +224,19 @@ class RemoteClient:
                     if len(response.content) > MAX_RESPONSE_BYTES:
                         raise ProviderOutputError(f"{self._provider}: response too large")
                     return response
-                self._log_status(status)
+                reason = error_reason(response)
+                self._log_status(status, reason)
                 if status == 429:
                     self._budget.block_for(retry_after_seconds(response))
-                    raise ProviderQuotaExceededError(f"{self._provider}: http 429")
+                    raise ProviderQuotaExceededError(
+                        f"{self._provider}: http 429", http_status=429, reason=reason
+                    )
                 specific = classify(response) if classify else None
                 if specific is not None:
                     raise specific
-                error = ProviderUnavailableError(f"{self._provider}: http {status}")
+                error = ProviderUnavailableError(
+                    f"{self._provider}: http {status}", http_status=status, reason=reason
+                )
                 if status not in RETRYABLE_STATUS:
                     raise error
             backoff = RETRY_BACKOFF_SECONDS * (attempt + 1)
@@ -271,14 +277,58 @@ class RemoteClient:
             return True
         return deadline - asyncio.get_running_loop().time() >= needed
 
-    def _log_status(self, status: int) -> None:
-        # Status code only; the body can echo the request.
+    def _log_status(self, status: int, reason: str | None) -> None:
+        # Status and error code only; the message and headers can echo the request.
         logging.getLogger(PROVIDER_LOGGER).warning(
             "provider_http_error",
             extra={
-                "fields": {"provider": self._provider, "slot": self._config.slot, "status": status}
+                "fields": {
+                    "provider": self._provider,
+                    "slot": self._config.slot,
+                    "status": status,
+                    "reason": reason,
+                }
             },
         )
+
+
+# An error code is an identifier: letters, digits, "_", "." or "-", no spaces.
+# Anything else (a sentence, a value echoed from the request) is dropped.
+_ERROR_CODE_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,63}$")
+
+
+def error_reason(response: httpx2.Response) -> str | None:
+    """The provider's machine-readable error code for a non-2xx answer, or None.
+
+    Google: `error.status` (for example INVALID_ARGUMENT, FAILED_PRECONDITION)
+    and, when present, the first ErrorInfo `reason` (for example
+    API_KEY_INVALID), joined with "/". Groq (OpenAI-style): `error.code`, else
+    `error.type`. Never `error.message`, `details` metadata or headers.
+    """
+    try:
+        body = response.json()
+    except ValueError:
+        return None
+    error = body.get("error") if isinstance(body, dict) else None
+    if not isinstance(error, dict):
+        return None
+    codes: list[str] = []
+    status = error.get("status")
+    if isinstance(status, str) and _ERROR_CODE_RE.match(status):
+        codes.append(status)
+    details = error.get("details")
+    for detail in details if isinstance(details, list) else []:
+        info = detail.get("reason") if isinstance(detail, dict) else None
+        if isinstance(info, str) and _ERROR_CODE_RE.match(info):
+            codes.append(info)
+            break
+    if not codes:
+        for key in ("code", "type"):
+            value = error.get(key)
+            if isinstance(value, str) and _ERROR_CODE_RE.match(value):
+                codes.append(value)
+                break
+    return "/".join(codes) or None
 
 
 def retry_after_seconds(response: httpx2.Response) -> float:
@@ -345,9 +395,16 @@ OUTPUT_MODELS: Mapping[str, type[BaseModel]] = {
     "tweak.advice": TweakModelOutput,
 }
 
-# JSON Schema keywords both providers accept. Everything else (patterns, string
-# lengths, exclusive bounds, defaults, titles) is dropped from the request and
-# still enforced by pydantic on the answer.
+# The structural JSON Schema keywords both providers accept. Everything else is
+# dropped from the request and still enforced by pydantic on the answer:
+# - Gemini compiles the schema into a state machine with limits on total states
+#   and answers 400 INVALID_ARGUMENT above them. `minItems` / `maxItems`
+#   duplicate the item schema once per counted position and `minimum` /
+#   `maximum` add states too, so a bound such as maxItems=200 on the
+#   recognition candidates got the vision request rejected. Bounds stay in
+#   pydantic only.
+# - `description` is the models' internal docstrings, not text for the model.
+# - Patterns, string lengths, exclusive bounds, defaults and titles.
 _PORTABLE_KEYWORDS = frozenset(
     {
         "type",
@@ -357,11 +414,6 @@ _PORTABLE_KEYWORDS = frozenset(
         "enum",
         "anyOf",
         "additionalProperties",
-        "minimum",
-        "maximum",
-        "minItems",
-        "maxItems",
-        "description",
     }
 )
 

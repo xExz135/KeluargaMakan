@@ -3,15 +3,17 @@
 FOR THE OWNER TO RUN LOCALLY. Not run in CI and not run by agents: it calls
 Google (Gemini API) and Groq with your real keys.
 
-What it sends: one tiny synthetic request per configured Gemini or Groq slot.
-A generated test image (coloured shapes, no people, no metadata), an invented
-Taste & Tweak question about a made-up recipe, and one second of a generated
-tone. No personal data. On free tiers Google and Groq may use requests to
-improve their products, so running this counts as opting in for this test data.
+What it sends: tiny synthetic requests per configured Gemini or Groq slot. A
+generated test image (coloured shapes, no people, no metadata) for vision; an
+invented Taste & Tweak question and an invented recipe adaptation for each
+language slot; one second of a generated tone for speech-to-text. No personal
+data. On free tiers Google and Groq may use requests to improve their products,
+so running this counts as opting in for this test data.
 
-What it prints: per slot, PASS or FAIL, the provider's model ID, the latency
-and, on failure, the error class name only. It never prints keys, prompts or
-model output.
+What it prints: per check, PASS or FAIL, the provider's model ID and the
+latency; on failure the error class, the HTTP status and the provider's error
+code (for example `http=400 reason=INVALID_ARGUMENT`). It never prints keys,
+prompts, model output or the provider's error message text.
 
 Usage (from services/ai, with the service venv):
     .venv/Scripts/python scripts/smoke_live.py            (Windows)
@@ -34,8 +36,10 @@ import struct
 import sys
 import time
 import zlib
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Coroutine, Mapping
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 SERVICE_ROOT = Path(__file__).resolve().parent.parent
 if str(SERVICE_ROOT) not in sys.path:
@@ -59,12 +63,16 @@ from app.providers.base import (  # noqa: E402
     ImageInput,
     LanguageProvider,
     ModelOutput,
+    ProviderError,
     Transcription,
 )
 from app.providers.gemini import GeminiProvider  # noqa: E402
 from app.providers.groq import GroqProvider  # noqa: E402
+from app.providers.registry import Transport  # noqa: E402
+from app.schemas.adapt import AdaptationModelOutput  # noqa: E402
 from app.schemas.recognize import RecognitionModelOutput  # noqa: E402
 from app.schemas.tweak import TweakModelOutput  # noqa: E402
+from app.telemetry import configure_logging  # noqa: E402
 
 SLOT_PREFIXES = ("VISION_", "LANGUAGE_", "SPEECH_TO_TEXT_")
 TIME_BUDGET_SECONDS = 30.0
@@ -130,6 +138,30 @@ def synthetic_wav(seconds: float = 1.0, rate: int = 16000) -> bytes:
     return header + b"data" + struct.pack("<I", len(data)) + data
 
 
+ADAPT_PAYLOAD: Mapping[str, object] = {
+    "libraryRecipe": {
+        "recipeId": "smoke_test_recipe",
+        "version": "1",
+        "title": "Tumis kangkung contoh",
+        "cuisine": "indonesian",
+        "servings": 2,
+        "totalTimeMinutes": 15,
+        "ingredients": [
+            {"ingredientId": None, "rawName": "kangkung", "quantity": 1, "unit": "ikat"},
+            {"ingredientId": None, "rawName": "bawang putih", "quantity": 3, "unit": "siung"},
+        ],
+        "steps": [
+            {"index": 1, "text": "Tumis bawang putih sampai harum.", "timerSeconds": None},
+            {"index": 2, "text": "Masukkan kangkung, aduk sampai layu.", "timerSeconds": None},
+        ],
+    },
+    "availableIngredients": [],
+    "constraints": {"avoid": [], "dislikes": [], "lessSalt": True},
+    "adaptations": ["scale"],
+    "targetServings": 4,
+    "maxTimeMinutes": None,
+}
+
 TWEAK_PAYLOAD: Mapping[str, object] = {
     "recipe": {
         "recipeId": "smoke_test_recipe",
@@ -173,38 +205,85 @@ async def _timed[T](
     return check(result), latency
 
 
-async def smoke(config: ProviderConfig, prompts: PromptRegistry) -> tuple[str, float]:
+@dataclass(frozen=True)
+class Check:
+    label: str
+    run: Callable[[], Coroutine[Any, Any, tuple[str, float]]]
+
+
+def checks(
+    config: ProviderConfig, prompts: PromptRegistry, transport: Transport = None
+) -> list[Check]:
+    """The synthetic requests for one slot: one per slot, plus adaptation on
+    language slots (its larger schema is checked separately from Taste & Tweak)."""
     if config.capability is Capability.VISION:
-        gemini = GeminiProvider(config)
+        gemini = GeminiProvider(config, transport=transport)
         prompt = prompts.active("recognize.ingredients").render(
             {"photoCount": 1, "savedIngredients": []}, "id"
         )
         clean, mime = strip_metadata(synthetic_png())
         image = ImageInput(data=clean, mime_type=mime)
-        return await _timed(
-            lambda options: gemini.analyze(prompt, [image], options),
-            _validated(RecognitionModelOutput),
-        )
+        return [
+            Check(
+                "recognize",
+                lambda: _timed(
+                    lambda options: gemini.analyze(prompt, [image], options),
+                    _validated(RecognitionModelOutput),
+                ),
+            )
+        ]
     if config.capability is Capability.LANGUAGE:
         adapter: LanguageProvider = (
-            GeminiProvider(config)
+            GeminiProvider(config, transport=transport)
             if config.provider is ProviderName.GEMINI
-            else GroqProvider(config)
+            else GroqProvider(config, transport=transport)
         )
-        prompt = prompts.active("tweak.advice").render(TWEAK_PAYLOAD, "id")
-        return await _timed(
-            lambda options: adapter.complete(prompt, options), _validated(TweakModelOutput)
-        )
+        tweak = prompts.active("tweak.advice").render(TWEAK_PAYLOAD, "id")
+        adapt = prompts.active("adapt.recipe").render(ADAPT_PAYLOAD, "id")
+        return [
+            Check(
+                "tweak",
+                lambda: _timed(
+                    lambda options: adapter.complete(tweak, options), _validated(TweakModelOutput)
+                ),
+            ),
+            Check(
+                "adapt",
+                lambda: _timed(
+                    lambda options: adapter.complete(adapt, options),
+                    _validated(AdaptationModelOutput),
+                ),
+            ),
+        ]
     if config.capability is Capability.SPEECH_TO_TEXT:
-        groq = GroqProvider(config)
+        groq = GroqProvider(config, transport=transport)
         prompt = prompts.active("speech.transcribe").render({}, "id")
         audio = AudioInput(data=synthetic_wav(), mime_type="audio/wav")
-        return await _timed(lambda options: groq.transcribe(audio, prompt, options), _transcribed)
+        return [
+            Check(
+                "transcribe",
+                lambda: _timed(
+                    lambda options: groq.transcribe(audio, prompt, options), _transcribed
+                ),
+            )
+        ]
     raise ConfigError("no smoke test for this capability")
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+def failure_details(exc: BaseException) -> str:
+    """Error class, HTTP status and the provider's error code only (no message)."""
+    parts = [f"error={type(exc).__name__}"]
+    if isinstance(exc, ProviderError):
+        if exc.http_status is not None:
+            parts.append(f"http={exc.http_status}")
+        if exc.reason is not None:
+            parts.append(f"reason={exc.reason}")
+    return " ".join(parts)
+
+
+def main(argv: list[str] | None = None, *, transport: Transport = None) -> int:
+    """`transport` is for the offline tests only; the owner's run uses the network."""
+    parser = argparse.ArgumentParser(description=(__doc__ or "").split("\n\n")[0])
     parser.add_argument("--env-file", type=Path, default=SERVICE_ROOT / ".env")
     args = parser.parse_args(argv)
 
@@ -229,19 +308,23 @@ def main(argv: list[str] | None = None) -> int:
     if not slots:
         print("No Gemini or Groq slot configured; nothing to test.")
         return 2
-    print("Sending one synthetic request per slot to Google and Groq (no personal data).")
+    print("Sending synthetic requests to Google and Groq (no personal data).")
     failures = 0
     for config in slots:
-        label = f"{config.slot:<16} {config.provider.value:<7}"
-        try:
-            model_id, latency = asyncio.run(smoke(config, prompts))
-        except Exception as exc:
-            failures += 1
-            print(f"FAIL {label} model={config.model_id} error={type(exc).__name__}")
-            continue
-        print(f"PASS {label} model={model_id} latency={latency:.0f}ms")
+        for check in checks(config, prompts, transport):
+            label = f"{config.slot:<16} {config.provider.value:<7} {check.label:<10}"
+            try:
+                model_id, latency = asyncio.run(check.run())
+            except Exception as exc:
+                failures += 1
+                print(f"FAIL {label} model={config.model_id} {failure_details(exc)}")
+                continue
+            print(f"PASS {label} model={model_id} latency={latency:.0f}ms")
     return 1 if failures else 0
 
 
 if __name__ == "__main__":
+    # The FAIL line carries the status and error code, so provider warnings are
+    # not printed separately (and go through the redacting formatter if at all).
+    configure_logging("ERROR")
     raise SystemExit(main())
