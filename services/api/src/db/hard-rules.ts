@@ -302,6 +302,26 @@ export async function listProfileRules(
 }
 
 /**
+ * Contract `ProfileRules` for several members of one household, all from one
+ * statement snapshot (H1). Throws `RulesUnavailableError` if any member's
+ * rules cannot be read, and `NotFoundError` if any member is not in the
+ * household; it never returns a member with fewer rules than stored.
+ */
+export async function listMembersRules(
+  db: SqlExecutor,
+  keys: HealthDataKeys,
+  householdId: string,
+  profileIds: readonly string[],
+): Promise<Map<string, ProfileRules>> {
+  const members = await readMembers(db, keys, householdId, profileIds);
+  const out = new Map<string, ProfileRules>();
+  for (const [profileId, member] of members) {
+    out.set(profileId, { consent: member.consent, items: member.rules });
+  }
+  return out;
+}
+
+/**
  * PRF-11: the hard rules of exactly the selected members, in the given order,
  * in the Cek Aman input shape. Throws `RulesUnavailableError` if any member's
  * rules cannot be read; the caller must abort the whole safety check.
@@ -431,6 +451,12 @@ export async function insertHardRule(
     readonly rule: NewHardRule;
     readonly mappingConfirmedBy: MappingConfirmer | null;
     readonly now?: Date;
+    /**
+     * Runs inside the insert's transaction, after the row is written (for
+     * example to record an `Idempotency-Key`). If it throws, the rule is not
+     * stored. It must not call the key service (N2).
+     */
+    readonly onInserted?: (tx: SqlExecutor, ruleId: string) => Promise<void>;
   },
 ): Promise<HardRuleRecord> {
   const now = input.now ?? new Date();
@@ -460,6 +486,7 @@ export async function insertHardRule(
         );
         const row = rows[0];
         if (row === undefined) throw new Error("hard rule insert returned no row");
+        if (input.onInserted !== undefined) await input.onInserted(tx, id);
         return {
           id,
           profileId: input.profileId,

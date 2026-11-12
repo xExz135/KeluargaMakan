@@ -7,12 +7,16 @@ import { Ajv2020 } from "ajv/dist/2020.js";
 import { parse } from "yaml";
 
 import { resolveApiConfig, type ApiConfig, type ApiConfigOverrides } from "../../../config/api.js";
+import type { ProfileConfig } from "../../../config/profiles.js";
 import { resolveTargets, type TargetOverrides, type Targets } from "../../../config/targets.js";
 import type { Clock } from "../../auth/auth-service.js";
 import { canonicalDestination } from "../../auth/destination.js";
 import { DevCodeSender, type SignInCodeSender } from "../../auth/code-sender.js";
 import type { AuthSecrets } from "../../auth/secrets.js";
 import type { SqlExecutor } from "../../db/executor.js";
+import { HealthDataKeys } from "../../db/health-data-keys.js";
+import { randomLocalKeys } from "../../db/testing/seed.js";
+import type { ReferenceCatalog } from "../../reference/catalog.js";
 import type { ApiLogger, LogFields } from "../../logger.js";
 import { createApp } from "../app.js";
 
@@ -104,6 +108,10 @@ export async function startHarness(
   options: {
     readonly config?: ApiConfigOverrides;
     readonly targets?: TargetOverrides;
+    /** Health-data keys (default: random local keys for this harness). */
+    readonly keys?: HealthDataKeys;
+    readonly catalog?: ReferenceCatalog;
+    readonly profileConfig?: ProfileConfig;
     readonly codeSender?: SignInCodeSender;
     /** Share another harness's secrets so its tokens are recognised. */
     readonly secrets?: AuthSecrets;
@@ -122,6 +130,9 @@ export async function startHarness(
     db,
     config,
     targets,
+    keys: options.keys ?? new HealthDataKeys(randomLocalKeys()),
+    ...(options.catalog === undefined ? {} : { catalog: options.catalog }),
+    ...(options.profileConfig === undefined ? {} : { profileConfig: options.profileConfig }),
     secrets,
     codeSender: options.codeSender ?? sender,
     logger,

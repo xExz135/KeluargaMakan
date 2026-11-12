@@ -93,7 +93,11 @@ export function parseSessionRefresh(body: unknown): { refreshToken: string } {
   return { refreshToken: refreshToken! };
 }
 
-function parseAvatar(reader: BodyReader, value: unknown, pointer: string): AvatarInput | null {
+export function parseAvatar(
+  reader: BodyReader,
+  value: unknown,
+  pointer: string,
+): AvatarInput | null {
   const record = reader.object(value, pointer, ["style", "colorToken", "illustrationId"]);
   if (record === null) return null;
   const style = reader.enumValue(

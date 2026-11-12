@@ -1,12 +1,15 @@
 import pg from "pg";
 
 import { apiConfigFromEnv } from "../config/api.js";
+import { profileConfigFromEnv } from "../config/profiles.js";
 import { targetsFromEnv } from "../config/targets.js";
 import { resolveAppEnv } from "./app-env.js";
 import { parseTrustedProxies } from "./auth/client-address.js";
 import { createCodeSender } from "./auth/code-sender.js";
 import { loadAuthSecrets } from "./auth/secrets.js";
+import { createKeyProvider } from "./db/crypto/config.js";
 import { pgExecutor } from "./db/executor.js";
+import { HealthDataKeys } from "./db/health-data-keys.js";
 import { createApp } from "./http/app.js";
 import { jsonLogger } from "./logger.js";
 
@@ -32,6 +35,10 @@ async function main(): Promise<void> {
     db: pgExecutor(pool),
     config: apiConfigFromEnv(env),
     targets: targetsFromEnv(env),
+    profileConfig: profileConfigFromEnv(env),
+    // DAT-02: no default provider; a missing or unknown KEY_PROVIDER stops startup.
+    // Cloud KMS needs its client, which T-023 wires in.
+    keys: new HealthDataKeys(createKeyProvider(env)),
     secrets: loadAuthSecrets(env),
     // Local development only: the dev sender prints the code and challenge ID,
     // never the destination. `createCodeSender` refuses it outside local and test.

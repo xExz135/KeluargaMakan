@@ -8,6 +8,7 @@ import { FastifyAdapter, type NestFastifyApplication } from "@nestjs/platform-fa
 import type { FastifyReply, FastifyRequest } from "fastify";
 
 import type { ApiConfig } from "../../config/api.js";
+import { defaultProfileConfig, type ProfileConfig } from "../../config/profiles.js";
 import { defaultTargets, type Targets } from "../../config/targets.js";
 import { readAccount } from "../auth/accounts.js";
 import { AuthService, type Clock } from "../auth/auth-service.js";
@@ -17,17 +18,34 @@ import { AccessGuard } from "../authz/access.js";
 import { ConsentController, ConsentTextController } from "../consent/consent.controller.js";
 import { ConsentService } from "../consent/consent-service.js";
 import type { SqlExecutor } from "../db/executor.js";
+import type { HealthDataKeys } from "../db/health-data-keys.js";
 import { HouseholdService } from "../households/household-service.js";
 import type { ApiLogger } from "../logger.js";
+import { ProfileService } from "../profiles/profile-service.js";
+import { ProfilesController } from "../profiles/profiles.controller.js";
+import { DbReferenceCatalog, type ReferenceCatalog } from "../reference/catalog.js";
+import { ReferenceController } from "../reference/reference.controller.js";
 import { AccountController, AuthController, HouseholdController } from "./controllers.js";
 import { toProblem } from "./problem.js";
-import { ACCOUNT_READER, AUTH_SERVICE, CONSENT_SERVICE, HOUSEHOLD_SERVICE } from "./tokens.js";
+import {
+  ACCOUNT_READER,
+  AUTH_SERVICE,
+  CONSENT_SERVICE,
+  HOUSEHOLD_SERVICE,
+  PROFILE_SERVICE,
+} from "./tokens.js";
 
 export interface AppDeps {
   readonly db: SqlExecutor;
   readonly config: ApiConfig;
   /** SRS (target) values (`config/targets.ts`); defaults when absent. */
   readonly targets?: Targets;
+  /** PRF-07 portion defaults by age group (`config/profiles.ts`). */
+  readonly profileConfig?: ProfileConfig;
+  /** DAT-02: member data keys wrapped by the separate health-data key. */
+  readonly keys: HealthDataKeys;
+  /** Reference names (PRF-06, PRF-08); defaults to the active reference dataset. */
+  readonly catalog?: ReferenceCatalog;
   readonly secrets: AuthSecrets;
   readonly codeSender: SignInCodeSender;
   readonly logger: ApiLogger;
@@ -58,6 +76,8 @@ export const CONTROLLERS = Object.freeze([
   HouseholdController,
   ConsentTextController,
   ConsentController,
+  ReferenceController,
+  ProfilesController,
 ] as const);
 
 /** Request bodies in this API are small JSON documents. */
@@ -112,6 +132,17 @@ export async function createApp(deps: AppDeps): Promise<NestFastifyApplication> 
     ...(deps.clock === undefined ? {} : { clock: deps.clock }),
   });
 
+  const profileService = new ProfileService({
+    db: deps.db,
+    keys: deps.keys,
+    catalog: deps.catalog ?? new DbReferenceCatalog(deps.db),
+    config: deps.config,
+    targets: deps.targets ?? defaultTargets,
+    profileConfig: deps.profileConfig ?? defaultProfileConfig,
+    hashKey: deps.secrets.hashKey,
+    ...(deps.clock === undefined ? {} : { clock: deps.clock }),
+  });
+
   @Catch()
   class ProblemFilter implements ExceptionFilter {
     catch(error: unknown, host: ArgumentsHost): void {
@@ -134,6 +165,7 @@ export async function createApp(deps: AppDeps): Promise<NestFastifyApplication> 
       { provide: AUTH_SERVICE, useValue: authService },
       { provide: HOUSEHOLD_SERVICE, useValue: householdService },
       { provide: CONSENT_SERVICE, useValue: consentService },
+      { provide: PROFILE_SERVICE, useValue: profileService },
       { provide: ACCOUNT_READER, useValue: { read: (id: string) => readAccount(deps.db, id) } },
     ],
   })

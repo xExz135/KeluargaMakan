@@ -150,7 +150,31 @@ export function resolveTargets(overrides: TargetOverrides = {}): Targets {
     }
     resolved[group] = out;
   }
-  return deepFreeze(resolved) as unknown as Targets;
+  const targets = resolved as unknown as Targets;
+  checkFloors(targets);
+  return deepFreeze(targets);
+}
+
+/**
+ * Values the SRS sets as a minimum, whatever the validated target becomes.
+ * PRF-02: "at least 12 profiles per household".
+ */
+export const TARGET_FLOORS = Object.freeze({ minMaxProfiles: 12, maxMaxProfiles: 100 });
+
+function checkFloors(targets: Targets): void {
+  const maxProfiles = targets.household.maxProfiles.value;
+  if (
+    !Number.isInteger(maxProfiles) ||
+    maxProfiles < TARGET_FLOORS.minMaxProfiles ||
+    maxProfiles > TARGET_FLOORS.maxMaxProfiles
+  ) {
+    throw new Error("household.maxProfiles must be a whole number from 12 to 100 (PRF-02)");
+  }
+  const withdrawalDays = targets.dataManagement.healthConsentWithdrawalDeletionDays.value;
+  if (!Number.isInteger(withdrawalDays) || withdrawalDays < 0 || withdrawalDays > 30) {
+    // SET-04: deletion within 30 days; a longer window would break the requirement.
+    throw new Error("dataManagement.healthConsentWithdrawalDeletionDays must be 0 to 30 (SET-04)");
+  }
 }
 
 /**
