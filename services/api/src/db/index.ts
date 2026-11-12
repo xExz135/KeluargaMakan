@@ -21,6 +21,7 @@ export {
   confirmRuleMapping,
   deleteHardRule,
   insertHardRule,
+  listMembersRules,
   listProfileRules,
   loadRulesForEvaluation,
   type HardRuleRecord,

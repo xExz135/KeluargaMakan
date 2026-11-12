@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { defaultTargets, resolveTargets } from "./targets.js";
+import { defaultTargets, resolveTargets, targetsFromEnv } from "./targets.js";
 import type { Target } from "./targets.js";
 
 const allTargets = (): [string, Target<unknown>][] =>
@@ -48,6 +48,36 @@ describe("targets config", () => {
     expect(() => resolveTargets({ household: { maxProfile: 3 } } as never)).toThrow(
       /Unknown target: household\.maxProfile/,
     );
+  });
+
+  it("PRF-02 the profile limit is a target with a floor of 12", () => {
+    expect(defaultTargets.household.maxProfiles).toMatchObject({
+      value: 12,
+      srsId: "PRF-02",
+      status: "target",
+    });
+    expect(resolveTargets({ household: { maxProfiles: 16 } }).household.maxProfiles.value).toBe(16);
+    for (const value of [11, 0, -1, 12.5, 101]) {
+      expect(() => resolveTargets({ household: { maxProfiles: value } }), String(value)).toThrow(
+        /PRF-02/,
+      );
+    }
+  });
+
+  it("SET-04 the withdrawal deletion window cannot exceed 30 days", () => {
+    expect(() =>
+      resolveTargets({ dataManagement: { healthConsentWithdrawalDeletionDays: 31 } }),
+    ).toThrow(/SET-04/);
+  });
+
+  it("TARGETS_JSON overrides values and rejects bad JSON", () => {
+    expect(
+      targetsFromEnv({ TARGETS_JSON: '{"household":{"maxProfiles":14}}' }).household.maxProfiles
+        .value,
+    ).toBe(14);
+    expect(targetsFromEnv({}).household.maxProfiles.value).toBe(12);
+    expect(() => targetsFromEnv({ TARGETS_JSON: "{" })).toThrow(/not valid JSON/);
+    expect(() => targetsFromEnv({ TARGETS_JSON: "[]" })).toThrow(/must be an object/);
   });
 
   it("is immutable", () => {
