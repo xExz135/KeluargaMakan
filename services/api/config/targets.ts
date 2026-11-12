@@ -153,6 +153,26 @@ export function resolveTargets(overrides: TargetOverrides = {}): Targets {
   return deepFreeze(resolved) as unknown as Targets;
 }
 
+/**
+ * Reads optional value overrides from `TARGETS_JSON` (deploy config), for
+ * example {"household":{"maxProfiles":14}}. Unknown keys and invalid values
+ * stop startup.
+ */
+export function targetsFromEnv(env: Readonly<Record<string, string | undefined>>): Targets {
+  const raw = env["TARGETS_JSON"]?.trim();
+  if (raw === undefined || raw === "") return resolveTargets();
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error("TARGETS_JSON is not valid JSON");
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error("TARGETS_JSON must be an object");
+  }
+  return resolveTargets(parsed);
+}
+
 function deepFreeze<T>(value: T): T {
   if (value !== null && typeof value === "object") {
     for (const child of Object.values(value)) {

@@ -8,21 +8,26 @@ import { FastifyAdapter, type NestFastifyApplication } from "@nestjs/platform-fa
 import type { FastifyReply, FastifyRequest } from "fastify";
 
 import type { ApiConfig } from "../../config/api.js";
+import { defaultTargets, type Targets } from "../../config/targets.js";
 import { readAccount } from "../auth/accounts.js";
 import { AuthService, type Clock } from "../auth/auth-service.js";
 import type { SignInCodeSender } from "../auth/code-sender.js";
 import type { AuthSecrets } from "../auth/secrets.js";
 import { AccessGuard } from "../authz/access.js";
+import { ConsentController, ConsentTextController } from "../consent/consent.controller.js";
+import { ConsentService } from "../consent/consent-service.js";
 import type { SqlExecutor } from "../db/executor.js";
 import { HouseholdService } from "../households/household-service.js";
 import type { ApiLogger } from "../logger.js";
 import { AccountController, AuthController, HouseholdController } from "./controllers.js";
 import { toProblem } from "./problem.js";
-import { ACCOUNT_READER, AUTH_SERVICE, HOUSEHOLD_SERVICE } from "./tokens.js";
+import { ACCOUNT_READER, AUTH_SERVICE, CONSENT_SERVICE, HOUSEHOLD_SERVICE } from "./tokens.js";
 
 export interface AppDeps {
   readonly db: SqlExecutor;
   readonly config: ApiConfig;
+  /** SRS (target) values (`config/targets.ts`); defaults when absent. */
+  readonly targets?: Targets;
   readonly secrets: AuthSecrets;
   readonly codeSender: SignInCodeSender;
   readonly logger: ApiLogger;
@@ -51,6 +56,8 @@ export const CONTROLLERS = Object.freeze([
   AuthController,
   AccountController,
   HouseholdController,
+  ConsentTextController,
+  ConsentController,
 ] as const);
 
 /** Request bodies in this API are small JSON documents. */
@@ -97,6 +104,14 @@ export async function createApp(deps: AppDeps): Promise<NestFastifyApplication> 
     ...(deps.clock === undefined ? {} : { clock: deps.clock }),
   });
 
+  const consentService = new ConsentService({
+    db: deps.db,
+    config: deps.config,
+    targets: deps.targets ?? defaultTargets,
+    hashKey: deps.secrets.hashKey,
+    ...(deps.clock === undefined ? {} : { clock: deps.clock }),
+  });
+
   @Catch()
   class ProblemFilter implements ExceptionFilter {
     catch(error: unknown, host: ArgumentsHost): void {
@@ -118,6 +133,7 @@ export async function createApp(deps: AppDeps): Promise<NestFastifyApplication> 
       { provide: APP_GUARD, useClass: AccessGuard },
       { provide: AUTH_SERVICE, useValue: authService },
       { provide: HOUSEHOLD_SERVICE, useValue: householdService },
+      { provide: CONSENT_SERVICE, useValue: consentService },
       { provide: ACCOUNT_READER, useValue: { read: (id: string) => readAccount(deps.db, id) } },
     ],
   })

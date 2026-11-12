@@ -1,6 +1,7 @@
 import pg from "pg";
 
 import { apiConfigFromEnv } from "../config/api.js";
+import { targetsFromEnv } from "../config/targets.js";
 import { resolveAppEnv } from "./app-env.js";
 import { parseTrustedProxies } from "./auth/client-address.js";
 import { createCodeSender } from "./auth/code-sender.js";
@@ -30,6 +31,7 @@ async function main(): Promise<void> {
   const app = await createApp({
     db: pgExecutor(pool),
     config: apiConfigFromEnv(env),
+    targets: targetsFromEnv(env),
     secrets: loadAuthSecrets(env),
     // Local development only: the dev sender prints the code and challenge ID,
     // never the destination. `createCodeSender` refuses it outside local and test.
