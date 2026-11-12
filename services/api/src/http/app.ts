@@ -3,7 +3,7 @@ import "reflect-metadata";
 import { randomUUID } from "node:crypto";
 
 import { Catch, Module, type ArgumentsHost, type ExceptionFilter } from "@nestjs/common";
-import { NestFactory } from "@nestjs/core";
+import { APP_GUARD, NestFactory } from "@nestjs/core";
 import { FastifyAdapter, type NestFastifyApplication } from "@nestjs/platform-fastify";
 import type { FastifyReply, FastifyRequest } from "fastify";
 
@@ -12,10 +12,10 @@ import { readAccount } from "../auth/accounts.js";
 import { AuthService, type Clock } from "../auth/auth-service.js";
 import type { SignInCodeSender } from "../auth/code-sender.js";
 import type { AuthSecrets } from "../auth/secrets.js";
+import { AccessGuard } from "../authz/access.js";
 import type { SqlExecutor } from "../db/executor.js";
 import { HouseholdService } from "../households/household-service.js";
 import type { ApiLogger } from "../logger.js";
-import { AuthGuard } from "./auth.guard.js";
 import { AccountController, AuthController, HouseholdController } from "./controllers.js";
 import { toProblem } from "./problem.js";
 import { ACCOUNT_READER, AUTH_SERVICE, HOUSEHOLD_SERVICE } from "./tokens.js";
@@ -45,6 +45,13 @@ function trustProxyOption(trusted: readonly string[] | true | undefined): boolea
   // left are never used.
   return [...trusted];
 }
+
+/** Every controller of the API. A test checks that each route declares its access (NFR-09). */
+export const CONTROLLERS = Object.freeze([
+  AuthController,
+  AccountController,
+  HouseholdController,
+] as const);
 
 /** Request bodies in this API are small JSON documents. */
 const BODY_LIMIT_BYTES = 64 * 1024;
@@ -104,9 +111,11 @@ export async function createApp(deps: AppDeps): Promise<NestFastifyApplication> 
   }
 
   @Module({
-    controllers: [AuthController, AccountController, HouseholdController],
+    controllers: [...CONTROLLERS],
     providers: [
-      AuthGuard,
+      // NFR-09 (T-019): every route passes the access guard; a route without
+      // a declared access rule is refused.
+      { provide: APP_GUARD, useClass: AccessGuard },
       { provide: AUTH_SERVICE, useValue: authService },
       { provide: HOUSEHOLD_SERVICE, useValue: householdService },
       { provide: ACCOUNT_READER, useValue: { read: (id: string) => readAccount(deps.db, id) } },

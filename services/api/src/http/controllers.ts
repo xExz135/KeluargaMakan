@@ -10,7 +10,6 @@ import {
   Post,
   Req,
   Res,
-  UseGuards,
 } from "@nestjs/common";
 import type { FastifyReply, FastifyRequest } from "fastify";
 
@@ -18,7 +17,7 @@ import { ApiError, unauthenticated } from "../api-error.js";
 import type { AccountView } from "../auth/accounts.js";
 import type { AuthContext, AuthService, SessionTokens } from "../auth/auth-service.js";
 import type { HouseholdService, HouseholdView } from "../households/household-service.js";
-import { Auth, AuthGuard } from "./auth.guard.js";
+import { Auth, Public, Requires } from "../authz/access.js";
 import {
   parseHouseholdCreate,
   parseHouseholdUpdate,
@@ -78,6 +77,7 @@ function householdBody(household: HouseholdView): Schemas["Household"] {
 }
 
 @Controller("v1/auth")
+@Public()
 export class AuthController {
   constructor(@Inject(AUTH_SERVICE) private readonly auth: AuthService) {}
 
@@ -129,18 +129,18 @@ export class AuthController {
 
   @Post("sign-out")
   @HttpCode(204)
-  @UseGuards(AuthGuard)
+  @Requires("session:sign_out")
   async signOut(@Auth() auth: AuthContext): Promise<void> {
     await this.auth.signOut(auth.sessionId);
   }
 }
 
 @Controller("v1/account")
-@UseGuards(AuthGuard)
 export class AccountController {
   constructor(@Inject(ACCOUNT_READER) private readonly accounts: AccountReader) {}
 
   @Get()
+  @Requires("account:read")
   async get(@Auth() auth: AuthContext): Promise<Schemas["Account"]> {
     const account = await this.accounts.read(auth.accountId);
     if (account === null) throw unauthenticated();
@@ -149,11 +149,11 @@ export class AccountController {
 }
 
 @Controller("v1/household")
-@UseGuards(AuthGuard)
 export class HouseholdController {
   constructor(@Inject(HOUSEHOLD_SERVICE) private readonly households: HouseholdService) {}
 
   @Post()
+  @Requires("household:create")
   async create(
     @Auth() auth: AuthContext,
     @Body() body: unknown,
@@ -168,11 +168,13 @@ export class HouseholdController {
   }
 
   @Get()
+  @Requires("household:read")
   async get(@Auth() auth: AuthContext): Promise<Schemas["Household"]> {
     return householdBody(await this.households.get(auth));
   }
 
   @Patch()
+  @Requires("household:write")
   async update(@Auth() auth: AuthContext, @Body() body: unknown): Promise<Schemas["Household"]> {
     return householdBody(await this.households.update(auth, parseHouseholdUpdate(body)));
   }

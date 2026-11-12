@@ -629,6 +629,67 @@ for (const target of DATABASE_TARGETS) {
       });
     });
 
+    describe("NFR-09 household scoping comes from the session (T-019)", () => {
+      it("NFR-09 IDOR: a household ID in the body or query cannot reach another household", async () => {
+        const a = await signIn(api, fakePhone());
+        const b = await signIn(api, fakePhone());
+        const homeA = (await createHousehold(api, a.tokens.accessToken)).body as { id: string };
+        const homeB = (
+          await createHousehold(api, b.tokens.accessToken, undefined, {
+            ...HOUSEHOLD,
+            city: "Kota Lain",
+          })
+        ).body as { id: string; city: string };
+
+        for (const key of ["id", "householdId", "managerAccountId"]) {
+          expectProblem(
+            await api.request("PATCH", "/v1/household", {
+              token: a.tokens.accessToken,
+              body: { city: "Diubah", [key]: homeB.id },
+            }),
+            400,
+            "validation_failed",
+          );
+        }
+        const viaQuery = await api.request("GET", `/v1/household?householdId=${homeB.id}`, {
+          token: a.tokens.accessToken,
+        });
+        expect(viaQuery.status).toBe(200);
+        expect(viaQuery.body).toMatchObject({ id: homeA.id });
+        const patched = await api.request("PATCH", `/v1/household?id=${homeB.id}`, {
+          token: a.tokens.accessToken,
+          body: { city: "Diubah" },
+        });
+        expect(patched.body).toMatchObject({ id: homeA.id, city: "Diubah" });
+
+        const untouched = await api.request("GET", "/v1/household", {
+          token: b.tokens.accessToken,
+        });
+        expect(untouched.body).toMatchObject({ id: homeB.id, city: "Kota Lain" });
+      });
+
+      it("NFR-09 an account whose stored role is not a V1 role is refused (403)", async () => {
+        const session = await signIn(api, fakePhone());
+        // The schema allows only 'manager' (ACC-03); drop the check to simulate a
+        // role that grants nothing in V1, such as a future co-cook.
+        await db.query(`ALTER TABLE account DROP CONSTRAINT account_role_check`);
+        try {
+          await db.query(`UPDATE account SET role = 'co_cook' WHERE id = $1`, [session.account.id]);
+          expectProblem(
+            await api.request("GET", "/v1/account", { token: session.tokens.accessToken }),
+            403,
+            "forbidden",
+          );
+          expectProblem(await createHousehold(api, session.tokens.accessToken), 403, "forbidden");
+        } finally {
+          await db.query(`UPDATE account SET role = 'manager' WHERE id = $1`, [session.account.id]);
+          await db.query(
+            `ALTER TABLE account ADD CONSTRAINT account_role_check CHECK (role IN ('manager'))`,
+          );
+        }
+      });
+    });
+
     describe("ACC-13 sign out, then sign in on another device, without losing household data", () => {
       it("ACC-13 integration: household data survives sign-out and a sign-in on a new device", async () => {
         const phone = fakePhone();
