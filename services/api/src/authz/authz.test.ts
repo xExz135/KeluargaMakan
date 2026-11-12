@@ -13,6 +13,7 @@ import {
   grantsOf,
   HOUSEHOLD_PERMISSIONS,
   isAllowed,
+  isHouseholdPermission,
   PERMISSIONS,
   REFERENCE_PERMISSIONS,
   ROLES,
@@ -185,7 +186,9 @@ describe("NFR-09 role-based access (T-019)", () => {
             );
             const expected = isAllowed(role, rule.permission) ? "allowed" : "403 forbidden";
             expect(result, `${role} ${controller.name}.${name}`).toBe(expected);
-            if (role !== "manager") expect(result).toBe("403 forbidden");
+            if (role !== "manager" && isHouseholdPermission(rule.permission)) {
+              expect(result, `${role} ${controller.name}.${name}`).toBe("403 forbidden");
+            }
           }
         }
       }

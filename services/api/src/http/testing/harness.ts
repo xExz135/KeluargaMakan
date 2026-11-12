@@ -7,7 +7,9 @@ import { Ajv2020 } from "ajv/dist/2020.js";
 import { parse } from "yaml";
 
 import { resolveApiConfig, type ApiConfig, type ApiConfigOverrides } from "../../../config/api.js";
+import { resolveTargets, type TargetOverrides, type Targets } from "../../../config/targets.js";
 import type { Clock } from "../../auth/auth-service.js";
+import { canonicalDestination } from "../../auth/destination.js";
 import { DevCodeSender, type SignInCodeSender } from "../../auth/code-sender.js";
 import type { AuthSecrets } from "../../auth/secrets.js";
 import type { SqlExecutor } from "../../db/executor.js";
@@ -81,9 +83,10 @@ export interface Harness {
   readonly logger: CapturingLogger;
   readonly sender: DevCodeSender;
   readonly config: ApiConfig;
+  readonly targets: Targets;
   readonly secrets: AuthSecrets;
   request(
-    method: "GET" | "POST" | "PATCH",
+    method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE",
     url: string,
     options?: {
       readonly body?: unknown;
@@ -100,6 +103,7 @@ export async function startHarness(
   db: SqlExecutor,
   options: {
     readonly config?: ApiConfigOverrides;
+    readonly targets?: TargetOverrides;
     readonly codeSender?: SignInCodeSender;
     /** Share another harness's secrets so its tokens are recognised. */
     readonly secrets?: AuthSecrets;
@@ -113,9 +117,11 @@ export async function startHarness(
   const sender = new DevCodeSender({ appEnv: "test" });
   const config = resolveApiConfig(options.config ?? {}, { appEnv: options.appEnv ?? "test" });
   const secrets = options.secrets ?? randomSecrets();
+  const targets = resolveTargets(options.targets ?? {});
   const app = await createApp({
     db,
     config,
+    targets,
     secrets,
     codeSender: options.codeSender ?? sender,
     logger,
@@ -129,6 +135,7 @@ export async function startHarness(
     logger,
     sender,
     config,
+    targets,
     secrets,
     async request(method, url, requestOptions = {}) {
       const headers: Record<string, string> = { ...requestOptions.headers };
@@ -185,4 +192,45 @@ export function contractErrors(schemaName: string, value: unknown): string[] {
   }
   if (validate(value)) return [];
   return (validate.errors ?? []).map((error) => `${error.instancePath} ${error.message ?? ""}`);
+}
+
+/** A signed-in manager with a household, as the API sees it. */
+export interface HouseholdSession {
+  readonly token: string;
+  readonly accountId: string;
+  readonly householdId: string;
+  readonly managerProfileId: string;
+}
+
+/** Signs in with a fictional phone number and creates a household (ACC-01, ACC-03). */
+export async function signInWithHousehold(h: Harness): Promise<HouseholdSession> {
+  const phone = fakePhone();
+  const requested = await h.request("POST", "/v1/auth/code/request", {
+    body: { channel: "phone", destination: phone, language: "id" },
+  });
+  if (requested.status !== 202) throw new Error(`code request failed: ${requested.raw}`);
+  const { challengeId } = requested.body as { challengeId: string };
+  const code = h.sender.latestCode(canonicalDestination("phone", phone) ?? phone);
+  if (code === null) throw new Error("no code sent");
+  const verified = await h.request("POST", "/v1/auth/code/verify", {
+    body: { challengeId, code, device: device() },
+  });
+  if (verified.status !== 200) throw new Error(`verify failed: ${verified.raw}`);
+  const session = verified.body as { tokens: { accessToken: string }; account: { id: string } };
+  const created = await h.request("POST", "/v1/household", {
+    token: session.tokens.accessToken,
+    body: {
+      timeZone: "Asia/Jakarta",
+      language: "id",
+      managerProfile: { name: "Ibu Uji", avatar: { style: "initials", colorToken: "avatar_1" } },
+    },
+  });
+  if (created.status !== 201) throw new Error(`household create failed: ${created.raw}`);
+  const household = created.body as { id: string; managerProfileId: string };
+  return {
+    token: session.tokens.accessToken,
+    accountId: session.account.id,
+    householdId: household.id,
+    managerProfileId: household.managerProfileId,
+  };
 }

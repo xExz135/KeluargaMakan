@@ -2,3 +2,4 @@
 export const AUTH_SERVICE = Symbol("AuthService");
 export const HOUSEHOLD_SERVICE = Symbol("HouseholdService");
 export const ACCOUNT_READER = Symbol("AccountReader");
+export const CONSENT_SERVICE = Symbol("ConsentService");
