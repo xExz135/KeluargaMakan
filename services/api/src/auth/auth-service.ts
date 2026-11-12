@@ -57,11 +57,17 @@ export interface SignedIn {
   readonly isNewAccount: boolean;
 }
 
-/** Who is calling, from a valid access token on an active session. */
+/**
+ * Who is calling, from a valid access token on an active session. The
+ * household and the role are read from the account on every request, never
+ * from the token or the request (NFR-09, T-019).
+ */
 export interface AuthContext {
   readonly accountId: string;
   readonly sessionId: string;
   readonly householdId: string | null;
+  /** The account's stored role; `authz/roles.ts` decides what it may do. */
+  readonly role: string;
 }
 
 const REFRESH_PREFIX = "kmr1_";
@@ -599,8 +605,8 @@ export class AuthService {
     }
     if (check.status === "invalid") throw unauthenticated();
     const { rows } = await withDbErrors(() =>
-      this.#db.query<{ household_id: string | null }>(
-        `SELECT a.household_id
+      this.#db.query<{ household_id: string | null; role: string }>(
+        `SELECT a.household_id, a.role
            FROM auth_session s
            JOIN account a ON a.id = s.account_id
           WHERE s.id = $1 AND a.id = $2 AND s.revoked_at IS NULL AND s.expires_at > $3`,
@@ -613,6 +619,7 @@ export class AuthService {
       accountId: check.claims.accountId,
       sessionId: check.claims.sessionId,
       householdId: row.household_id,
+      role: row.role,
     };
   }
 }
