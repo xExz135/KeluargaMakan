@@ -6,6 +6,7 @@ import type {
   HouseholdUpdateInput,
   Language,
 } from "../households/household-service.js";
+import { cleanUserText, codePointLength } from "./text.js";
 import { BodyReader, isTimeZone, UUID_PATTERN } from "./validation.js";
 
 /** Request body parsers, one per contract request schema. */
@@ -168,7 +169,15 @@ export function parseHouseholdCreate(body: unknown): HouseholdCreateInput {
       const avatar = Object.hasOwn(profile, "avatar")
         ? parseAvatar(reader, profile["avatar"], "/managerProfile/avatar")
         : null;
-      if (typeof profileName === "string") manager = { name: profileName, avatar };
+      if (typeof profileName === "string") {
+        // Security review T-019 L5: the same check as every other profile name.
+        const clean = cleanUserText(profileName);
+        if (clean === null || codePointLength(clean) > 30) {
+          reader.fail("/managerProfile/name", "invalid_format");
+        } else {
+          manager = { name: clean, avatar };
+        }
+      }
     }
   }
   reader.done();

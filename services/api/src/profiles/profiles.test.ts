@@ -652,6 +652,73 @@ for (const target of DATABASE_TARGETS) {
       });
     });
 
+    describe("L5 names and rule text (security review T-019)", () => {
+      const HIDDEN = [
+        "uda​ng", // zero-width space
+        "uda⁠ng", // word joiner
+        "﻿udang", // byte-order mark
+        "uda­ng", // soft hyphen
+        "A‮B", // bidi override
+        "A\ud800B", // lone surrogate
+        "A\u0007B", // control
+        "AB", // private use
+      ];
+
+      it("L5 names with hidden or invalid characters are refused without echoing them; names are stored in NFC", async () => {
+        const home = await signInWithHousehold(api);
+        for (const name of HIDDEN) {
+          const created = await createProfile(home, { name, ageGroup: "adult" });
+          expectProblem(created, 400, "validation_failed");
+          expect(created.raw).not.toContain(name);
+          expectProblem(
+            await api.request("PATCH", profileUrl(home.managerProfileId), {
+              token: home.token,
+              body: { name },
+            }),
+            400,
+            "validation_failed",
+          );
+        }
+        const decomposed = await createProfile(home, { name: "René", ageGroup: "adult" });
+        expect(decomposed.status).toBe(201);
+        expect((decomposed.body as { name: string }).name).toBe("René");
+      });
+
+      it("L5 rule text with hidden characters is refused; look-alike text is a duplicate", async () => {
+        const home = await signInWithHousehold(api);
+        const id = home.managerProfileId;
+        await giveConsent(home, id);
+        for (const freeText of HIDDEN) {
+          const created = await addRule(home, id, { type: "free_text", freeText });
+          expectProblem(created, 400, "validation_failed");
+          expect(created.raw).not.toContain(freeText);
+        }
+        expect(
+          (await addRule(home, id, { type: "free_text", freeText: "udang galah" })).status,
+        ).toBe(201);
+        expectProblem(
+          await addRule(home, id, {
+            type: "free_text",
+            freeText: "ｕｄａｎｇ galah",
+          }),
+          409,
+          "hard_rule_duplicate",
+        );
+        expect(await ruleRows(id)).toBe(1);
+      });
+
+      it("L5 concurrent identical rule creates store one rule (checked under the member lock)", async () => {
+        const home = await signInWithHousehold(api);
+        const id = home.managerProfileId;
+        await giveConsent(home, id);
+        const results = await Promise.all(
+          [0, 1, 2].map(() => addRule(home, id, { type: "allergy", allergen: "soy" })),
+        );
+        expect(results.map((r) => r.status).sort()).toEqual([201, 409, 409]);
+        expect(await ruleRows(id)).toBe(1);
+      });
+    });
+
     describe("PRF-05 PRF-06 soft preferences, likes and dislikes", () => {
       it("PRF-05 soft preferences are replaced as a whole and can be sent again", async () => {
         const home = await signInWithHousehold(api);
