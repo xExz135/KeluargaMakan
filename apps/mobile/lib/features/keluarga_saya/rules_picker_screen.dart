@@ -312,6 +312,11 @@ class _RulesPickerScreenState extends ConsumerState<RulesPickerScreen> {
             enabled: enabled,
             maxLength: _maxText,
             textCapitalization: TextCapitalization.sentences,
+            // Health data: the keyboard must not learn, suggest or change
+            // it (security review T-028 M1).
+            enableIMEPersonalizedLearning: false,
+            enableSuggestions: false,
+            autocorrect: false,
             decoration: InputDecoration(
               labelText: l10n.familyRulesOtherLabel,
               hintText: l10n.onboardingRulesOtherHint,

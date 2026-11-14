@@ -321,6 +321,9 @@ class _ProfileFormScreenState extends ConsumerState<ProfileFormScreen> {
             maxLength: _maxName,
             textCapitalization: TextCapitalization.words,
             autocorrect: false,
+            // Members' and children's names are not learned by the keyboard
+            // (security review T-028 M1).
+            enableIMEPersonalizedLearning: false,
             decoration: InputDecoration(
               labelText: l10n.familyAddNameLabel,
               hintText: l10n.familyAddNameHint,
