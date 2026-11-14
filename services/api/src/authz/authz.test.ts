@@ -129,7 +129,7 @@ describe("NFR-09 role-based access (T-019)", () => {
     expect(missing).toEqual([]);
   });
 
-  it("NFR-09 only sign-in routes are public", () => {
+  it("NFR-09 only sign-in routes and the readiness probe are public", () => {
     const publicRoutes: string[] = [];
     for (const controller of CONTROLLERS) {
       for (const [name, handler] of routesOf(controller)) {
@@ -144,6 +144,8 @@ describe("NFR-09 role-based access (T-019)", () => {
         "AuthController.refresh",
         "AuthController.requestCode",
         "AuthController.verifyCode",
+        // Security review T-030 L2: says only ready or not ready.
+        "HealthController.ready",
       ].sort(),
     );
   });

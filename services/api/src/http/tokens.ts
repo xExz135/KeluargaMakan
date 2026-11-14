@@ -7,3 +7,4 @@ export const PROFILE_SERVICE = Symbol("ProfileService");
 export const KITCHEN_SERVICE = Symbol("KitchenService");
 export const KITCHEN_CONFIG = Symbol("KitchenConfig");
 export const REFERENCE_SOURCE = Symbol("ReferenceSource");
+export const HEALTH_CHECKS = Symbol("HealthChecks");
