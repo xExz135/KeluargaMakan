@@ -396,6 +396,7 @@ describe("consent", () => {
       "decision",
       "textVersion",
       "language",
+      "expectedConsent",
     ]);
     expect(operation("recordHealthDataConsent").path).toBe(
       "/v1/household/profiles/{profileId}/consents/health-data",
@@ -408,6 +409,22 @@ describe("consent", () => {
     expect(errorCodes).toEqual(
       expect.arrayContaining(["consent_text_outdated", "consent_not_active"]),
     );
+  });
+
+  it("M1 consent writes are conditional on the state the manager saw, and online only", () => {
+    expect(schema("ExpectedConsentState").required).toEqual(["status", "consentRecordId"]);
+    expect(schema("HealthDataConsentWithdrawal").required).toEqual(["expectedConsent"]);
+    expect(errorCodes).toContain("consent_changed");
+    for (const id of ["recordHealthDataConsent", "withdrawHealthDataConsent"]) {
+      expect(operation(id).operation.description).toContain("`consent_changed`");
+      expect(operation(id).operation.description).toContain("Online only");
+    }
+  });
+
+  it("Q62 Q46 consent renewal after an adult and child change; the manager stays an adult", () => {
+    expect(schema("RulesConsentState").required).toContain("renewalRequired");
+    expect(schema("ConsentAudience").enum).toEqual(["adult", "child"]);
+    expect(errorCodes).toContain("manager_profile_must_be_adult");
   });
 
   it("SET-04 a withdrawal reports when the member's rules will have been deleted", () => {

@@ -30,6 +30,8 @@ enum ErrorCode {
   consentRequired._(r'consent_required'),
   consentTextOutdated._(r'consent_text_outdated'),
   consentNotActive._(r'consent_not_active'),
+  consentChanged._(r'consent_changed'),
+  managerProfileMustBeAdult._(r'manager_profile_must_be_adult'),
   hardRuleDuplicate._(r'hard_rule_duplicate'),
   mappingNotApplicable._(r'mapping_not_applicable'),
   idempotencyKeyReused._(r'idempotency_key_reused'),
@@ -115,6 +117,8 @@ class ErrorCodeTypeTransformer {
         case r'consent_required': return ErrorCode.consentRequired;
         case r'consent_text_outdated': return ErrorCode.consentTextOutdated;
         case r'consent_not_active': return ErrorCode.consentNotActive;
+        case r'consent_changed': return ErrorCode.consentChanged;
+        case r'manager_profile_must_be_adult': return ErrorCode.managerProfileMustBeAdult;
         case r'hard_rule_duplicate': return ErrorCode.hardRuleDuplicate;
         case r'mapping_not_applicable': return ErrorCode.mappingNotApplicable;
         case r'idempotency_key_reused': return ErrorCode.idempotencyKeyReused;

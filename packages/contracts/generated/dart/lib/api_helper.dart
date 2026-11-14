@@ -64,6 +64,9 @@ String parameterToString(dynamic value) {
   if (value is AvatarStyle) {
     return AvatarStyleTypeTransformer().encode(value).toString();
   }
+  if (value is ConsentAudience) {
+    return ConsentAudienceTypeTransformer().encode(value).toString();
+  }
   if (value is ConsentDecision) {
     return ConsentDecisionTypeTransformer().encode(value).toString();
   }

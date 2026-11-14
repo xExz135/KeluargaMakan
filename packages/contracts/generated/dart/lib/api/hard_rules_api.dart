@@ -85,7 +85,7 @@ class HardRulesApi {
 
   /// Add a hard rule
   ///
-  /// Adds an allergy from the standard list, halal, vegetarian, vegan, a medical exclusion or a free-text rule (PRF-03, PRF-04). Needs a current health-data consent for the member, else 409 `consent_required` (ACC-08); for a child the guardian confirmation must also be on record (SET-10). Free-text and medical-exclusion rules are saved as unmapped unless the manager picked matching ingredients (`mappedIngredientIds`). An unmapped rule makes Cek Aman return \"Check the label\" for related recipes, never \"Safe\" (PRF-08, SAF-09). Online only: the server re-evaluates affected safety results.
+  /// Adds an allergy from the standard list, halal, vegetarian, vegan, a medical exclusion or a free-text rule (PRF-03, PRF-04). Needs a current health-data consent for the member, else 409 `consent_required` (ACC-08), also while `consent.renewalRequired` is true; for a child the guardian confirmation must also be on record (SET-10). Free-text and medical-exclusion rules are saved as unmapped unless the manager picked matching ingredients (`mappedIngredientIds`). An unmapped rule makes Cek Aman return \"Check the label\" for related recipes, never \"Safe\" (PRF-08, SAF-09). Online only: the server re-evaluates affected safety results.
   ///
   /// Note: This method returns the HTTP [Response].
   ///
@@ -130,7 +130,7 @@ class HardRulesApi {
 
   /// Add a hard rule
   ///
-  /// Adds an allergy from the standard list, halal, vegetarian, vegan, a medical exclusion or a free-text rule (PRF-03, PRF-04). Needs a current health-data consent for the member, else 409 `consent_required` (ACC-08); for a child the guardian confirmation must also be on record (SET-10). Free-text and medical-exclusion rules are saved as unmapped unless the manager picked matching ingredients (`mappedIngredientIds`). An unmapped rule makes Cek Aman return \"Check the label\" for related recipes, never \"Safe\" (PRF-08, SAF-09). Online only: the server re-evaluates affected safety results.
+  /// Adds an allergy from the standard list, halal, vegetarian, vegan, a medical exclusion or a free-text rule (PRF-03, PRF-04). Needs a current health-data consent for the member, else 409 `consent_required` (ACC-08), also while `consent.renewalRequired` is true; for a child the guardian confirmation must also be on record (SET-10). Free-text and medical-exclusion rules are saved as unmapped unless the manager picked matching ingredients (`mappedIngredientIds`). An unmapped rule makes Cek Aman return \"Check the label\" for related recipes, never \"Safe\" (PRF-08, SAF-09). Online only: the server re-evaluates affected safety results.
   ///
   /// Parameters:
   ///

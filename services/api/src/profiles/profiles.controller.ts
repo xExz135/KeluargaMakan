@@ -45,8 +45,11 @@ import {
 
 const iso = (date: Date) => date.toISOString();
 
-function consentBody(state: RulesConsentState): Schemas["RulesConsentState"] {
+function consentBody(
+  state: RulesConsentState & { readonly renewalRequired: boolean },
+): Schemas["RulesConsentState"] {
   return {
+    renewalRequired: state.renewalRequired,
     status: state.status,
     consentRecordId: state.consentRecordId,
     decidedAt: state.decidedAt === null ? null : iso(state.decidedAt),

@@ -18,7 +18,7 @@ class ConsentApi {
 
   /// Get the current consent text for a purpose
   ///
-  /// Returns the current text and its version, which the client sends back when recording a decision (SET-03). Texts are served from content, not built into the app, so legal changes need no release. `isDraft` stays true until legal approval.
+  /// Returns the current text and its version, which the client sends back when recording a decision (SET-03). Texts are served from content, not built into the app, so legal changes need no release. `isDraft` stays true until legal approval. The health-data text has an adult and a child version (SET-10, QUESTIONS #62).
   ///
   /// Note: This method returns the HTTP [Response].
   ///
@@ -27,7 +27,10 @@ class ConsentApi {
   /// * [ConsentPurpose] purpose (required):
   ///
   /// * [Language] language (required):
-  Future<Response> getConsentTextWithHttpInfo(ConsentPurpose purpose, Language language, { Future<void>? abortTrigger, }) async {
+  ///
+  /// * [ConsentAudience] audience:
+  ///   For `health_data`: `child` for an infant, child or teen profile, `adult` otherwise (default). Ignored for `guardian_confirmation`.
+  Future<Response> getConsentTextWithHttpInfo(ConsentPurpose purpose, Language language, { ConsentAudience? audience, Future<void>? abortTrigger, }) async {
     // ignore: prefer_const_declarations
     final path = r'/v1/consent-texts/{purpose}'
       .replaceAll('{purpose}', purpose.toString());
@@ -40,6 +43,9 @@ class ConsentApi {
     final formParams = <String, String>{};
 
       queryParams.addAll(_queryParams('', 'language', language));
+    if (audience != null) {
+      queryParams.addAll(_queryParams('', 'audience', audience));
+    }
 
     const contentTypes = <String>[];
 
@@ -58,15 +64,18 @@ class ConsentApi {
 
   /// Get the current consent text for a purpose
   ///
-  /// Returns the current text and its version, which the client sends back when recording a decision (SET-03). Texts are served from content, not built into the app, so legal changes need no release. `isDraft` stays true until legal approval.
+  /// Returns the current text and its version, which the client sends back when recording a decision (SET-03). Texts are served from content, not built into the app, so legal changes need no release. `isDraft` stays true until legal approval. The health-data text has an adult and a child version (SET-10, QUESTIONS #62).
   ///
   /// Parameters:
   ///
   /// * [ConsentPurpose] purpose (required):
   ///
   /// * [Language] language (required):
-  Future<ConsentText?> getConsentText(ConsentPurpose purpose, Language language, { Future<void>? abortTrigger, }) async {
-    final response = await getConsentTextWithHttpInfo(purpose, language, abortTrigger: abortTrigger,);
+  ///
+  /// * [ConsentAudience] audience:
+  ///   For `health_data`: `child` for an infant, child or teen profile, `adult` otherwise (default). Ignored for `guardian_confirmation`.
+  Future<ConsentText?> getConsentText(ConsentPurpose purpose, Language language, { ConsentAudience? audience, Future<void>? abortTrigger, }) async {
+    final response = await getConsentTextWithHttpInfo(purpose, language, audience: audience, abortTrigger: abortTrigger,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }
@@ -140,7 +149,7 @@ class ConsentApi {
 
   /// Record the manager's health-data consent decision for a member
   ///
-  /// Records an explicit decision, given or declined, on storing the member's hard rules (ACC-08, SET-03). Nothing is pre-given. `textVersion` must be the current version from `getConsentText`, else 409 `consent_text_outdated`. For a child profile the guardian confirmation must be on record, else 409 `guardian_confirmation_required` (SET-10). A decline stores no rules; the member shows \"rules not saved\".
+  /// Records an explicit decision, given or declined, on storing the member's hard rules (ACC-08, SET-03). Nothing is pre-given. `textVersion` must be the current version from `getConsentText` for the member's audience (the child text for an infant, child or teen profile), else 409 `consent_text_outdated`. `expectedConsent` is the member's `rules.consent` the manager was shown; if the stored state has moved since (another phone decided or withdrew), nothing is recorded and the answer is 409 `consent_changed`. For a child profile the guardian confirmation must be on record, else 409 `guardian_confirmation_required` (SET-10). A decline stores no rules; the member shows \"rules not saved\". Online only: never queue this request offline; ask again after a 409.
   ///
   /// Note: This method returns the HTTP [Response].
   ///
@@ -185,7 +194,7 @@ class ConsentApi {
 
   /// Record the manager's health-data consent decision for a member
   ///
-  /// Records an explicit decision, given or declined, on storing the member's hard rules (ACC-08, SET-03). Nothing is pre-given. `textVersion` must be the current version from `getConsentText`, else 409 `consent_text_outdated`. For a child profile the guardian confirmation must be on record, else 409 `guardian_confirmation_required` (SET-10). A decline stores no rules; the member shows \"rules not saved\".
+  /// Records an explicit decision, given or declined, on storing the member's hard rules (ACC-08, SET-03). Nothing is pre-given. `textVersion` must be the current version from `getConsentText` for the member's audience (the child text for an infant, child or teen profile), else 409 `consent_text_outdated`. `expectedConsent` is the member's `rules.consent` the manager was shown; if the stored state has moved since (another phone decided or withdrew), nothing is recorded and the answer is 409 `consent_changed`. For a child profile the guardian confirmation must be on record, else 409 `guardian_confirmation_required` (SET-10). A decline stores no rules; the member shows \"rules not saved\". Online only: never queue this request offline; ask again after a 409.
   ///
   /// Parameters:
   ///
@@ -212,26 +221,28 @@ class ConsentApi {
 
   /// Withdraw a member's health-data consent
   ///
-  /// Withdraws the current consent (SET-03). The member's hard rules stop being used at once and are deleted by `deletionDueBy`, set from the configured period (SET-04, 30 days target). Cek Aman no longer checks rules for this member, and clients show \"rules not saved\". Returns 409 `consent_not_active` when there is no current consent.
+  /// Withdraws the current consent (SET-03). The member's hard rules stop being used at once and are deleted by `deletionDueBy`, set from the configured period (SET-04, 30 days target). Cek Aman no longer checks rules for this member, and clients show \"rules not saved\". `expectedConsent` is the state the manager was shown; if it has moved since, nothing changes and the answer is 409 `consent_changed`. Returns 409 `consent_not_active` when there is no current consent. Online only: never queue this request offline.
   ///
   /// Note: This method returns the HTTP [Response].
   ///
   /// Parameters:
   ///
   /// * [String] profileId (required):
-  Future<Response> withdrawHealthDataConsentWithHttpInfo(String profileId, { Future<void>? abortTrigger, }) async {
+  ///
+  /// * [HealthDataConsentWithdrawal] healthDataConsentWithdrawal (required):
+  Future<Response> withdrawHealthDataConsentWithHttpInfo(String profileId, HealthDataConsentWithdrawal healthDataConsentWithdrawal, { Future<void>? abortTrigger, }) async {
     // ignore: prefer_const_declarations
     final path = r'/v1/household/profiles/{profileId}/consents/health-data/withdraw'
       .replaceAll('{profileId}', profileId);
 
     // ignore: prefer_final_locals
-    Object? postBody;
+    Object? postBody = healthDataConsentWithdrawal;
 
     final queryParams = <QueryParam>[];
     final headerParams = <String, String>{};
     final formParams = <String, String>{};
 
-    const contentTypes = <String>[];
+    const contentTypes = <String>['application/json'];
 
 
     return apiClient.invokeAPI(
@@ -248,13 +259,15 @@ class ConsentApi {
 
   /// Withdraw a member's health-data consent
   ///
-  /// Withdraws the current consent (SET-03). The member's hard rules stop being used at once and are deleted by `deletionDueBy`, set from the configured period (SET-04, 30 days target). Cek Aman no longer checks rules for this member, and clients show \"rules not saved\". Returns 409 `consent_not_active` when there is no current consent.
+  /// Withdraws the current consent (SET-03). The member's hard rules stop being used at once and are deleted by `deletionDueBy`, set from the configured period (SET-04, 30 days target). Cek Aman no longer checks rules for this member, and clients show \"rules not saved\". `expectedConsent` is the state the manager was shown; if it has moved since, nothing changes and the answer is 409 `consent_changed`. Returns 409 `consent_not_active` when there is no current consent. Online only: never queue this request offline.
   ///
   /// Parameters:
   ///
   /// * [String] profileId (required):
-  Future<ConsentRecord?> withdrawHealthDataConsent(String profileId, { Future<void>? abortTrigger, }) async {
-    final response = await withdrawHealthDataConsentWithHttpInfo(profileId, abortTrigger: abortTrigger,);
+  ///
+  /// * [HealthDataConsentWithdrawal] healthDataConsentWithdrawal (required):
+  Future<ConsentRecord?> withdrawHealthDataConsent(String profileId, HealthDataConsentWithdrawal healthDataConsentWithdrawal, { Future<void>? abortTrigger, }) async {
+    final response = await withdrawHealthDataConsentWithHttpInfo(profileId, healthDataConsentWithdrawal, abortTrigger: abortTrigger,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }

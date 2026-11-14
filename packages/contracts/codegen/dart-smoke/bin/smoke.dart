@@ -27,6 +27,7 @@ const consentState = {
   'decidedAt': '2026-01-01T00:00:00Z',
   'textVersion': 'test-v1',
   'deletionDueBy': null,
+  'renewalRequired': false,
 };
 
 const childProfile = {
@@ -116,6 +117,20 @@ void main() {
   check(create['ageGroup'] == 'teen', 'enum encodes to its wire value');
   check((create['guardianConfirmation'] as Map)['confirmed'] == true,
       'SET-10 guardian confirmation encodes');
+
+  final decision = roundTrip(HealthDataConsentDecision(
+    decision: ConsentDecision.given,
+    textVersion: 'test-v1',
+    language: Language.id,
+    expectedConsent: ExpectedConsentState(
+      status: RulesConsentStatus.none,
+      consentRecordId: null,
+    ),
+  ));
+  final expected = decision['expectedConsent'] as Map;
+  check(expected['status'] == 'none' && expected.containsKey('consentRecordId') &&
+          expected['consentRecordId'] == null,
+      'M1 consent precondition encodes, with an explicit null record for none');
 
   final update = roundTrip(HouseholdUpdate(city: const Optional.present(null)));
   check(jsonEncode(update) == '{"city":null}', 'PATCH sends only present fields; null clears');

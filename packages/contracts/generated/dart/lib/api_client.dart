@@ -193,6 +193,8 @@ class ApiClient {
           return Avatar.fromJson(value);
         case 'AvatarStyle':
           return AvatarStyleTypeTransformer().decode(value);
+        case 'ConsentAudience':
+          return ConsentAudienceTypeTransformer().decode(value);
         case 'ConsentDecision':
           return ConsentDecisionTypeTransformer().decode(value);
         case 'ConsentPurpose':
@@ -211,6 +213,8 @@ class ApiClient {
           return DevicePlatformTypeTransformer().decode(value);
         case 'ErrorCode':
           return ErrorCodeTypeTransformer().decode(value);
+        case 'ExpectedConsentState':
+          return ExpectedConsentState.fromJson(value);
         case 'FieldError':
           return FieldError.fromJson(value);
         case 'FieldErrorCode':
@@ -239,6 +243,8 @@ class ApiClient {
           return HardRuleTypeTypeTransformer().decode(value);
         case 'HealthDataConsentDecision':
           return HealthDataConsentDecision.fromJson(value);
+        case 'HealthDataConsentWithdrawal':
+          return HealthDataConsentWithdrawal.fromJson(value);
         case 'Household':
           return Household.fromJson(value);
         case 'HouseholdCreate':
