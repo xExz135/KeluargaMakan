@@ -1,6 +1,7 @@
 import { withDbErrors } from "../db/errors.js";
 import type { SqlExecutor } from "../db/executor.js";
 import { isReferenceId } from "../db/ids.js";
+import type { ReferenceSource } from "./reference-data.js";
 
 /**
  * Reference names for IDs the household refers to: liked or disliked
@@ -63,6 +64,36 @@ export class DbReferenceCatalog implements ReferenceCatalog {
       }
     }
     return names;
+  }
+
+  /** No library recipes exist before T-041. */
+  dishNames(): Promise<Map<string, LocalizedName>> {
+    return Promise.resolve(new Map<string, LocalizedName>());
+  }
+}
+
+/**
+ * QUESTIONS #49: names from the verified reference dataset, the same one the
+ * ingredient search uses, so an ingredient found by search is also accepted
+ * for likes, dislikes and rule mappings. While no verified dataset is loaded
+ * no ingredient is known: writes are refused and reads show the ID.
+ */
+export class VerifiedReferenceCatalog implements ReferenceCatalog {
+  readonly #source: ReferenceSource;
+
+  constructor(source: ReferenceSource) {
+    this.#source = source;
+  }
+
+  ingredientNames(ids: readonly string[]): Promise<Map<string, LocalizedName>> {
+    const catalog = this.#source.current()?.catalog;
+    const names = new Map<string, LocalizedName>();
+    if (catalog === undefined) return Promise.resolve(names);
+    for (const id of new Set(ids)) {
+      const found = catalog.get(id);
+      if (found !== null) names.set(id, { id: found.displayName.id, en: found.displayName.en });
+    }
+    return Promise.resolve(names);
   }
 
   /** No library recipes exist before T-041. */

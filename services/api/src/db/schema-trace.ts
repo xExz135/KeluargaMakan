@@ -192,6 +192,7 @@ export const SCHEMA_TRACE: Readonly<Record<string, TableTrace>> = {
       household_id: household,
       ingredient_id: "Ingredient: reference ingredient (KIT-04)",
       custom_name: "Ingredient: custom ingredient (KIT-05)",
+      custom_key: "Ingredient: custom ingredient, name comparison key (KIT-05, KIT-16)",
       category: "Ingredient: category (KIT-03)",
       state: "State (KIT-02)",
       quantity: "Quantity (KIT-09)",

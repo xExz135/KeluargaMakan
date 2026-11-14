@@ -1459,14 +1459,39 @@ for (const target of DATABASE_TARGETS) {
             ),
           ),
         ).toBe("23514");
+        // Migration 0008: a custom item carries its name comparison key.
+        expect(
+          await dbErrorCode(
+            db.query(
+              `INSERT INTO kitchen_item (household_id, custom_name, category) VALUES ($1, 'Sambal Rumah', 'sauces_condiments')`,
+              [home.householdId],
+            ),
+          ),
+        ).toBe("23514");
+        expect(
+          await dbErrorCode(
+            db.query(
+              `INSERT INTO kitchen_item (household_id, ingredient_id, custom_key, category) VALUES ($1, 'fixture_y', 'y', 'staples')`,
+              [home.householdId],
+            ),
+          ),
+        ).toBe("23514");
         await db.query(
-          `INSERT INTO kitchen_item (household_id, custom_name, category, quantity) VALUES ($1, 'Sambal Rumah', 'sauces_condiments', 'some')`,
+          `INSERT INTO kitchen_item (household_id, custom_name, custom_key, category, quantity) VALUES ($1, 'Sambal Rumah', 'sambal rumah', 'sauces_condiments', 'some')`,
           [home.householdId],
         );
         expect(
           await dbErrorCode(
             db.query(
-              `INSERT INTO kitchen_item (household_id, custom_name, category) VALUES ($1, ' sambal rumah ', 'sauces_condiments')`,
+              `INSERT INTO kitchen_item (household_id, custom_name, custom_key, category) VALUES ($1, ' sambal rumah ', 'sambal rumah 2', 'sauces_condiments')`,
+              [home.householdId],
+            ),
+          ),
+        ).toBe("23505");
+        expect(
+          await dbErrorCode(
+            db.query(
+              `INSERT INTO kitchen_item (household_id, custom_name, custom_key, category) VALUES ($1, 'Sambal-Rumah', 'sambal rumah', 'sauces_condiments')`,
               [home.householdId],
             ),
           ),

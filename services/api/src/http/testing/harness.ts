@@ -7,6 +7,7 @@ import { Ajv2020 } from "ajv/dist/2020.js";
 import { parse } from "yaml";
 
 import { resolveApiConfig, type ApiConfig, type ApiConfigOverrides } from "../../../config/api.js";
+import type { KitchenConfig } from "../../../config/kitchen.js";
 import type { ProfileConfig } from "../../../config/profiles.js";
 import { resolveTargets, type TargetOverrides, type Targets } from "../../../config/targets.js";
 import type { Clock } from "../../auth/auth-service.js";
@@ -17,6 +18,7 @@ import type { SqlExecutor } from "../../db/executor.js";
 import { HealthDataKeys } from "../../db/health-data-keys.js";
 import { randomLocalKeys } from "../../db/testing/seed.js";
 import type { ReferenceCatalog } from "../../reference/catalog.js";
+import type { ReferenceSource } from "../../reference/reference-data.js";
 import type { ApiLogger, LogFields } from "../../logger.js";
 import { createApp } from "../app.js";
 
@@ -111,6 +113,9 @@ export async function startHarness(
     /** Health-data keys (default: random local keys for this harness). */
     readonly keys?: HealthDataKeys;
     readonly catalog?: ReferenceCatalog;
+    /** Verified reference dataset (default: none, so catalog routes answer 503). */
+    readonly reference?: ReferenceSource;
+    readonly kitchenConfig?: KitchenConfig;
     readonly profileConfig?: ProfileConfig;
     readonly codeSender?: SignInCodeSender;
     /** Share another harness's secrets so its tokens are recognised. */
@@ -132,6 +137,8 @@ export async function startHarness(
     targets,
     keys: options.keys ?? new HealthDataKeys(randomLocalKeys()),
     ...(options.catalog === undefined ? {} : { catalog: options.catalog }),
+    ...(options.reference === undefined ? {} : { reference: options.reference }),
+    ...(options.kitchenConfig === undefined ? {} : { kitchenConfig: options.kitchenConfig }),
     ...(options.profileConfig === undefined ? {} : { profileConfig: options.profileConfig }),
     secrets,
     codeSender: options.codeSender ?? sender,

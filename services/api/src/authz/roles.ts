@@ -38,6 +38,9 @@ export const HOUSEHOLD_PERMISSIONS = [
   "hard_rule:write",
   "consent:read",
   "consent:write",
+  /** Dapur Saya (KIT-01 to KIT-09, KIT-16). */
+  "kitchen:read",
+  "kitchen:write",
 ] as const;
 
 export const REFERENCE_PERMISSIONS = [
