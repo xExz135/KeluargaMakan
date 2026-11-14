@@ -11,6 +11,7 @@ import {
   type ReferenceDataset,
   type ReferenceIngredient,
 } from "@keluargamakan/cek-aman";
+import { createBuiltDataset, verifyBuiltDataset } from "@keluargamakan/reference-data";
 import { RequestMethod } from "@nestjs/common";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -33,6 +34,7 @@ import {
   type HouseholdSession,
   type Response,
 } from "../http/testing/harness.js";
+import { referenceSourceOf, unavailableReference } from "../reference/reference-data.js";
 
 const HEALTH_VERSION = CONSENT_TEXTS.health_data.version;
 const CHILD_VERSION = HEALTH_DATA_TEXTS.child.version;
@@ -73,6 +75,22 @@ const REFERENCE: ReferenceDataset = {
   version: REFERENCE_VERSION,
   ingredients: INGREDIENTS,
 };
+
+/**
+ * Security review T-030 L3: the profiles run on the verified catalog, as in
+ * production. The fixture records go through the same build format, content
+ * hash and verification as a real dataset.
+ */
+const VERIFIED_SOURCE = referenceSourceOf(
+  verifyBuiltDataset(
+    JSON.parse(
+      JSON.stringify(
+        createBuiltDataset({ version: REFERENCE_VERSION, fixture: true, ingredients: INGREDIENTS }),
+      ),
+    ),
+    { allowFixture: true, expectedSha256: null },
+  ),
+);
 
 function expectProblem(response: Response, status: number, code: string): void {
   expect(response.status, response.raw).toBe(status);
@@ -161,12 +179,7 @@ for (const target of DATABASE_TARGETS) {
       opened = await target.open();
       db = opened.executor;
       await migrate(db);
-      await db.query(
-        `INSERT INTO reference_dataset (version, schema, content_sha256, payload, is_active)
-         VALUES ($1, 'keluargamakan.reference.ingredients/1', $2, $3::jsonb, true)`,
-        [REFERENCE_VERSION, "a".repeat(64), JSON.stringify({ ingredients: INGREDIENTS })],
-      );
-      api = await startHarness(db, { keys });
+      api = await startHarness(db, { keys, reference: VERIFIED_SOURCE });
     });
 
     afterAll(async () => {
@@ -176,7 +189,11 @@ for (const target of DATABASE_TARGETS) {
     });
 
     const another = async (options: Parameters<typeof startHarness>[1]) => {
-      const harness = await startHarness(db, { secrets: api.secrets, ...options });
+      const harness = await startHarness(db, {
+        secrets: api.secrets,
+        reference: VERIFIED_SOURCE,
+        ...options,
+      });
       extra.push(harness);
       return harness;
     };
@@ -1285,6 +1302,100 @@ for (const target of DATABASE_TARGETS) {
           items: { id: string }[];
         };
         expect(aList.items.map((p) => p.id)).toEqual([a.managerProfileId]);
+      });
+    });
+
+    describe("L3 L4 reference data for likes and rule mappings (security review T-030)", () => {
+      it("L3 the default catalog is the verified dataset: the reference_dataset table is never read", async () => {
+        await db.query(
+          `INSERT INTO reference_dataset (version, schema, content_sha256, payload, is_active)
+           VALUES ('TEST-FIXTURE-unpinned-1', 'keluargamakan.reference.ingredients/1', $1, $2::jsonb, true)
+           ON CONFLICT DO NOTHING`,
+          [
+            "b".repeat(64),
+            JSON.stringify({ ingredients: [fixtureIngredient("fx_api_tabel", "tabel", [])] }),
+          ],
+        );
+        const home = await signInWithHousehold(api);
+        const url = `${profileUrl(home.managerProfileId)}/likes-dislikes`;
+        // In the unpinned table only: refused.
+        expectProblem(
+          await api.request("PUT", url, {
+            token: home.token,
+            body: { likes: [{ kind: "ingredient", refId: "fx_api_tabel" }], dislikes: [] },
+          }),
+          400,
+          "validation_failed",
+        );
+        // In the verified dataset: accepted, with its reference name.
+        const saved = await api.request("PUT", url, {
+          token: home.token,
+          body: { likes: [{ kind: "ingredient", refId: "fx_api_nasi" }], dislikes: [] },
+        });
+        expect(saved.status, saved.raw).toBe(200);
+        expect(saved.body).toMatchObject({ likes: [{ displayName: { id: "nasi fiksi" } }] });
+        await db.query(`DELETE FROM reference_dataset WHERE version = 'TEST-FIXTURE-unpinned-1'`);
+      });
+
+      it("L4 without a verified dataset, likes and rule mappings answer 503 and store nothing; reads still work", async () => {
+        const down = await another({ reference: unavailableReference });
+        const home = await signInWithHousehold(api);
+        const url = `${profileUrl(home.managerProfileId)}/likes-dislikes`;
+        await api.request("PUT", url, {
+          token: home.token,
+          body: { likes: [{ kind: "ingredient", refId: "fx_api_nasi" }], dislikes: [] },
+        });
+        for (const body of [
+          { likes: [{ kind: "ingredient", refId: "fx_api_udang" }], dislikes: [] },
+          { likes: [], dislikes: [{ kind: "ingredient", refId: "fx_api_nasi" }] },
+        ]) {
+          expectProblem(
+            await down.request("PUT", url, { token: home.token, body }),
+            503,
+            "reference_data_unavailable",
+          );
+        }
+        // Clearing likes needs no reference data.
+        const emptied = await down.request("PUT", url, {
+          token: home.token,
+          body: { likes: [], dislikes: [] },
+        });
+        expect(emptied.status, emptied.raw).toBe(200);
+        await api.request("PUT", url, {
+          token: home.token,
+          body: { likes: [{ kind: "ingredient", refId: "fx_api_nasi" }], dislikes: [] },
+        });
+
+        await giveConsent(home, home.managerProfileId);
+        expectProblem(
+          await addRule(
+            home,
+            home.managerProfileId,
+            { type: "free_text", freeText: "bahan fiktif", mappedIngredientIds: ["fx_api_kacang"] },
+            undefined,
+            down,
+          ),
+          503,
+          "reference_data_unavailable",
+        );
+        expect(await ruleRows(home.managerProfileId)).toBe(0);
+        // An unmapped rule needs no reference data (Cek Aman gives Check the label).
+        const unmapped = await addRule(
+          home,
+          home.managerProfileId,
+          { type: "free_text", freeText: "bahan fiktif" },
+          undefined,
+          down,
+        );
+        expect(unmapped.status, unmapped.raw).toBe(201);
+        // Reads still work, with the ID as the name.
+        const read = await down.request("GET", profileUrl(home.managerProfileId), {
+          token: home.token,
+        });
+        expect(read.status, read.raw).toBe(200);
+        expect(read.body).toMatchObject({
+          likesDislikes: { likes: [{ refId: "fx_api_nasi", displayName: { id: "fx_api_nasi" } }] },
+        });
       });
     });
 

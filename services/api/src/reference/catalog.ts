@@ -1,7 +1,4 @@
-import { withDbErrors } from "../db/errors.js";
-import type { SqlExecutor } from "../db/executor.js";
-import { isReferenceId } from "../db/ids.js";
-import type { ReferenceSource } from "./reference-data.js";
+import { referenceDataUnavailable, type ReferenceSource } from "./reference-data.js";
 
 /**
  * Reference names for IDs the household refers to: liked or disliked
@@ -10,13 +7,17 @@ import type { ReferenceSource } from "./reference-data.js";
  * it receives (QUESTIONS #44). Values are human-owned reference data; this
  * module only reads them.
  *
- * - Ingredients come from the active reference dataset (`reference_dataset`,
- *   T-013 build). With no active dataset no ingredient is known.
+ * - Ingredients come from the verified reference dataset, the same one the
+ *   ingredient search and Cek Aman use (QUESTIONS #49; security review T-030
+ *   L3). There is no other source: the `reference_dataset` table is not read,
+ *   because nothing checks its content hash or pin.
  * - Dishes are library recipes (T-041). Until the library exists no dish is
  *   known, so dish likes and dislikes are refused rather than stored blind.
  *
- * Writes accept only known IDs. A stored ID that later leaves the reference
- * data is still returned, with its ID as the name (never hidden).
+ * Writes accept only known IDs, and answer 503 `reference_data_unavailable`
+ * while no verified dataset is loaded (L4), never "unknown ingredient". A
+ * stored ID that later leaves the reference data is still returned, with its
+ * ID as the name (never hidden); reads keep working without a dataset.
  */
 
 export interface LocalizedName {
@@ -27,57 +28,14 @@ export interface LocalizedName {
 export interface ReferenceCatalog {
   ingredientNames(ids: readonly string[]): Promise<Map<string, LocalizedName>>;
   dishNames(ids: readonly string[]): Promise<Map<string, LocalizedName>>;
+  /** Before a write checks ingredient IDs: throws 503 `reference_data_unavailable` without a dataset. */
+  requireIngredients(): void;
 }
 
 export function fallbackName(refId: string): LocalizedName {
   return { id: refId, en: refId };
 }
 
-export class DbReferenceCatalog implements ReferenceCatalog {
-  readonly #db: SqlExecutor;
-
-  constructor(db: SqlExecutor) {
-    this.#db = db;
-  }
-
-  async ingredientNames(ids: readonly string[]): Promise<Map<string, LocalizedName>> {
-    const wanted = [...new Set(ids)].filter(isReferenceId);
-    if (wanted.length === 0) return new Map();
-    const { rows } = await withDbErrors(() =>
-      this.#db.query<{ ref_id: string; name_id: string | null; name_en: string | null }>(
-        `SELECT e->>'id' AS ref_id,
-                e->'displayName'->>'id' AS name_id,
-                e->'displayName'->>'en' AS name_en
-           FROM reference_dataset d
-           CROSS JOIN LATERAL jsonb_array_elements(
-             CASE WHEN jsonb_typeof(d.payload->'ingredients') = 'array'
-                  THEN d.payload->'ingredients' ELSE '[]'::jsonb END
-           ) e
-          WHERE d.is_active AND e->>'id' = ANY($1::text[])`,
-        [wanted],
-      ),
-    );
-    const names = new Map<string, LocalizedName>();
-    for (const row of rows) {
-      if (typeof row.name_id === "string" && typeof row.name_en === "string") {
-        names.set(row.ref_id, { id: row.name_id, en: row.name_en });
-      }
-    }
-    return names;
-  }
-
-  /** No library recipes exist before T-041. */
-  dishNames(): Promise<Map<string, LocalizedName>> {
-    return Promise.resolve(new Map<string, LocalizedName>());
-  }
-}
-
-/**
- * QUESTIONS #49: names from the verified reference dataset, the same one the
- * ingredient search uses, so an ingredient found by search is also accepted
- * for likes, dislikes and rule mappings. While no verified dataset is loaded
- * no ingredient is known: writes are refused and reads show the ID.
- */
 export class VerifiedReferenceCatalog implements ReferenceCatalog {
   readonly #source: ReferenceSource;
 
@@ -99,5 +57,9 @@ export class VerifiedReferenceCatalog implements ReferenceCatalog {
   /** No library recipes exist before T-041. */
   dishNames(): Promise<Map<string, LocalizedName>> {
     return Promise.resolve(new Map<string, LocalizedName>());
+  }
+
+  requireIngredients(): void {
+    if (this.#source.current() === null) throw referenceDataUnavailable();
   }
 }

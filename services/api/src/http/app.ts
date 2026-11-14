@@ -27,7 +27,7 @@ import { KitchenService } from "../kitchen/kitchen-service.js";
 import type { ApiLogger } from "../logger.js";
 import { ProfileService } from "../profiles/profile-service.js";
 import { ProfilesController } from "../profiles/profiles.controller.js";
-import { DbReferenceCatalog, type ReferenceCatalog } from "../reference/catalog.js";
+import { VerifiedReferenceCatalog, type ReferenceCatalog } from "../reference/catalog.js";
 import { unavailableReference, type ReferenceSource } from "../reference/reference-data.js";
 import { ReferenceController } from "../reference/reference.controller.js";
 import { AccountController, AuthController, HouseholdController } from "./controllers.js";
@@ -53,7 +53,7 @@ export interface AppDeps {
   readonly profileConfig?: ProfileConfig;
   /** DAT-02: member data keys wrapped by the separate health-data key. */
   readonly keys: HealthDataKeys;
-  /** Reference names (PRF-06, PRF-08); defaults to the active reference dataset. */
+  /** Reference names (PRF-06, PRF-08); defaults to names from `reference` (QUESTIONS #49). */
   readonly catalog?: ReferenceCatalog;
   /**
    * The verified reference dataset (KIT-04 catalog and search, kitchen
@@ -156,7 +156,7 @@ export async function createApp(deps: AppDeps): Promise<NestFastifyApplication> 
   const profileService = new ProfileService({
     db: deps.db,
     keys: deps.keys,
-    catalog: deps.catalog ?? new DbReferenceCatalog(deps.db),
+    catalog: deps.catalog ?? new VerifiedReferenceCatalog(reference),
     config: deps.config,
     targets: deps.targets ?? defaultTargets,
     profileConfig: deps.profileConfig ?? defaultProfileConfig,
