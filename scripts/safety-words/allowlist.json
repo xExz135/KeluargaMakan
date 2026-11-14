@@ -81,6 +81,46 @@
       },
       "locales": ["en"],
       "reason": "Copy deck 24.3 (final): tells the manager that a member whose rules are not filled in never gets the Aman badge (ACC-08, F2r). It names the badge the member will not get, never calls anyone safe; mobile-engineer T-028, for qa-engineer and ux-designer review."
+    },
+    {
+      "key": "kitchenItemA11yCustom",
+      "rule": "state-word-outside-cek-aman",
+      "terms": ["cek"],
+      "values": {
+        "id": "Bahan buatan sendiri. Cek Aman akan meminta cek label."
+      },
+      "locales": ["id"],
+      "reason": "Copy deck 8 (final): the TalkBack sentence of a custom kitchen item says Cek Aman will ask to check the label (KIT-05, SAF-09). It names the real badge state, not a verdict of its own; listed in QUESTIONS #60; mobile-engineer T-033, for qa-engineer and ux-designer review."
+    },
+    {
+      "key": "kitchenItemA11yCustom",
+      "rule": "state-word-outside-cek-aman",
+      "terms": ["check the label"],
+      "values": {
+        "en": "Your own ingredient. Cek Aman will ask you to check the label."
+      },
+      "locales": ["en"],
+      "reason": "Copy deck 8 (final): the TalkBack sentence of a custom kitchen item says Cek Aman will ask to check the label (KIT-05, SAF-09). It names the real badge state, not a verdict of its own; listed in QUESTIONS #60; mobile-engineer T-033, for qa-engineer and ux-designer review."
+    },
+    {
+      "key": "kitchenCustomNote",
+      "rule": "state-word-outside-cek-aman",
+      "terms": ["cek"],
+      "values": {
+        "id": "Bahan ini belum dikenal Cek Aman. Untuk anggota yang punya aturan wajib, resep yang memakai bahan ini akan diberi tanda Cek label."
+      },
+      "locales": ["id"],
+      "reason": "Copy deck 8 (final): K3 tells the manager that a custom ingredient is not known to Cek Aman, so recipes using it get the Cek label state for members with hard rules (KIT-05, SAF-09). It names the real badge state, not a verdict of its own; listed in QUESTIONS #60; mobile-engineer T-033, for qa-engineer and ux-designer review."
+    },
+    {
+      "key": "kitchenCustomNote",
+      "rule": "state-word-outside-cek-aman",
+      "terms": ["check the label"],
+      "values": {
+        "en": "Cek Aman doesn't know this ingredient. For members with hard rules, recipes using it will be marked Check the label."
+      },
+      "locales": ["en"],
+      "reason": "Copy deck 8 (final): K3 tells the manager that a custom ingredient is not known to Cek Aman, so recipes using it get the Cek label state for members with hard rules (KIT-05, SAF-09). It names the real badge state, not a verdict of its own; listed in QUESTIONS #60; mobile-engineer T-033, for qa-engineer and ux-designer review."
     }
   ]
 }

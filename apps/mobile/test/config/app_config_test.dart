@@ -35,6 +35,8 @@ void main() {
         'cook.controlSizeDp',
         'cook.navButtonHeightDp',
         'kitchen.toggleMinHeightDp',
+        'kitchen.frequentCount',
+        'kitchen.searchDebounceMs',
         'cook.maxConcurrentTimers',
         'ui.slowLoadingMs',
         'ui.snackbarActionMs',

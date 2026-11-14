@@ -51,6 +51,25 @@ abstract final class ConfigKeys {
     min: 48,
   );
 
+  /// Dapur Saya: how many of a category's most used items come before the
+  /// "Lainnya" divider (screens.md K1, KIT-06).
+  static const kitchenFrequentCount = ConfigKey<int>(
+    'kitchen.frequentCount',
+    6,
+    requirementIds: ['KIT-06'],
+    status: ConfigStatus.decided,
+    min: 1,
+  );
+
+  /// Dapur Saya search: pause in typing before the search is sent (K2).
+  static const kitchenSearchDebounceMs = ConfigKey<int>(
+    'kitchen.searchDebounceMs',
+    300,
+    requirementIds: ['KIT-04'],
+    status: ConfigStatus.decided,
+    min: 0,
+  );
+
   /// Timers that can run at once.
   static const maxConcurrentTimers = ConfigKey<int>(
     'cook.maxConcurrentTimers',
@@ -143,6 +162,8 @@ abstract final class ConfigKeys {
     cookControlSizeDp,
     cookNavButtonHeightDp,
     kitchenToggleMinHeightDp,
+    kitchenFrequentCount,
+    kitchenSearchDebounceMs,
     maxConcurrentTimers,
     slowLoadingMs,
     snackbarActionMs,
