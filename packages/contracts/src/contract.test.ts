@@ -528,6 +528,19 @@ describe("Dapur Saya kitchen (T-030, contract 0.2)", () => {
     );
   });
 
+  it("L7 the catalog download is conditional: ETag, If-None-Match and 304 without a body", () => {
+    const op = operation("listReferenceIngredients").operation;
+    expect((op.parameters ?? []).map((p) => `${p.in}:${p.name}`)).toEqual(["header:If-None-Match"]);
+    const ok = op.responses["200"] as { headers?: Record<string, unknown> };
+    const notModified = op.responses["304"] as {
+      headers?: Record<string, unknown>;
+      content?: unknown;
+    };
+    expect(Object.keys(ok.headers ?? {})).toEqual(["ETag", "Cache-Control"]);
+    expect(Object.keys(notModified.headers ?? {})).toEqual(["ETag", "Cache-Control"]);
+    expect(notModified.content).toBeUndefined();
+  });
+
   it("KIT-04 the catalog never carries safety data: only Cek Aman reads it", () => {
     const names = reachableSchemas(["ReferenceIngredientCatalog", "IngredientSearchResult"]);
     const props = names.flatMap((name) => Object.keys(schema(name).properties ?? {}));

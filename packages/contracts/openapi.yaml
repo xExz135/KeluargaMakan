@@ -1,7 +1,7 @@
 openapi: 3.1.1
 info:
   title: KeluargaMakan API
-  version: 0.2.0
+  version: 0.2.1
   summary: Household manager API for KeluargaMakan (FamilyEats).
   description: >-
     Source of truth for API shapes: change this file first, then implement.
@@ -40,6 +40,11 @@ info:
     their endpoints come in a later version. Operations with
     `x-server-task` are designed here and served from that backlog task; a
     server without them answers 404 `not_found`.
+
+
+    v0.2.1 (additive): the catalog download has an `ETag`; sending it back in
+    `If-None-Match` answers 304 with no body while the data is unchanged
+    (security review T-030 L7).
 
 
     Versioning (QUESTIONS #58): adding an operation, an optional request
@@ -1048,14 +1053,32 @@ paths:
         changes whenever the data changes. When the dataset is not loaded or
         fails verification the answer is 503 `reference_data_unavailable`,
         never an empty catalog. No safety data (components, allergens, halal)
-        is included: only Cek Aman uses those.
+        is included: only Cek Aman uses those. The `ETag` identifies the
+        dataset; a phone that sends it back in `If-None-Match` gets 304 with
+        no body while its copy is current, so refreshing the copy is cheap.
       x-requirements: [KIT-04, DAT-06]
+      parameters:
+        - name: If-None-Match
+          in: header
+          required: false
+          description: The `ETag` of the catalog the phone already has.
+          schema:
+            type: string
+            maxLength: 200
       responses:
         "200":
           description: The catalog.
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+            Cache-Control: { $ref: "#/components/headers/CacheControl" }
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ReferenceIngredientCatalog" }
+        "304":
+          description: The phone's copy is current (its `If-None-Match` matches); no body.
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+            Cache-Control: { $ref: "#/components/headers/CacheControl" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "503": { $ref: "#/components/responses/ServiceUnavailable" }
         default: { $ref: "#/components/responses/UnexpectedError" }
@@ -1160,6 +1183,16 @@ components:
       schema:
         type: integer
         minimum: 0
+    ETag:
+      description: Opaque entity tag of the served data (RFC 9110); changes whenever the data changes.
+      schema:
+        type: string
+    CacheControl:
+      description: >-
+        `private, no-cache`: only the phone may keep a copy, and it checks
+        with `If-None-Match` before using it.
+      schema:
+        type: string
 
   responses:
     BadRequest:

@@ -355,6 +355,51 @@ for (const target of DATABASE_TARGETS) {
         expect(response.raw).not.toMatch(/allergen|halal|components|verified|diet/);
       });
 
+      it("L7 the catalog has an ETag; a matching If-None-Match answers 304 without a body", async () => {
+        const home = await signInWithHousehold(api);
+        const first = await api.request("GET", CATALOG, { token: home.token });
+        expect(first.status).toBe(200);
+        const etag = `"${fixture.sha256}"`;
+        expect(first.headers["etag"]).toBe(etag);
+        expect(first.headers["cache-control"]).toBe("private, no-cache");
+        expect(String(first.headers["content-type"])).toMatch(/^application\/json/);
+        expect(contractErrors("ReferenceIngredientCatalog", first.body)).toEqual([]);
+
+        for (const header of [etag, `W/${etag}`, `"other", ${etag}`, "*"]) {
+          const repeat = await api.request("GET", CATALOG, {
+            token: home.token,
+            headers: { "if-none-match": header },
+          });
+          expect(repeat.status, header).toBe(304);
+          expect(repeat.raw, header).toBe("");
+          expect(repeat.headers["etag"]).toBe(etag);
+          expect(repeat.headers["cache-control"]).toBe("private, no-cache");
+        }
+        for (const header of ['"other"', fixture.sha256, "", "x".repeat(2000)]) {
+          const changed = await api.request("GET", CATALOG, {
+            token: home.token,
+            headers: { "if-none-match": header },
+          });
+          expect(changed.status, header).toBe(200);
+          expect(changed.body).toEqual(first.body);
+        }
+        // The tag never replaces authentication, and no dataset is never a 304.
+        expectProblem(
+          await api.request("GET", CATALOG, { headers: { "if-none-match": etag } }),
+          401,
+          "unauthenticated",
+        );
+        const down = await another({ reference: unavailableReference });
+        expectProblem(
+          await down.request("GET", CATALOG, {
+            token: home.token,
+            headers: { "if-none-match": "*" },
+          }),
+          503,
+          "reference_data_unavailable",
+        );
+      });
+
       it("KIT-04 fail closed: without a verified dataset the catalog and search answer 503, never an empty list", async () => {
         const home = await signInWithHousehold(api);
         await add(home, { ingredientId: "fx_kit_tempe" });

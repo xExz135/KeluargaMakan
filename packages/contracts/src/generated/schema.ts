@@ -563,7 +563,7 @@ export interface paths {
         };
         /**
          * Get the whole reference ingredient catalog
-         * @description Every ingredient of the verified reference dataset with its names, local and regional names, kitchen category and brands, for the copy the phone keeps for offline search (KIT-04). `referenceVersion` changes whenever the data changes. When the dataset is not loaded or fails verification the answer is 503 `reference_data_unavailable`, never an empty catalog. No safety data (components, allergens, halal) is included: only Cek Aman uses those.
+         * @description Every ingredient of the verified reference dataset with its names, local and regional names, kitchen category and brands, for the copy the phone keeps for offline search (KIT-04). `referenceVersion` changes whenever the data changes. When the dataset is not loaded or fails verification the answer is 503 `reference_data_unavailable`, never an empty catalog. No safety data (components, allergens, halal) is included: only Cek Aman uses those. The `ETag` identifies the dataset; a phone that sends it back in `If-None-Match` gets 304 with no body while its copy is current, so refreshing the copy is cheap.
          */
         get: operations["listReferenceIngredients"];
         put?: never;
@@ -1446,6 +1446,10 @@ export interface components {
     headers: {
         /** @description Seconds to wait before retrying. */
         RetryAfter: number;
+        /** @description Opaque entity tag of the served data (RFC 9110); changes whenever the data changes. */
+        ETag: string;
+        /** @description `private, no-cache`: only the phone may keep a copy, and it checks with `If-None-Match` before using it. */
+        CacheControl: string;
     };
     pathItems: never;
 }
@@ -2440,7 +2444,10 @@ export interface operations {
     listReferenceIngredients: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description The `ETag` of the catalog the phone already has. */
+                "If-None-Match"?: string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -2449,11 +2456,22 @@ export interface operations {
             /** @description The catalog. */
             200: {
                 headers: {
+                    ETag: components["headers"]["ETag"];
+                    "Cache-Control": components["headers"]["CacheControl"];
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["ReferenceIngredientCatalog"];
                 };
+            };
+            /** @description The phone's copy is current (its `If-None-Match` matches); no body. */
+            304: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    "Cache-Control": components["headers"]["CacheControl"];
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             401: components["responses"]["Unauthorized"];
             503: components["responses"]["ServiceUnavailable"];

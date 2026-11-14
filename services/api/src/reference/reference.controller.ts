@@ -1,6 +1,7 @@
 import { RULE_SET_VERSION, STANDARD_ALLERGENS } from "@keluargamakan/cek-aman";
 import type { Schemas } from "@keluargamakan/contracts";
-import { Body, Controller, Get, HttpCode, Inject, Post } from "@nestjs/common";
+import { Body, Controller, Get, Headers, HttpCode, Inject, Post, Res } from "@nestjs/common";
+import type { FastifyReply } from "fastify";
 
 import type { KitchenConfig } from "../../config/kitchen.js";
 import { Requires } from "../authz/access.js";
@@ -8,7 +9,11 @@ import { cleanUserText, codePointLength } from "../http/text.js";
 import { KITCHEN_CONFIG, REFERENCE_SOURCE } from "../http/tokens.js";
 import { BodyReader } from "../http/validation.js";
 import type { CatalogIngredient } from "./ingredient-catalog.js";
-import { referenceDataUnavailable, type ReferenceSource } from "./reference-data.js";
+import {
+  referenceDataUnavailable,
+  type LoadedReference,
+  type ReferenceSource,
+} from "./reference-data.js";
 
 /**
  * Reference vocabularies and the ingredient catalog.
@@ -25,6 +30,43 @@ import { referenceDataUnavailable, type ReferenceSource } from "./reference-data
  */
 
 const QUERY_MAX = 60;
+
+/**
+ * Security review T-030 L7: the catalog body and its entity tag, built once
+ * per loaded dataset. The tag is the dataset's content hash, which covers
+ * its version and every record, so it changes exactly when the data does.
+ */
+interface CatalogDownload {
+  readonly etag: string;
+  readonly json: string;
+}
+
+const downloads = new WeakMap<LoadedReference, CatalogDownload>();
+
+function downloadOf(loaded: LoadedReference): CatalogDownload {
+  let download = downloads.get(loaded);
+  if (download === undefined) {
+    const body: Schemas["ReferenceIngredientCatalog"] = {
+      referenceVersion: loaded.catalog.referenceVersion,
+      items: loaded.catalog.list().map(catalogIngredientBody),
+    };
+    download = { etag: `"${loaded.verified.contentHash}"`, json: JSON.stringify(body) };
+    downloads.set(loaded, download);
+  }
+  return download;
+}
+
+/** RFC 9110 If-None-Match: a list of tags, weak or strong, or `*`. */
+export function matchesIfNoneMatch(header: unknown, etag: string): boolean {
+  if (typeof header !== "string" || header.length > 1024) return false;
+  return header
+    .split(",")
+    .map((tag) => tag.trim().replace(/^W\//, ""))
+    .some((tag) => tag === "*" || tag === etag);
+}
+
+/** Only the phone may keep the copy, and it revalidates before using it. */
+export const CATALOG_CACHE_CONTROL = "private, no-cache";
 
 export function catalogIngredientBody(item: CatalogIngredient): Schemas["CatalogIngredient"] {
   return {
@@ -86,13 +128,20 @@ export class ReferenceController {
 
   @Get("ingredients")
   @Requires("reference:read")
-  ingredients(): Schemas["ReferenceIngredientCatalog"] {
+  ingredients(
+    @Headers("if-none-match") ifNoneMatch: unknown,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ): string | undefined {
     const loaded = this.reference.current();
     if (loaded === null) throw referenceDataUnavailable();
-    return {
-      referenceVersion: loaded.catalog.referenceVersion,
-      items: loaded.catalog.list().map(catalogIngredientBody),
-    };
+    const download = downloadOf(loaded);
+    void reply.header("ETag", download.etag).header("Cache-Control", CATALOG_CACHE_CONTROL);
+    if (matchesIfNoneMatch(ifNoneMatch, download.etag)) {
+      void reply.status(304);
+      return undefined;
+    }
+    void reply.header("Content-Type", "application/json; charset=utf-8");
+    return download.json;
   }
 
   @Post("ingredients/search")
