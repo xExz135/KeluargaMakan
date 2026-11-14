@@ -71,6 +71,12 @@ Future<RulesSaveResult> saveRulesWithConsent(
   ValueChanged<bool>? onConsentSheet,
 }) async {
   final family = ref.read(familyProfilesProvider.notifier);
+  // The rules belong to this account. If the screen closes or the session
+  // ends or changes while saving, nothing more is sent (security review
+  // T-028 L1).
+  final account = ref.read(currentAccountIdProvider);
+  bool gone() =>
+      !context.mounted || ref.read(currentAccountIdProvider) != account;
   var member = memberIn(ref.read(familyProfilesProvider), profileId);
   if (member == null || member.rules is RulesNotLoaded) {
     return const RulesSaveResult(
@@ -99,6 +105,9 @@ Future<RulesSaveResult> saveRulesWithConsent(
     if (outcome != ConsentOutcome.given) {
       return RulesSaveResult(consent: outcome);
     }
+    if (gone()) {
+      return RulesSaveResult(consent: outcome, failed: [...drafts]);
+    }
   }
 
   final repo = ref.read(hardRulesRepositoryProvider);
@@ -108,7 +117,14 @@ Future<RulesSaveResult> saveRulesWithConsent(
   var askedAgain = false;
   final failed = <RuleDraft>[];
   final queue = [...drafts];
+  var stopped = false;
   while (queue.isNotEmpty) {
+    if (gone()) {
+      stopped = true;
+      failed.addAll(queue);
+      queue.clear();
+      break;
+    }
     final draft = queue.removeAt(0);
     final key = keys.putIfAbsent(draft, randomUuidV4);
     final result = await repo.createHardRule(
@@ -141,7 +157,7 @@ Future<RulesSaveResult> saveRulesWithConsent(
           break;
         }
         final outcome = await askConsent();
-        if (outcome != ConsentOutcome.given) {
+        if (outcome != ConsentOutcome.given || gone()) {
           failed
             ..add(draft)
             ..addAll(queue);
@@ -156,7 +172,8 @@ Future<RulesSaveResult> saveRulesWithConsent(
         failed.add(draft);
     }
   }
-  await family.refresh();
+  // After a session change the family state is already another account's.
+  if (!stopped && !gone()) await family.refresh();
   return RulesSaveResult(
     consent: ConsentOutcome.given,
     saved: saved,
