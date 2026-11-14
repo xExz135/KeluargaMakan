@@ -28,6 +28,7 @@ import 'api_fixtures.dart' show profileJson;
 import 'pump_app.dart';
 
 part 'fake_server_family.dart';
+part 'fake_server_kitchen.dart';
 
 /// The fixture code every challenge accepts unless [FakeServer.code] says
 /// otherwise.
@@ -80,6 +81,9 @@ final class FakeServer {
 
   /// `ProfileList.maxProfiles` (PRF-02).
   int maxProfiles = 12;
+
+  /// Dapur Saya state (helpers/fake_server_kitchen.dart).
+  final FakeKitchen kitchen = FakeKitchen();
 
   /// Answers kept per Idempotency-Key, replayed for the same key.
   final Map<String, Object?> _replays = {};
@@ -153,6 +157,8 @@ final class FakeServer {
         _householdNameByAccount[account] = manager['name']! as String;
         return json(_householdJson(account), 201);
     }
+    final kitchenAnswer = _handleKitchen(this, request, _account(request));
+    if (kitchenAnswer != null) return kitchenAnswer;
     final family = _handleFamily(this, request, _account(request));
     if (family != null) return family;
     return problem('not_found', 404);
