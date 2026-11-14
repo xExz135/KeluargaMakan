@@ -198,6 +198,34 @@ final class ApiCaller {
     }
   }
 
+  /// A conditional GET (`If-None-Match`): a 2xx answer is decoded by
+  /// [decode] with the response's `ETag`; 304 gives [NotModified] with no
+  /// body (contract 0.2.1, reference catalog).
+  Future<ApiResult<Conditional<T>>> callConditional<T>(
+    String operation,
+    Future<http.Response> Function() send,
+    T Function(Object? json, String? etag) decode,
+  ) async {
+    final sent = await _send(operation, send, allowNotModified: true);
+    final http.Response response;
+    switch (sent) {
+      case Err(:final failure):
+        return Err(failure);
+      case Ok(:final value):
+        response = value;
+    }
+    final etag = response.headers['etag'];
+    if (response.statusCode == 304) return Ok(NotModified(etag));
+    if (response.bodyBytes.isEmpty) return Err(DecodeFailure(operation));
+    try {
+      final json = jsonDecode(utf8.decode(response.bodyBytes));
+      return Ok(Modified(decode(json, etag)));
+    } on Object catch (e) {
+      debugPrint('API decode failed: $operation (${e.runtimeType})');
+      return Err(DecodeFailure(operation));
+    }
+  }
+
   /// A call whose 2xx answer has no body that the app needs.
   Future<ApiResult<void>> callNoContent(
     String operation,
@@ -212,8 +240,9 @@ final class ApiCaller {
 
   Future<ApiResult<http.Response>> _send(
     String operation,
-    Future<http.Response> Function() send,
-  ) async {
+    Future<http.Response> Function() send, {
+    bool allowNotModified = false,
+  }) async {
     if (!_env.isConfigured) return const Err(NotConfiguredFailure());
     final http.Response response;
     try {
@@ -240,9 +269,35 @@ final class ApiCaller {
         ),
       );
     }
+    if (allowNotModified && status == 304) return Ok(response);
     if (status < 200 || status >= 300) return Err(DecodeFailure(operation));
     return Ok(response);
   }
+}
+
+/// The answer to a conditional request.
+sealed class Conditional<T> {
+  const Conditional();
+}
+
+/// 2xx: a new copy.
+final class Modified<T> extends Conditional<T> {
+  const Modified(this.value);
+
+  final T value;
+
+  @override
+  String toString() => 'Modified<$T>';
+}
+
+/// 304: the copy the phone has is current.
+final class NotModified<T> extends Conditional<T> {
+  const NotModified(this.etag);
+
+  final String? etag;
+
+  @override
+  String toString() => 'NotModified';
 }
 
 /// Throws [FormatException] when a generated `fromJson` returned null.

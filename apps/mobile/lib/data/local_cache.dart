@@ -12,6 +12,8 @@
 // household data in memory must reset on a session change, by watching
 // currentAccountIdProvider.
 
+import 'dart:convert';
+
 import 'package:drift/drift.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:keluargamakan_api/api.dart' as api;
@@ -20,6 +22,7 @@ import '../core/api/api_client.dart';
 import '../core/storage/app_database.dart';
 import 'models/family.dart';
 import 'models/household.dart';
+import 'models/kitchen.dart';
 import 'models/sourced.dart';
 
 typedef Clock = DateTime Function();
@@ -216,6 +219,164 @@ final class LocalCache {
       ruleSetVersion: rows.first.ruleSetVersion,
       items: items,
       source: FromCache(rows.first.cachedAt),
+    );
+  }
+
+  // ------------------------------------------------------------ Kitchen
+
+  /// Replaces the cached kitchen with [list], only while [accountId] is
+  /// still the signed-in account (checked inside the write, so an answer
+  /// that arrives after another account signed in is never stored for it).
+  Future<void> saveKitchen(KitchenList list, {required String accountId}) =>
+      _db.transaction(() async {
+        if (_currentAccountId() != accountId) return;
+        await claimFor(accountId);
+        final now = _now().toUtc();
+        await _db.delete(_db.cachedKitchenItems).go();
+        await _db.delete(_db.cachedKitchens).go();
+        await _db
+            .into(_db.cachedKitchens)
+            .insert(
+              CachedKitchensCompanion.insert(
+                id: const Value(1),
+                maxItems: list.maxItems,
+                referenceVersion: Value(list.referenceVersion),
+                cachedAt: now,
+              ),
+            );
+        await _db.batch((b) {
+          b.insertAll(_db.cachedKitchenItems, [
+            for (final (i, item) in list.items.indexed)
+              CachedKitchenItemsCompanion.insert(
+                id: item.id,
+                position: i,
+                ingredientId: Value(item.ingredientId),
+                isCustom: item.isCustom,
+                displayNameId: Value(item.displayName?.id),
+                displayNameEn: Value(item.displayName?.en),
+                customName: Value(item.customName),
+                category: item.category.toJson(),
+                state: item.state.wire,
+                isDefaultStaple: item.isDefaultStaple,
+                usageRank: Value(item.usageRank),
+                changedAt: item.changedAt,
+                createdAt: item.createdAt,
+              ),
+          ]);
+        });
+      });
+
+  /// The cached kitchen, or null when there is no usable copy for the
+  /// signed-in account.
+  Future<KitchenList?> kitchen() async {
+    if (!await _readable()) return null;
+    final meta = await _db.select(_db.cachedKitchens).getSingleOrNull();
+    if (meta == null) return null;
+    final rows = await (_db.select(
+      _db.cachedKitchenItems,
+    )..orderBy([(t) => OrderingTerm(expression: t.position)])).get();
+    final items = <KitchenEntry>[];
+    for (final row in rows) {
+      final category = api.KitchenCategory.fromJson(row.category);
+      if (category == null) return null;
+      final nameId = row.displayNameId;
+      final nameEn = row.displayNameEn;
+      items.add(
+        KitchenEntry(
+          id: row.id,
+          ingredientId: row.ingredientId,
+          displayName: nameId != null && nameEn != null
+              ? BilingualName(id: nameId, en: nameEn)
+              : null,
+          customName: row.customName,
+          category: category,
+          state: KitchenItemState.fromWire(row.state),
+          isDefaultStaple: row.isDefaultStaple,
+          usageRank: row.usageRank,
+          changedAt: row.changedAt,
+          createdAt: row.createdAt,
+        ),
+      );
+    }
+    return KitchenList(
+      items: items,
+      maxItems: meta.maxItems,
+      referenceVersion: meta.referenceVersion,
+      source: FromCache(meta.cachedAt),
+    );
+  }
+
+  // ------------------------------------------------------------ Catalog
+
+  /// Replaces the cached reference catalog. Public reference data: not
+  /// bound to an account and kept when the session ends.
+  Future<void> saveCatalog(IngredientCatalog catalog) =>
+      _db.transaction(() async {
+        final now = _now().toUtc();
+        await _db.delete(_db.cachedCatalogIngredients).go();
+        await _db.delete(_db.cachedCatalogs).go();
+        await _db
+            .into(_db.cachedCatalogs)
+            .insert(
+              CachedCatalogsCompanion.insert(
+                id: const Value(1),
+                referenceVersion: catalog.referenceVersion,
+                etag: Value(catalog.etag),
+                cachedAt: now,
+              ),
+            );
+        await _db.batch((b) {
+          b.insertAll(_db.cachedCatalogIngredients, [
+            for (final (i, item) in catalog.items.indexed)
+              CachedCatalogIngredientsCompanion.insert(
+                ingredientId: item.ingredientId,
+                position: i,
+                nameId: item.displayName.id,
+                nameEn: item.displayName.en,
+                localNames: jsonEncode(item.localNames),
+                category: Value(item.category?.toJson()),
+                brandVaries: item.brandVaries,
+              ),
+          ]);
+        });
+      });
+
+  /// Records that the cached catalog was confirmed current (304).
+  Future<void> touchCatalog() =>
+      (_db.update(_db.cachedCatalogs))
+          .write(CachedCatalogsCompanion(cachedAt: Value(_now().toUtc())));
+
+  /// The cached catalog, or null when there is no usable copy.
+  Future<IngredientCatalog?> catalog() async {
+    final meta = await _db.select(_db.cachedCatalogs).getSingleOrNull();
+    if (meta == null) return null;
+    final rows = await (_db.select(
+      _db.cachedCatalogIngredients,
+    )..orderBy([(t) => OrderingTerm(expression: t.position)])).get();
+    final items = <CatalogEntry>[];
+    for (final row in rows) {
+      final Object? names;
+      try {
+        names = jsonDecode(row.localNames);
+      } on FormatException {
+        return null;
+      }
+      if (names is! List || names.any((n) => n is! String)) return null;
+      items.add(
+        CatalogEntry(
+          ingredientId: row.ingredientId,
+          displayName: BilingualName(id: row.nameId, en: row.nameEn),
+          localNames: names.cast<String>(),
+          category: api.KitchenCategory.fromJson(row.category),
+          brandVaries: row.brandVaries,
+        ),
+      );
+    }
+    return IngredientCatalog(
+      referenceVersion: meta.referenceVersion,
+      etag: meta.etag,
+      items: items,
+      source: FromCache(meta.cachedAt),
     );
   }
 }
