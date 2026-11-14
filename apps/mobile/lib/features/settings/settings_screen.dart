@@ -1,6 +1,6 @@
-// S1 Pengaturan (flows/08 section 2). Shell version: the Umum group's
-// Bahasa (ACC-09, NFR-16) and Tema (INT-05) rows. The other groups come with
-// their own tasks.
+// S1 Pengaturan (flows/08 section 2). The Umum group's Bahasa (ACC-09,
+// NFR-16) and Tema (INT-05) rows, and the Akun group's "Masuk sebagai" and
+// "Keluar" (ACC-13). The other groups come with their own tasks.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -10,15 +10,55 @@ import '../../core/l10n/app_locale.dart';
 import '../../core/theme/theme_mode_controller.dart';
 import '../../core/theme/tokens.dart';
 import '../../l10n/generated/app_localizations.dart';
+import '../auth/app_entry.dart';
+import 'signed_in_account.dart';
 
-class SettingsScreen extends ConsumerWidget {
+class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends ConsumerState<SettingsScreen> {
+  bool _signingOut = false;
+
+  /// ACC-13: confirm, then sign out on this phone. The household stays in
+  /// the account; the router moves to O1 once the session has ended.
+  Future<void> _signOut() async {
+    final l10n = AppLocalizations.of(context);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        scrollable: true,
+        title: Text(l10n.settingsSignOutTitle),
+        content: Text(l10n.settingsSignOutBody),
+        actions: [
+          TextButton(
+            key: const Key('settings.signOut.cancel'),
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: Text(l10n.commonCancel),
+          ),
+          FilledButton(
+            key: const Key('settings.signOut.confirm'),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: Text(l10n.settingsSignOutConfirm),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _signingOut = true);
+    await ref.read(appEntryProvider.notifier).signOut();
+    if (mounted) setState(() => _signingOut = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final currentLocale = Localizations.localeOf(context);
     final themeMode = ref.watch(themeModeControllerProvider);
+    final account = ref.watch(signedInAccountProvider).value;
 
     return SectionScaffold(
       title: l10n.settingsTitle,
@@ -37,6 +77,25 @@ class SettingsScreen extends ConsumerWidget {
             title: Text(l10n.settingsTheme),
             subtitle: Text(_themeName(l10n, themeMode)),
             onTap: () => _chooseTheme(context, ref, themeMode),
+          ),
+          _GroupHeader(l10n.settingsGroupAccount),
+          if (account != null)
+            ListTile(
+              key: const Key('settings.signedInAs'),
+              title: Text(l10n.settingsSignedInAs(account)),
+            ),
+          ListTile(
+            key: const Key('settings.signOut'),
+            leading: const Icon(Icons.logout),
+            title: Text(l10n.settingsSignOut),
+            trailing: _signingOut
+                ? const SizedBox.square(
+                    dimension: 24,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : null,
+            enabled: !_signingOut,
+            onTap: _signOut,
           ),
         ],
       ),

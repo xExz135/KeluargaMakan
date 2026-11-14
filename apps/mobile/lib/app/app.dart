@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/l10n/app_locale.dart';
 import '../core/theme/app_theme.dart';
 import '../core/theme/theme_mode_controller.dart';
+import '../features/auth/entry_notice_host.dart';
 import '../l10n/generated/app_localizations.dart';
 import 'router.dart';
 
@@ -34,7 +35,10 @@ class KeluargaMakanApp extends ConsumerWidget {
         GlobalCupertinoLocalizations.delegate,
       ],
       // System text scaling is used as is, up to 200% and beyond (INT-05,
-      // NFR-15). Do not add a builder that clamps MediaQuery.textScaler.
+      // NFR-15). This builder only adds sign-in notices; never clamp
+      // MediaQuery.textScaler here.
+      builder: (context, child) =>
+          EntryNoticeHost(child: child ?? const SizedBox.shrink()),
     );
   }
 }

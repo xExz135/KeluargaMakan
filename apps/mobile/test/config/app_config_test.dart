@@ -41,7 +41,12 @@ void main() {
         'settings.defaultServings',
         'nav.planTabEnabled',
         'api.requestTimeoutMs',
+        'auth.googleSignInEnabled',
       ]);
+    });
+
+    test('ACC-02 INT-13 Google sign-in is off by default', () {
+      expect(const AppConfig().get(ConfigKeys.googleSignInEnabled), isFalse);
     });
 
     test('INT-04 a source value overrides the default without a code '

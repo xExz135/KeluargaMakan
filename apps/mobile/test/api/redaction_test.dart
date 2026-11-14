@@ -14,6 +14,8 @@ import 'package:keluargamakan/data/decoders.dart';
 import 'package:keluargamakan/data/models/family.dart';
 import 'package:keluargamakan/data/models/sourced.dart';
 import 'package:keluargamakan/data/repositories/auth_repository.dart';
+import 'package:keluargamakan/features/auth/google_id_token.dart';
+import 'package:keluargamakan/features/auth/sign_in_draft.dart';
 import 'package:keluargamakan_api/api.dart' as api;
 
 import '../helpers/api_fixtures.dart';
@@ -105,6 +107,45 @@ void main() {
     expectClean(ConsentChangedFailure(problem));
     expectClean(Err<Object>(ConsentChangedFailure(problem)));
     expectClean(ManagerProfileMustBeAdultFailure(problem));
+  });
+
+  test('ACC-01 DAT-08 the sign-in in progress prints no contact details, '
+      'and a Google token is never printed', () {
+    final challenge = api.SignInCodeChallenge.fromJson({
+      'challengeId': '6f1a2b3c-4d5e-4f60-8a7b-9c0d1e2f3a4b',
+      'channel': 'phone',
+      'codeLength': 6,
+      'expiresAt': '2026-11-14T03:10:00Z',
+      'resendAvailableAt': '2026-11-14T03:01:00Z',
+    })!;
+    final draft = SignInDraft(
+      channel: api.SignInChannel.phone,
+      destination: '+6281200000000',
+      maskedDestination: '0812 •••• 0000',
+      challenge: challenge,
+      resendAvailableAt: DateTime.utc(2026, 11, 14, 3, 1),
+    );
+    expectClean(draft);
+    expect(draft.toString(), isNot(contains('0812')));
+    expect(draft.toString(), 'SignInDraft(phone)');
+    const token = GoogleIdToken('google-id-token-s3cret');
+    expect(token.toString(), isNot(contains('s3cret')));
+  });
+
+  test('ACC-01 DAT-08 the sign-in screens log nothing at all', () {
+    final calls = RegExp(r'\b(debugPrint|print|log|debugPrintStack)\(');
+    final files = Directory('lib/features/auth')
+        .listSync(recursive: true)
+        .whereType<File>()
+        .where((f) => f.path.endsWith('.dart'));
+    expect(files, isNotEmpty);
+    for (final file in files) {
+      expect(
+        calls.hasMatch(file.readAsStringSync()),
+        isFalse,
+        reason: file.path,
+      );
+    }
   });
 
   test('DAT-08 log calls in lib/ interpolate only the operation name and '
