@@ -194,7 +194,7 @@ final class ApiCaller {
     final status = response.statusCode;
     if (status >= 400) {
       return Err(
-        ProblemFailure(
+        ProblemFailure.of(
           ApiProblem.parse(
             status,
             utf8.decode(response.bodyBytes, allowMalformed: true),

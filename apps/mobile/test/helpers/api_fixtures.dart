@@ -1,6 +1,6 @@
 // TEST FIXTURE: not real safety or nutrition data.
 //
-// Contract-shaped JSON (packages/contracts/openapi.yaml v0.1) and a test
+// Contract-shaped JSON (packages/contracts/openapi.yaml v0.1.2) and a test
 // container wired to a MockClient. Names, IDs and rules are invented for
 // tests only.
 
@@ -100,7 +100,11 @@ http.Response problemResponse(
   headers: {'content-type': 'application/problem+json', ...headers},
 );
 
-Map<String, Object?> consentJson(String status) => {
+Map<String, Object?> consentJson(
+  String status, {
+  bool renewalRequired = false,
+}) => {
+  'renewalRequired': renewalRequired,
   'status': status,
   'consentRecordId': status == 'none' ? null : 'consent-1',
   'decidedAt': status == 'none' ? null : '2026-11-01T03:00:00Z',
@@ -136,8 +140,12 @@ Map<String, Object?> freeTextRuleJson(String text) => {
 
 Map<String, Object?> rulesJson({
   String consent = 'given',
+  bool renewalRequired = false,
   List<Object?> items = const [],
-}) => {'consent': consentJson(consent), 'items': items};
+}) => {
+  'consent': consentJson(consent, renewalRequired: renewalRequired),
+  'items': items,
+};
 
 Map<String, Object?> profileJson({
   String id = 'p-ibu',

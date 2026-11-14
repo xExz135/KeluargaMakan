@@ -60,19 +60,37 @@ MemberRules decodeRules(Object? json) {
   rawItems.forEach(_checkRuleRow);
   final rawConsent = _object(raw['consent'], 'rules.consent');
   if (rawConsent['status'] is! String) _bad('rules.consent.status');
+  // The generated model reads a missing `renewalRequired` with a bare null
+  // check and a wrong-typed one as null (contract 0.1.2).
+  if (rawConsent['renewalRequired'] is! bool) {
+    _bad('rules.consent.renewalRequired');
+  }
+  // The record ID is the precondition of the next consent write; a
+  // wrong-typed one would read as null ("no decision yet").
+  final rawRecordId = rawConsent['consentRecordId'];
+  if (rawRecordId != null && rawRecordId is! String) {
+    _bad('rules.consent.consentRecordId');
+  }
 
   final rules = required(api.ProfileRules.fromJson(raw), 'rules');
   if (rules.items.length != rawItems.length) _bad('rules.items row');
   final consent = rules.consent;
   final status = ConsentStatus.fromApi(consent.status);
+  // Every decision has a record; only `none` has no record ID.
+  if (status != ConsentStatus.none && consent.consentRecordId == null) {
+    _bad('rules.consent without a record');
+  }
   if (status == ConsentStatus.given) {
     return RulesSaved(items: rules.items, consent: consent);
   }
-  // The contract keeps items empty unless consent is given. Rules next to a
-  // consent that does not allow them contradict each other: fail closed.
+  // Renewal applies only to a given consent (QUESTIONS #62). The contract
+  // keeps items empty unless consent is given. Either contradiction: fail
+  // closed.
+  if (consent.renewalRequired) _bad('renewal without a given consent');
   if (rules.items.isNotEmpty) _bad('rules without consent');
   return RulesNotSaved(
     status: status,
+    consentRecordId: consent.consentRecordId,
     decidedAt: consent.decidedAt,
     textVersion: consent.textVersion,
     deletionDueBy: consent.deletionDueBy,
