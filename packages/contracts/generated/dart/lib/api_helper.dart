@@ -88,6 +88,21 @@ String parameterToString(dynamic value) {
   if (value is HardRuleType) {
     return HardRuleTypeTypeTransformer().encode(value).toString();
   }
+  if (value is KitchenCategory) {
+    return KitchenCategoryTypeTransformer().encode(value).toString();
+  }
+  if (value is KitchenChangeOperation) {
+    return KitchenChangeOperationTypeTransformer().encode(value).toString();
+  }
+  if (value is KitchenChangeOutcome) {
+    return KitchenChangeOutcomeTypeTransformer().encode(value).toString();
+  }
+  if (value is KitchenItemState) {
+    return KitchenItemStateTypeTransformer().encode(value).toString();
+  }
+  if (value is KitchenQuantity) {
+    return KitchenQuantityTypeTransformer().encode(value).toString();
+  }
   if (value is Language) {
     return LanguageTypeTransformer().encode(value).toString();
   }
@@ -100,8 +115,17 @@ String parameterToString(dynamic value) {
   if (value is MappingStatus) {
     return MappingStatusTypeTransformer().encode(value).toString();
   }
+  if (value is PhotoSessionStatus) {
+    return PhotoSessionStatusTypeTransformer().encode(value).toString();
+  }
   if (value is PortionSize) {
     return PortionSizeTypeTransformer().encode(value).toString();
+  }
+  if (value is RecognitionConfidence) {
+    return RecognitionConfidenceTypeTransformer().encode(value).toString();
+  }
+  if (value is RecognitionFailureReason) {
+    return RecognitionFailureReasonTypeTransformer().encode(value).toString();
   }
   if (value is RulesConsentStatus) {
     return RulesConsentStatusTypeTransformer().encode(value).toString();

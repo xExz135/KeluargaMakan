@@ -45,6 +45,8 @@ export interface OperationObject {
   readonly requestBody?: { readonly content?: Readonly<Record<string, MediaType>> };
   readonly responses: Readonly<Record<string, ResponseObject>>;
   readonly "x-requirements"?: readonly string[];
+  /** Backlog task that serves an operation designed ahead of its server work. */
+  readonly "x-server-task"?: string;
 }
 
 export interface OpenApiDocument {
@@ -115,6 +117,19 @@ export function directRefs(node: SchemaObject): string[] {
   };
   visit(node);
   return refs;
+}
+
+/** Names of every component schema reachable from `roots`, the roots included. */
+export function reachableSchemas(roots: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const pending = [...roots];
+  while (pending.length > 0) {
+    const name = pending.pop() as string;
+    if (seen.has(name)) continue;
+    seen.add(name);
+    pending.push(...directRefs(schema(name)));
+  }
+  return [...seen].sort();
 }
 
 /** Every property name declared anywhere in the component schemas. */

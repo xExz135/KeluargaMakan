@@ -60,6 +60,38 @@ const childProfile = {
   'updatedAt': '2026-01-01T00:00:00Z',
 };
 
+const customItem = {
+  'id': 'item-test-1',
+  'ingredientId': null,
+  'isCustom': true,
+  'displayName': null,
+  'customName': 'Daun fiktif',
+  'category': 'spices_aromatics',
+  'state': 'out',
+  'quantity': null,
+  'brand': null,
+  'isDefaultStaple': false,
+  'usageRank': null,
+  'changedAt': '2026-01-01T00:00:00Z',
+  'createdAt': '2026-01-01T00:00:00Z',
+};
+
+const staple = {
+  'id': 'item-test-2',
+  'ingredientId': 'fx_smoke_beras',
+  'isCustom': false,
+  'displayName': {'id': 'Beras fiksi', 'en': 'Fictional rice'},
+  'customName': null,
+  'category': 'staples',
+  'state': 'available',
+  'quantity': 'plenty',
+  'brand': null,
+  'isDefaultStaple': true,
+  'usageRank': 1,
+  'changedAt': '2026-01-01T00:00:00Z',
+  'createdAt': '2026-01-01T00:00:00Z',
+};
+
 void main() {
   final profile = Profile.fromJson(childProfile);
   check(profile != null, 'Profile decodes');
@@ -143,6 +175,81 @@ void main() {
     'requestId': 'req-test-1',
   });
   check(problem?.code == ErrorCode.consentRequired, 'error model decodes the stable code');
+
+  // Contract 0.2: Dapur Saya.
+  final list = KitchenItemList.fromJson({
+    'items': [customItem, staple],
+    'maxItems': 500,
+    'referenceVersion': null,
+  });
+  check(list?.items.length == 2, 'KIT-01 kitchen list decodes');
+  final custom = list?.items.first;
+  check(custom?.ingredientId == null && custom?.isCustom == true && custom?.customName == 'Daun fiktif',
+      'KIT-05 custom item has no reference ID and is flagged');
+  check(custom?.category == KitchenCategory.spicesAromatics, 'KIT-03 category code decodes');
+  check(list?.items.last.isDefaultStaple == true && list?.items.last.state == KitchenItemState.available,
+      'KIT-07 default staple decodes as available');
+
+  var unknownStateRejected = false;
+  try {
+    KitchenItem.fromJson({...customItem, 'state': 'a_state_from_a_newer_server'});
+  } on Error {
+    unknownStateRejected = true;
+  }
+  check(unknownStateRejected, 'KIT-02 an unknown item state never decodes as available');
+
+  final toggle = roundTrip(KitchenItemUpdate(state: const Optional.present(KitchenItemState.out_)));
+  check(jsonEncode(toggle) == '{"state":"out"}', 'KIT-02 a toggle sends only the state');
+
+  final add = roundTrip(KitchenItemCreate(
+    customName: const Optional.present('Daun fiktif'),
+    category: const Optional.present(KitchenCategory.spicesAromatics),
+  ));
+  check(!add.containsKey('ingredientId') && add['category'] == 'spices_aromatics',
+      'KIT-05 a custom add leaves the reference ID out');
+
+  final search = IngredientSearchResult.fromJson({
+    'referenceVersion': 'TEST-FIXTURE-1@sha256:${'0' * 64}',
+    'items': [
+      {
+        'ingredient': {
+          'ingredientId': 'fx_smoke_kemangi',
+          'displayName': {'id': 'Kemangi fiksi', 'en': 'Fictional lemon basil'},
+          'localNames': ['Selasih fiksi'],
+          'category': null,
+          'brandVaries': false,
+          'brands': <Object>[],
+        },
+        'matchedName': 'Selasih fiksi',
+      },
+    ],
+  });
+  check(search?.items.single.matchedName == 'Selasih fiksi', 'KIT-04 search hit decodes');
+  check(search?.items.single.ingredient.category == null,
+      'KIT-04 a catalog entry without a kitchen category decodes as null');
+
+  final change = roundTrip(KitchenChange(
+    changeId: '00000000-0000-4000-8000-000000000001',
+    ingredient: KitchenIngredientKey(ingredientId: const Optional.present('fx_smoke_kemangi')),
+    operation: KitchenChangeOperation.upsert,
+    ageMs: 1500,
+    state: const Optional.present(KitchenItemState.out_),
+  ));
+  check(change['ageMs'] == 1500 && !change.containsKey('quantity'),
+      'KIT-16 a queued change encodes its age and only the fields it changes');
+
+  final recognized = RecognizedItem.fromJson({
+    'id': 'rec-test-1',
+    'label': 'tempe atau tahu',
+    'ingredientId': null,
+    'displayName': null,
+    'confidence': 'low',
+    'options': <Object>[],
+    'kitchenItemId': null,
+  });
+  check(recognized?.confidence == RecognitionConfidence.low, 'REC-03 low confidence decodes');
+  check(RecognitionConfidence.fromJson('a_level_from_a_newer_server') == null,
+      'REC-02 an unknown confidence is never read as a known level');
 
   if (failures > 0) {
     stderr.writeln('$failures check(s) failed');

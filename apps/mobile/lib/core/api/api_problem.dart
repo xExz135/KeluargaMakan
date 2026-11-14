@@ -38,8 +38,11 @@ enum ApiErrorCode {
   hardRuleDuplicate('hard_rule_duplicate'),
   mappingNotApplicable('mapping_not_applicable'),
   idempotencyKeyReused('idempotency_key_reused'),
+  kitchenItemLimitReached('kitchen_item_limit_reached'),
+  ingredientSetLimitReached('ingredient_set_limit_reached'),
   rateLimited('rate_limited'),
   rulesUnavailable('rules_unavailable'),
+  referenceDataUnavailable('reference_data_unavailable'),
   signInMethodUnavailable('sign_in_method_unavailable'),
   serviceUnavailable('service_unavailable'),
   internalError('internal_error');

@@ -412,6 +412,188 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/household/kitchen/items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the household's saved ingredients
+         * @description The saved kitchen of the session's household, the same on every phone signed in to it (KIT-01). Items come in KIT-03 category order. The default staples are created with the household as available and stay available until the user marks them out (KIT-07, ACC-05). Reference names come from the verified reference dataset; when it is not available the list is still returned, with `displayName` null.
+         */
+        get: operations["listKitchenItems"];
+        put?: never;
+        /**
+         * Add an ingredient to the kitchen
+         * @description Adds a reference ingredient found by search (KIT-04) or a custom ingredient (KIT-05). A custom ingredient is stored with `ingredientId: null` and `isCustom: true`; Cek Aman gives it "Check the label" for every member with a hard rule (SAF-09). An unknown `ingredientId` gives 400 `validation_failed`. When the reference dataset cannot be verified, adding a reference ingredient gives 503 `reference_data_unavailable` (custom ingredients still work). If the ingredient is already in the kitchen nothing is duplicated: the existing item takes the requested state and is returned with 200. Returns 409 `kitchen_item_limit_reached` at the configured limit.
+         */
+        post: operations["addKitchenItem"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/household/kitchen/items/{itemId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A kitchen item in the session's household. */
+                itemId: components["parameters"]["ItemId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove an ingredient from the kitchen
+         * @description Removes the item and its set memberships. A default staple can be removed too; marking it out keeps it in the list instead (KIT-07).
+         */
+        delete: operations["removeKitchenItem"];
+        options?: never;
+        head?: never;
+        /**
+         * Change an ingredient's state or details
+         * @description One tap toggles available and out (KIT-02). Only the fields present are changed. The change is stamped with the server time and wins over any earlier change to the same ingredient (KIT-16); sending the same change again leaves the same result. `quantity` and `brand` (KIT-09) are served from T-032; a server without them answers 400 `validation_failed` for those fields.
+         */
+        patch: operations["updateKitchenItem"];
+        trace?: never;
+    };
+    "/v1/household/kitchen/sets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the household's ingredient sets */
+        get: operations["listIngredientSets"];
+        put?: never;
+        /**
+         * Create an ingredient set
+         * @description A named group of kitchen items, for example "Belanja mingguan" (KIT-08). Unknown item IDs give 404 `not_found`. Returns 409 `ingredient_set_limit_reached` at the configured limit.
+         */
+        post: operations["createIngredientSet"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/household/kitchen/sets/{setId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description An ingredient set in the session's household. */
+                setId: components["parameters"]["SetId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Rename an ingredient set or change its items
+         * @description The whole set is replaced, so an offline edit sent again is safe.
+         */
+        put: operations["replaceIngredientSet"];
+        post?: never;
+        /**
+         * Delete an ingredient set
+         * @description The items stay in the kitchen.
+         */
+        delete: operations["deleteIngredientSet"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/household/kitchen/sets/{setId}/mark-available": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description An ingredient set in the session's household. */
+                setId: components["parameters"]["SetId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mark every item in a set available
+         * @description "Tandai semua ada" (KIT-08): every item in the set becomes available in one call, stamped with the server time (KIT-16). No other item changes, and nothing becomes out. Sending it again leaves the same result. The response lists the set's items after the change; the client keeps the earlier states for its undo.
+         */
+        post: operations["markIngredientSetAvailable"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/household/kitchen/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send queued kitchen changes and fetch changes from other phones
+         * @description KIT-16 offline sync. The phone sends the changes it queued while offline, oldest first, and the cursor of its last sync. Each change names its ingredient (a reference ID or a custom name), so an item added offline needs no server ID. The server places each change on its own clock at the time it was made (now minus `ageMs`, so a phone with a wrong clock still orders correctly) and keeps, per ingredient, the latest change: an older change than the stored one is `superseded` and the stored item is returned. Every change has a `changeId`; sending it again returns its first result without applying it twice, so replaying the queue is safe. The response carries every item changed or removed since the cursor (all items when `cursor` is null or too old, with `full: true`) and a new cursor. A rejected change (for example an unknown ingredient or the item limit) never stops the rest.
+         */
+        post: operations["syncKitchen"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/reference/ingredients": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get the whole reference ingredient catalog
+         * @description Every ingredient of the verified reference dataset with its names, local and regional names, kitchen category and brands, for the copy the phone keeps for offline search (KIT-04). `referenceVersion` changes whenever the data changes. When the dataset is not loaded or fails verification the answer is 503 `reference_data_unavailable`, never an empty catalog. No safety data (components, allergens, halal) is included: only Cek Aman uses those.
+         */
+        get: operations["listReferenceIngredients"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/reference/ingredients/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Search the reference ingredients by name or local name
+         * @description Searches the standard Indonesian ingredient list by name (Indonesian or English) and by local or regional name, for example kemangi, daun salam, tempe or kecap manis (KIT-04). Matching ignores case, accents and spacing (Unicode NFKC); exact and starting matches come first. The same search picks ingredients for likes and dislikes (PRF-06) and for a rule mapping (PRF-08; QUESTIONS #49). The query is sent in the body so it never appears in a URL or an access log. An empty `items` means no ingredient matched; when the reference dataset is not loaded or fails verification the answer is 503 `reference_data_unavailable`, never an empty list.
+         */
+        post: operations["searchReferenceIngredients"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/reference/allergens": {
         parameters: {
             query?: never;
@@ -489,7 +671,7 @@ export interface components {
          * @description Stable machine-readable error code. New codes may be added; clients treat an unknown code like `internal_error`.
          * @enum {string}
          */
-        ErrorCode: "validation_failed" | "code_invalid" | "code_expired" | "code_attempts_exceeded" | "unauthenticated" | "access_token_expired" | "refresh_token_invalid" | "google_token_invalid" | "forbidden" | "not_found" | "household_required" | "household_exists" | "profile_limit_reached" | "manager_profile_not_deletable" | "guardian_confirmation_required" | "consent_required" | "consent_text_outdated" | "consent_not_active" | "consent_changed" | "manager_profile_must_be_adult" | "hard_rule_duplicate" | "mapping_not_applicable" | "idempotency_key_reused" | "rate_limited" | "rules_unavailable" | "sign_in_method_unavailable" | "service_unavailable" | "internal_error";
+        ErrorCode: "validation_failed" | "code_invalid" | "code_expired" | "code_attempts_exceeded" | "unauthenticated" | "access_token_expired" | "refresh_token_invalid" | "google_token_invalid" | "forbidden" | "not_found" | "household_required" | "household_exists" | "profile_limit_reached" | "manager_profile_not_deletable" | "guardian_confirmation_required" | "consent_required" | "consent_text_outdated" | "consent_not_active" | "consent_changed" | "manager_profile_must_be_adult" | "hard_rule_duplicate" | "mapping_not_applicable" | "idempotency_key_reused" | "kitchen_item_limit_reached" | "ingredient_set_limit_reached" | "rate_limited" | "rules_unavailable" | "reference_data_unavailable" | "sign_in_method_unavailable" | "service_unavailable" | "internal_error";
         /** @enum {string} */
         SignInChannel: "phone" | "email";
         /** @enum {string} */
@@ -916,6 +1098,272 @@ export interface components {
             /** @description Newest first. */
             items: components["schemas"]["ConsentRecord"][];
         };
+        /**
+         * @description KIT-03 categories in display order: protein, vegetables, fruit, spices and aromatics, staples, sauces and condiments, dairy, frozen and leftovers. The app shows its own Bahasa Indonesia or English label for each code. Leftovers holds custom items in V1; saved leftovers (KIT-13) use the same code later.
+         * @enum {string}
+         */
+        KitchenCategory: "protein" | "vegetables" | "fruit" | "spices_aromatics" | "staples" | "sauces_condiments" | "dairy" | "frozen" | "leftovers";
+        /**
+         * @description KIT-02: available ("Ada") or out ("Habis"). Clients show an unknown state as out, never as available.
+         * @enum {string}
+         */
+        KitchenItemState: "available" | "out";
+        /**
+         * @description KIT-09 optional amount.
+         * @enum {string}
+         */
+        KitchenQuantity: "a_little" | "some" | "plenty";
+        /** @description A custom ingredient's name as the user typed it (KIT-05), stored in Unicode NFC with surrounding spaces removed. Text with control, format or private-use characters is refused. Names that differ only in case, accents, punctuation or spacing are the same ingredient. */
+        KitchenCustomName: string;
+        /** @description The brand recorded for an item (KIT-09, SAF-07). `brandId` is one of the ingredient's reference brands, or null for a brand typed as text, for which Cek Aman keeps "Check the label" on brand-varying components. A brand is never shown as safe or verified. */
+        KitchenBrand: {
+            brandId: components["schemas"]["ReferenceId"] | null;
+            /** @description The reference brand name, or the text as typed. */
+            name: string;
+        };
+        /** @description Exactly one of `brandId` (from the ingredient's catalog `brands`) or `customName` (a brand not in the list). Only reference ingredients take a `brandId`. */
+        KitchenBrandInput: {
+            brandId?: components["schemas"]["ReferenceId"];
+            customName?: string;
+        };
+        /** @description SRS 18.1 Kitchen item. A reference ingredient has `ingredientId` and its reference `displayName` (null while the reference data is not available or no longer lists the ingredient). A custom ingredient (KIT-05) has `ingredientId: null`, `isCustom: true` and `customName`; Cek Aman gives "Check the label" for it to every member with a hard rule (SAF-09). `changedAt` is the server time of the last accepted change (KIT-16). */
+        KitchenItem: {
+            id: components["schemas"]["Id"];
+            ingredientId: components["schemas"]["ReferenceId"] | null;
+            /** @description True exactly when `ingredientId` is null (KIT-05 flag). */
+            isCustom: boolean;
+            displayName: components["schemas"]["LocalizedText"] | null;
+            customName: components["schemas"]["KitchenCustomName"] | null;
+            category: components["schemas"]["KitchenCategory"];
+            state: components["schemas"]["KitchenItemState"];
+            quantity: components["schemas"]["KitchenQuantity"] | null;
+            brand: components["schemas"]["KitchenBrand"] | null;
+            /** @description Created with the household as a default staple (KIT-07, ACC-05). */
+            isDefaultStaple: boolean;
+            /** @description KIT-06: 1 is the most used item in its category. Null until use is recorded; clients then fall back to their own order. */
+            usageRank: number | null;
+            /** Format: date-time */
+            changedAt: string;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        KitchenItemList: {
+            /** @description In KIT-03 category order. */
+            items: components["schemas"]["KitchenItem"][];
+            /** @description The configured limit of items per household. */
+            maxItems: number;
+            /** @description DAT-06 version of the reference data the names come from, or null when it is not available. */
+            referenceVersion: string | null;
+        };
+        /** @description Exactly one of `ingredientId` (a reference ingredient, KIT-04) or `customName` (KIT-05). `category` is required for a custom ingredient and for a reference ingredient whose catalog `category` is null; otherwise the catalog category is used. `state` defaults to `available`. */
+        KitchenItemCreate: {
+            ingredientId?: components["schemas"]["ReferenceId"];
+            customName?: components["schemas"]["KitchenCustomName"];
+            category?: components["schemas"]["KitchenCategory"];
+            state?: components["schemas"]["KitchenItemState"];
+        };
+        /** @description Only the fields present change. `quantity` and `brand` may be null to clear them (KIT-09). */
+        KitchenItemUpdate: {
+            state?: components["schemas"]["KitchenItemState"];
+            category?: components["schemas"]["KitchenCategory"];
+            quantity?: components["schemas"]["KitchenQuantity"] | null;
+            brand?: components["schemas"]["KitchenBrandInput"] | null;
+        };
+        /** @example Belanja mingguan */
+        IngredientSetName: string;
+        /** @description SRS 18.1 Ingredient set (KIT-08). */
+        IngredientSet: {
+            id: components["schemas"]["Id"];
+            name: components["schemas"]["IngredientSetName"];
+            /** @description Kitchen items in the set; a removed item leaves the set. */
+            itemIds: components["schemas"]["Id"][];
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        IngredientSetList: {
+            items: components["schemas"]["IngredientSet"][];
+            /** @description The configured limit of sets per household. */
+            maxSets: number;
+        };
+        IngredientSetInput: {
+            name: components["schemas"]["IngredientSetName"];
+            itemIds: components["schemas"]["Id"][];
+        };
+        /** @description The ingredient a sync change is for (KIT-16: the latest change wins per ingredient): exactly one of `ingredientId` or `customName`. Custom names are compared ignoring case, accents, punctuation and spacing. */
+        KitchenIngredientKey: {
+            ingredientId?: components["schemas"]["ReferenceId"];
+            customName?: components["schemas"]["KitchenCustomName"];
+        };
+        /**
+         * @description `upsert` adds the ingredient if needed and sets the fields present; `remove` takes it out of the kitchen.
+         * @enum {string}
+         */
+        KitchenChangeOperation: "upsert" | "remove";
+        /** @description One change queued on the phone. For `upsert`, `category` is needed when the ingredient is new and has no catalog category; `quantity` and `brand` may be null to clear them. */
+        KitchenChange: {
+            /**
+             * Format: uuid
+             * @description Random UUID made with the change; a repeat returns the first result.
+             */
+            changeId: string;
+            ingredient: components["schemas"]["KitchenIngredientKey"];
+            operation: components["schemas"]["KitchenChangeOperation"];
+            /** @description Milliseconds from the edit to sending this request, measured on the phone. The server dates the change at its own time minus this age (KIT-16), so the phone's clock setting does not matter. Changes older than the server's limit are superseded by any later change. */
+            ageMs: number;
+            category?: components["schemas"]["KitchenCategory"];
+            state?: components["schemas"]["KitchenItemState"];
+            quantity?: components["schemas"]["KitchenQuantity"] | null;
+            brand?: components["schemas"]["KitchenBrandInput"] | null;
+        };
+        KitchenSyncRequest: {
+            /** @description The `cursor` of the last sync response, or null for a first sync. */
+            cursor: string | null;
+            /** @description Oldest first. */
+            changes: components["schemas"]["KitchenChange"][];
+        };
+        /**
+         * @description `applied`: the change is the latest for its ingredient (also for a repeat of an applied change). `superseded`: a later change to the ingredient was already stored; the stored item is in `items`. `rejected`: the change cannot be applied (see `errorCode`); nothing changed.
+         * @enum {string}
+         */
+        KitchenChangeOutcome: "applied" | "superseded" | "rejected";
+        KitchenChangeResult: {
+            /** Format: uuid */
+            changeId: string;
+            outcome: components["schemas"]["KitchenChangeOutcome"];
+            /** @description The server's item for the ingredient, or null when there is none. */
+            itemId: components["schemas"]["Id"] | null;
+            /** @description Why a change was rejected, for example `validation_failed` or `kitchen_item_limit_reached`. */
+            errorCode: components["schemas"]["ErrorCode"] | null;
+        };
+        KitchenSyncResponse: {
+            /** @description Opaque; send it with the next sync. */
+            cursor: string;
+            /** @description True when `items` is the whole kitchen (first sync, or a cursor too old to continue from); the phone then replaces its copy, keeping only changes still queued. */
+            full: boolean;
+            /** @description Items changed since the cursor, in KIT-03 category order. */
+            items: components["schemas"]["KitchenItem"][];
+            /** @description Items removed since the cursor (empty when `full`). */
+            removedItemIds: components["schemas"]["Id"][];
+            /** @description One result per sent change, in the same order. */
+            results: components["schemas"]["KitchenChangeResult"][];
+            maxItems: number;
+            referenceVersion: string | null;
+        };
+        /** @description A reference brand of an ingredient (KIT-09, SAF-07). Not a safety result. */
+        CatalogBrand: {
+            brandId: components["schemas"]["ReferenceId"];
+            name: string;
+        };
+        /** @description A reference ingredient as the kitchen and search use it (SRS 18.1 Ingredient: names, local names, category, brands). It carries no components, allergens or halal data: only Cek Aman reads those. */
+        CatalogIngredient: {
+            ingredientId: components["schemas"]["ReferenceId"];
+            displayName: components["schemas"]["LocalizedText"];
+            /** @description Local, regional and alternative names (KIT-04). */
+            localNames: string[];
+            /** @description The kitchen category, or null when the reference data gives none; the app then asks for one when the ingredient is added. */
+            category: components["schemas"]["KitchenCategory"] | null;
+            /** @description SAF-07: what the ingredient contains can differ by brand, so the app offers to record a brand (KIT-09). This is not a safety result. */
+            brandVaries: boolean;
+            brands: components["schemas"]["CatalogBrand"][];
+        };
+        ReferenceIngredientCatalog: {
+            /** @description DAT-06 version and content hash of the verified dataset. */
+            referenceVersion: string;
+            /** @description Sorted by Indonesian display name. */
+            items: components["schemas"]["CatalogIngredient"][];
+        };
+        IngredientSearchRequest: {
+            /** @description What the user typed. Hidden or control characters are refused (400). The query is never stored or logged. */
+            query: string;
+            /** @description At most this many results (default and upper limit from configuration). */
+            limit?: number;
+        };
+        IngredientSearchHit: {
+            ingredient: components["schemas"]["CatalogIngredient"];
+            /** @description The local or regional name that matched, shown next to the display name; null when a display name matched. */
+            matchedName: string | null;
+        };
+        IngredientSearchResult: {
+            referenceVersion: string;
+            /** @description Best match first. Empty only when nothing matched. */
+            items: components["schemas"]["IngredientSearchHit"][];
+        };
+        /**
+         * @description Confirm-and-Save session (REC-01 to REC-04). `collecting`: photos are being added; `processing`: they are being read; `ready`: a result waits for confirmation; `failed`: see `failureReason`; `confirmed` and `discarded`: closed by the user; `expired`: the result was not confirmed in time and was dropped. Clients treat an unknown status like `failed` and offer manual entry.
+         * @enum {string}
+         */
+        PhotoSessionStatus: "collecting" | "processing" | "ready" | "failed" | "confirmed" | "discarded" | "expired";
+        /**
+         * @description `ai_not_enabled`: the household has not turned on AI features (SET-09); `ai_unavailable`: the recognizer is down, out of quota or too slow (INT-06 fallback: manual entry); `photos_unreadable`: the photos could not be read; `processing_failed`: any other failure.
+         * @enum {string}
+         */
+        RecognitionFailureReason: "ai_not_enabled" | "ai_unavailable" | "photos_unreadable" | "processing_failed";
+        /**
+         * @description REC-02. `high` and `medium` items start ticked; `low` items are asked as a question with likely options and nothing preselected (REC-03). Clients treat an unknown value like `low`.
+         * @enum {string}
+         */
+        RecognitionConfidence: "high" | "medium" | "low";
+        /** @description A likely reference ingredient for a low-confidence item (REC-03). */
+        RecognitionOption: {
+            ingredientId: components["schemas"]["ReferenceId"];
+            displayName: components["schemas"]["LocalizedText"];
+        };
+        /** @description One line of the checklist (REC-02). It carries no safety, allergen or halal field: a photo is never evidence for Cek Aman (REC-06, SAF-10). */
+        RecognizedItem: {
+            id: components["schemas"]["Id"];
+            /** @description The name as read from the photo, shown when there is no reference match. */
+            label: string;
+            /** @description The reference ingredient the API matched by name, or null. A name that does not match is never guessed into an ID (AI-06). */
+            ingredientId: components["schemas"]["ReferenceId"] | null;
+            displayName: components["schemas"]["LocalizedText"] | null;
+            confidence: components["schemas"]["RecognitionConfidence"];
+            /** @description Likely options for a low-confidence item, for example tempe or tofu (REC-03). */
+            options: components["schemas"]["RecognitionOption"][];
+            /** @description The saved kitchen item this matches, preferred over new ones (REC-05). */
+            kitchenItemId: components["schemas"]["Id"] | null;
+        };
+        /** @description The checklist. Nothing in it is saved until the user confirms (REC-04), and an unconfirmed result never reaches suggestions. */
+        RecognitionResult: {
+            /** @description Items matching saved kitchen items first (REC-05). Empty when nothing was recognized. */
+            items: components["schemas"]["RecognizedItem"][];
+            referenceVersion: string;
+        };
+        /** @description A photo setup session (REC-01). Photos are kept only in temporary storage and deleted as soon as they are processed (REC-07, SET-05, DAT-03); no response ever carries a photo or a link to one. */
+        PhotoSession: {
+            id: components["schemas"]["Id"];
+            status: components["schemas"]["PhotoSessionStatus"];
+            photoCount: number;
+            /** @description Photos allowed per session, from configuration (REC-01, 5 target). */
+            maxPhotos: number;
+            failureReason: components["schemas"]["RecognitionFailureReason"] | null;
+            /** @description Set when `status` is `ready`. */
+            result: components["schemas"]["RecognitionResult"] | null;
+            /** Format: date-time */
+            createdAt: string;
+            /**
+             * Format: date-time
+             * @description When an unconfirmed result is dropped (configuration, QUESTIONS
+             */
+            expiresAt: string;
+        };
+        /** @description One ticked line, as the user left it: exactly one of `ingredientId` (a recognized, chosen or searched reference ingredient) or `customName` (a free-text rename, saved as a flagged custom item, KIT-05). `category` follows the `KitchenItemCreate` rules. */
+        RecognitionConfirmationItem: {
+            /** @description The checklist line it came from; absent for an item the user added. */
+            recognizedItemId?: components["schemas"]["Id"];
+            ingredientId?: components["schemas"]["ReferenceId"];
+            customName?: components["schemas"]["KitchenCustomName"];
+            category?: components["schemas"]["KitchenCategory"];
+        };
+        /** @description "Simpan" (REC-04): only these items become available. Unticked lines are ignored, and no other kitchen item is removed or marked out. */
+        RecognitionConfirmation: {
+            items: components["schemas"]["RecognitionConfirmationItem"][];
+        };
+        RecognitionConfirmationResult: {
+            /** @description The confirmed items, each now available. */
+            items: components["schemas"]["KitchenItem"][];
+        };
     };
     responses: {
         /** @description The request is malformed or fails validation. */
@@ -987,6 +1435,10 @@ export interface components {
     parameters: {
         ProfileId: components["schemas"]["Id"];
         RuleId: components["schemas"]["Id"];
+        /** @description A kitchen item in the session's household. */
+        ItemId: components["schemas"]["Id"];
+        /** @description An ingredient set in the session's household. */
+        SetId: components["schemas"]["Id"];
         /** @description A client-generated UUID. Repeating a request with the same key returns the first result instead of creating a duplicate, so an offline queue can replay safely. Reusing a key with a different body returns 409 `idempotency_key_reused`. Keys are kept for a configured period. */
         IdempotencyKey: string;
     };
@@ -1696,6 +2148,343 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            default: components["responses"]["UnexpectedError"];
+        };
+    };
+    listKitchenItems: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The saved ingredients. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KitchenItemList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            409: components["responses"]["Conflict"];
+            503: components["responses"]["ServiceUnavailable"];
+            default: components["responses"]["UnexpectedError"];
+        };
+    };
+    addKitchenItem: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description A client-generated UUID. Repeating a request with the same key returns the first result instead of creating a duplicate, so an offline queue can replay safely. Reusing a key with a different body returns 409 `idempotency_key_reused`. Keys are kept for a configured period. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["KitchenItemCreate"];
+            };
+        };
+        responses: {
+            /** @description The ingredient was already in the kitchen; its updated item. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KitchenItem"];
+                };
+            };
+            /** @description Added. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KitchenItem"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            409: components["responses"]["Conflict"];
+            503: components["responses"]["ServiceUnavailable"];
+            default: components["responses"]["UnexpectedError"];
+        };
+    };
+    removeKitchenItem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A kitchen item in the session's household. */
+                itemId: components["parameters"]["ItemId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Removed. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            default: components["responses"]["UnexpectedError"];
+        };
+    };
+    updateKitchenItem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A kitchen item in the session's household. */
+                itemId: components["parameters"]["ItemId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["KitchenItemUpdate"];
+            };
+        };
+        responses: {
+            /** @description The updated item. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KitchenItem"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            default: components["responses"]["UnexpectedError"];
+        };
+    };
+    listIngredientSets: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The ingredient sets. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IngredientSetList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            409: components["responses"]["Conflict"];
+            default: components["responses"]["UnexpectedError"];
+        };
+    };
+    createIngredientSet: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description A client-generated UUID. Repeating a request with the same key returns the first result instead of creating a duplicate, so an offline queue can replay safely. Reusing a key with a different body returns 409 `idempotency_key_reused`. Keys are kept for a configured period. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IngredientSetInput"];
+            };
+        };
+        responses: {
+            /** @description Created. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IngredientSet"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            default: components["responses"]["UnexpectedError"];
+        };
+    };
+    replaceIngredientSet: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description An ingredient set in the session's household. */
+                setId: components["parameters"]["SetId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IngredientSetInput"];
+            };
+        };
+        responses: {
+            /** @description The updated set. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IngredientSet"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            default: components["responses"]["UnexpectedError"];
+        };
+    };
+    deleteIngredientSet: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description An ingredient set in the session's household. */
+                setId: components["parameters"]["SetId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            default: components["responses"]["UnexpectedError"];
+        };
+    };
+    markIngredientSetAvailable: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description An ingredient set in the session's household. */
+                setId: components["parameters"]["SetId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The set's items after the change. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KitchenItemList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            default: components["responses"]["UnexpectedError"];
+        };
+    };
+    syncKitchen: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["KitchenSyncRequest"];
+            };
+        };
+        responses: {
+            /** @description The outcome of each change and the changes since the cursor. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KitchenSyncResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            409: components["responses"]["Conflict"];
+            503: components["responses"]["ServiceUnavailable"];
+            default: components["responses"]["UnexpectedError"];
+        };
+    };
+    listReferenceIngredients: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The catalog. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReferenceIngredientCatalog"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            503: components["responses"]["ServiceUnavailable"];
+            default: components["responses"]["UnexpectedError"];
+        };
+    };
+    searchReferenceIngredients: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IngredientSearchRequest"];
+            };
+        };
+        responses: {
+            /** @description The matching ingredients, best first. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IngredientSearchResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            503: components["responses"]["ServiceUnavailable"];
             default: components["responses"]["UnexpectedError"];
         };
     };
