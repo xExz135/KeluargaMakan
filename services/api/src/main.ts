@@ -1,6 +1,7 @@
 import pg from "pg";
 
 import { apiConfigFromEnv } from "../config/api.js";
+import { kitchenConfigFromEnv } from "../config/kitchen.js";
 import { profileConfigFromEnv } from "../config/profiles.js";
 import { targetsFromEnv } from "../config/targets.js";
 import { resolveAppEnv } from "./app-env.js";
@@ -11,7 +12,10 @@ import { createKeyProvider } from "./db/crypto/config.js";
 import { pgExecutor } from "./db/executor.js";
 import { HealthDataKeys } from "./db/health-data-keys.js";
 import { createApp } from "./http/app.js";
+import { checkStaplesInReference } from "./kitchen/staples.js";
 import { jsonLogger } from "./logger.js";
+import { VerifiedReferenceCatalog } from "./reference/catalog.js";
+import { referenceSourceFromEnv } from "./reference/reference-data.js";
 
 /**
  * Starts the API. Configuration comes from the environment (see
@@ -30,12 +34,23 @@ async function main(): Promise<void> {
       "TRUST_PROXY is no longer read; set TRUSTED_PROXY_CIDRS to the load balancer ranges",
     );
   }
+  // DAT-06, SAF-13: the verified reference dataset. When it is missing or
+  // fails verification the API still starts, and the catalog routes and
+  // reference-ingredient writes answer 503 (fail closed).
+  const reference = referenceSourceFromEnv(env, jsonLogger);
+  const kitchenConfig = kitchenConfigFromEnv(env);
+  checkStaplesInReference(kitchenConfig, reference);
   const pool = new pg.Pool({ connectionString: databaseUrl });
   const app = await createApp({
     db: pgExecutor(pool),
     config: apiConfigFromEnv(env),
     targets: targetsFromEnv(env),
     profileConfig: profileConfigFromEnv(env),
+    kitchenConfig,
+    reference,
+    // QUESTIONS #49: likes, dislikes and rule mappings accept the same
+    // ingredients the search finds.
+    catalog: new VerifiedReferenceCatalog(reference),
     // DAT-02: no default provider; a missing or unknown KEY_PROVIDER stops startup.
     // Cloud KMS needs its client, which T-023 wires in.
     keys: new HealthDataKeys(createKeyProvider(env)),

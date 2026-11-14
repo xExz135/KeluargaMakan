@@ -8,6 +8,7 @@ import { FastifyAdapter, type NestFastifyApplication } from "@nestjs/platform-fa
 import type { FastifyReply, FastifyRequest } from "fastify";
 
 import type { ApiConfig } from "../../config/api.js";
+import { defaultKitchenConfig, type KitchenConfig } from "../../config/kitchen.js";
 import { defaultProfileConfig, type ProfileConfig } from "../../config/profiles.js";
 import { defaultTargets, type Targets } from "../../config/targets.js";
 import { readAccount } from "../auth/accounts.js";
@@ -20,10 +21,13 @@ import { ConsentService } from "../consent/consent-service.js";
 import type { SqlExecutor } from "../db/executor.js";
 import type { HealthDataKeys } from "../db/health-data-keys.js";
 import { HouseholdService } from "../households/household-service.js";
+import { KitchenController } from "../kitchen/kitchen.controller.js";
+import { KitchenService } from "../kitchen/kitchen-service.js";
 import type { ApiLogger } from "../logger.js";
 import { ProfileService } from "../profiles/profile-service.js";
 import { ProfilesController } from "../profiles/profiles.controller.js";
 import { DbReferenceCatalog, type ReferenceCatalog } from "../reference/catalog.js";
+import { unavailableReference, type ReferenceSource } from "../reference/reference-data.js";
 import { ReferenceController } from "../reference/reference.controller.js";
 import { AccountController, AuthController, HouseholdController } from "./controllers.js";
 import { toProblem } from "./problem.js";
@@ -32,7 +36,10 @@ import {
   AUTH_SERVICE,
   CONSENT_SERVICE,
   HOUSEHOLD_SERVICE,
+  KITCHEN_CONFIG,
+  KITCHEN_SERVICE,
   PROFILE_SERVICE,
+  REFERENCE_SOURCE,
 } from "./tokens.js";
 
 export interface AppDeps {
@@ -46,6 +53,13 @@ export interface AppDeps {
   readonly keys: HealthDataKeys;
   /** Reference names (PRF-06, PRF-08); defaults to the active reference dataset. */
   readonly catalog?: ReferenceCatalog;
+  /**
+   * The verified reference dataset (KIT-04 catalog and search, kitchen
+   * names). Defaults to none: catalog routes answer 503 (fail closed).
+   */
+  readonly reference?: ReferenceSource;
+  /** Dapur Saya settings (`config/kitchen.ts`): default staples, limits. */
+  readonly kitchenConfig?: KitchenConfig;
   readonly secrets: AuthSecrets;
   readonly codeSender: SignInCodeSender;
   readonly logger: ApiLogger;
@@ -78,6 +92,7 @@ export const CONTROLLERS = Object.freeze([
   ConsentController,
   ReferenceController,
   ProfilesController,
+  KitchenController,
 ] as const);
 
 /** Request bodies in this API are small JSON documents. */
@@ -117,10 +132,13 @@ export async function createApp(deps: AppDeps): Promise<NestFastifyApplication> 
     codeSender: deps.codeSender,
     ...(deps.clock === undefined ? {} : { clock: deps.clock }),
   });
+  const kitchenConfig = deps.kitchenConfig ?? defaultKitchenConfig;
+  const reference = deps.reference ?? unavailableReference;
   const householdService = new HouseholdService({
     db: deps.db,
     config: deps.config,
     hashKey: deps.secrets.hashKey,
+    defaultStaples: kitchenConfig.defaultStaples,
     ...(deps.clock === undefined ? {} : { clock: deps.clock }),
   });
 
@@ -139,6 +157,15 @@ export async function createApp(deps: AppDeps): Promise<NestFastifyApplication> 
     config: deps.config,
     targets: deps.targets ?? defaultTargets,
     profileConfig: deps.profileConfig ?? defaultProfileConfig,
+    hashKey: deps.secrets.hashKey,
+    ...(deps.clock === undefined ? {} : { clock: deps.clock }),
+  });
+
+  const kitchenService = new KitchenService({
+    db: deps.db,
+    config: deps.config,
+    kitchen: kitchenConfig,
+    reference,
     hashKey: deps.secrets.hashKey,
     ...(deps.clock === undefined ? {} : { clock: deps.clock }),
   });
@@ -166,6 +193,9 @@ export async function createApp(deps: AppDeps): Promise<NestFastifyApplication> 
       { provide: HOUSEHOLD_SERVICE, useValue: householdService },
       { provide: CONSENT_SERVICE, useValue: consentService },
       { provide: PROFILE_SERVICE, useValue: profileService },
+      { provide: KITCHEN_SERVICE, useValue: kitchenService },
+      { provide: KITCHEN_CONFIG, useValue: kitchenConfig },
+      { provide: REFERENCE_SOURCE, useValue: reference },
       { provide: ACCOUNT_READER, useValue: { read: (id: string) => readAccount(deps.db, id) } },
     ],
   })

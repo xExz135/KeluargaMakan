@@ -1,12 +1,14 @@
 import { randomUUID } from "node:crypto";
 
 import type { ApiConfig } from "../../config/api.js";
+import type { DefaultStaple } from "../../config/kitchen.js";
 import { ApiError, unauthenticated } from "../api-error.js";
 import type { AuthContext, Clock } from "../auth/auth-service.js";
 import { systemClock } from "../auth/auth-service.js";
 import { keyedHash } from "../auth/crypto.js";
 import { withDbErrors } from "../db/errors.js";
 import type { SqlExecutor } from "../db/executor.js";
+import { insertDefaultStaples } from "../kitchen/kitchen-store.js";
 
 /**
  * ACC-03: the household and its single manager account. The signed-in
@@ -94,6 +96,8 @@ export interface HouseholdServiceDeps {
   readonly db: SqlExecutor;
   readonly config: ApiConfig;
   readonly hashKey: Buffer;
+  /** KIT-07, ACC-05: created as available with every new household (`config/kitchen.ts`). */
+  readonly defaultStaples?: readonly DefaultStaple[];
   readonly clock?: Clock;
 }
 
@@ -101,12 +105,14 @@ export class HouseholdService {
   readonly #db: SqlExecutor;
   readonly #config: ApiConfig;
   readonly #hashKey: Buffer;
+  readonly #defaultStaples: readonly DefaultStaple[];
   readonly #clock: Clock;
 
   constructor(deps: HouseholdServiceDeps) {
     this.#db = deps.db;
     this.#config = deps.config;
     this.#hashKey = deps.hashKey;
+    this.#defaultStaples = deps.defaultStaples ?? [];
     this.#clock = deps.clock ?? systemClock;
   }
 
@@ -123,7 +129,7 @@ export class HouseholdService {
 
   /**
    * ACC-03, ACC-04: creates the household with the caller as its only manager
-   * and the manager's own adult profile. With an `Idempotency-Key`, a repeat
+   * and the manager's own adult profile, and its default staples (KIT-07). With an `Idempotency-Key`, a repeat
    * of the same request returns the household it created (`created: false`);
    * the same key with another body is refused.
    */
@@ -213,6 +219,13 @@ export class HouseholdService {
           now,
         ],
       );
+      // KIT-07, ACC-05: the default staples, available until the user marks them out.
+      await insertDefaultStaples(tx, {
+        householdId,
+        accountId: context.accountId,
+        staples: this.#defaultStaples,
+        now,
+      });
       if (idempotencyKey !== null) {
         await tx.query(
           `DELETE FROM idempotency_record WHERE account_id = $1 AND idempotency_key = $2`,

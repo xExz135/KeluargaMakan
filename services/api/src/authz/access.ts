@@ -44,7 +44,7 @@ export const ACCESS_METADATA = "keluargamakan:access";
 export const Public = () => SetMetadata(ACCESS_METADATA, { kind: "public" } satisfies AccessRule);
 
 /**
- * Permissions on data inside a household (profiles, rules, consent). Their
+ * Permissions on data inside a household (profiles, rules, consent, kitchen). Their
  * routes get a `HouseholdScope` from the session and answer 409
  * `household_required` before one exists. The household routes themselves
  * (create, read, update) find the household from the account in their service.
@@ -56,6 +56,8 @@ const SCOPED: ReadonlySet<Permission> = new Set<Permission>([
   "hard_rule:write",
   "consent:read",
   "consent:write",
+  "kitchen:read",
+  "kitchen:write",
 ]);
 
 /** Requires an authenticated caller whose role holds `permission`. */

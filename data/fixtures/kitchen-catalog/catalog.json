@@ -1,0 +1,311 @@
+{
+  "$comment": "TEST FIXTURE: not real safety or nutrition data. Fictional catalog records for the Dapur Saya API tests (T-031): names and local names exercise search only. Every safety value is unverified or unknown, so Cek Aman can only give Check the label. IDs use the fx_kit_ prefix.",
+  "schema": "keluargamakan.reference.ingredients/1",
+  "version": "TEST-FIXTURE-kitchen-catalog-1",
+  "ingredients": [
+    {
+      "id": "fx_kit_kemangi",
+      "displayName": {
+        "id": "Kemangi fiksi",
+        "en": "Fiction lemon basil"
+      },
+      "localNames": ["Selasih fiksi", "Surawung fiksi"],
+      "category": "vegetables",
+      "components": {
+        "verification": "unverified",
+        "ingredientIds": []
+      },
+      "allergens": {
+        "verification": "unverified",
+        "contains": [],
+        "mayContain": []
+      },
+      "halal": {
+        "verification": "unverified",
+        "value": "unknown",
+        "nonHalalSources": []
+      },
+      "diet": {
+        "verification": "unverified",
+        "vegetarian": "unknown",
+        "vegan": "unknown"
+      },
+      "brandVaries": false,
+      "brandVariants": [],
+      "tkpiCode": null
+    },
+    {
+      "id": "fx_kit_daun_salam",
+      "displayName": {
+        "id": "Daun salam fiksi",
+        "en": "Fiction Indonesian bay leaf"
+      },
+      "localNames": ["Manting fiksi"],
+      "category": "spices_aromatics",
+      "components": {
+        "verification": "unverified",
+        "ingredientIds": []
+      },
+      "allergens": {
+        "verification": "unverified",
+        "contains": [],
+        "mayContain": []
+      },
+      "halal": {
+        "verification": "unverified",
+        "value": "unknown",
+        "nonHalalSources": []
+      },
+      "diet": {
+        "verification": "unverified",
+        "vegetarian": "unknown",
+        "vegan": "unknown"
+      },
+      "brandVaries": false,
+      "brandVariants": [],
+      "tkpiCode": null
+    },
+    {
+      "id": "fx_kit_tempe",
+      "displayName": {
+        "id": "Tempe fiksi",
+        "en": "Fiction tempeh"
+      },
+      "localNames": ["Témpé gembus fiksi"],
+      "category": "protein",
+      "components": {
+        "verification": "unverified",
+        "ingredientIds": []
+      },
+      "allergens": {
+        "verification": "unverified",
+        "contains": [],
+        "mayContain": []
+      },
+      "halal": {
+        "verification": "unverified",
+        "value": "unknown",
+        "nonHalalSources": []
+      },
+      "diet": {
+        "verification": "unverified",
+        "vegetarian": "unknown",
+        "vegan": "unknown"
+      },
+      "brandVaries": false,
+      "brandVariants": [],
+      "tkpiCode": null
+    },
+    {
+      "id": "fx_kit_kecap_manis",
+      "displayName": {
+        "id": "Kecap manis fiksi",
+        "en": "Fiction sweet soy sauce"
+      },
+      "localNames": ["Ketjap fiksi"],
+      "category": "sauces_condiments",
+      "components": {
+        "verification": "unverified",
+        "ingredientIds": []
+      },
+      "allergens": {
+        "verification": "unverified",
+        "contains": [],
+        "mayContain": []
+      },
+      "halal": {
+        "verification": "unverified",
+        "value": "unknown",
+        "nonHalalSources": []
+      },
+      "diet": {
+        "verification": "unverified",
+        "vegetarian": "unknown",
+        "vegan": "unknown"
+      },
+      "brandVaries": true,
+      "brandVariants": [
+        {
+          "brandId": "fx_kit_merek_a",
+          "brandName": "Merek A fiksi",
+          "verified": false,
+          "components": {
+            "verification": "unverified",
+            "ingredientIds": []
+          },
+          "allergens": {
+            "verification": "unverified",
+            "contains": [],
+            "mayContain": []
+          },
+          "halal": {
+            "verification": "unverified",
+            "value": "unknown",
+            "nonHalalSources": []
+          },
+          "diet": {
+            "verification": "unverified",
+            "vegetarian": "unknown",
+            "vegan": "unknown"
+          }
+        }
+      ],
+      "tkpiCode": null
+    },
+    {
+      "id": "fx_kit_beras",
+      "displayName": {
+        "id": "Beras fiksi",
+        "en": "Fiction rice"
+      },
+      "localNames": [],
+      "category": "staples",
+      "components": {
+        "verification": "unverified",
+        "ingredientIds": []
+      },
+      "allergens": {
+        "verification": "unverified",
+        "contains": [],
+        "mayContain": []
+      },
+      "halal": {
+        "verification": "unverified",
+        "value": "unknown",
+        "nonHalalSources": []
+      },
+      "diet": {
+        "verification": "unverified",
+        "vegetarian": "unknown",
+        "vegan": "unknown"
+      },
+      "brandVaries": false,
+      "brandVariants": [],
+      "tkpiCode": null
+    },
+    {
+      "id": "fx_kit_bawang_merah",
+      "displayName": {
+        "id": "Bawang merah fiksi",
+        "en": "Fiction shallot"
+      },
+      "localNames": ["Brambang fiksi"],
+      "category": "spices_aromatics",
+      "components": {
+        "verification": "unverified",
+        "ingredientIds": []
+      },
+      "allergens": {
+        "verification": "unverified",
+        "contains": [],
+        "mayContain": []
+      },
+      "halal": {
+        "verification": "unverified",
+        "value": "unknown",
+        "nonHalalSources": []
+      },
+      "diet": {
+        "verification": "unverified",
+        "vegetarian": "unknown",
+        "vegan": "unknown"
+      },
+      "brandVaries": false,
+      "brandVariants": [],
+      "tkpiCode": null
+    },
+    {
+      "id": "fx_kit_garam",
+      "displayName": {
+        "id": "Garam fiksi",
+        "en": "Fiction salt"
+      },
+      "localNames": [],
+      "category": "staples",
+      "components": {
+        "verification": "unverified",
+        "ingredientIds": []
+      },
+      "allergens": {
+        "verification": "unverified",
+        "contains": [],
+        "mayContain": []
+      },
+      "halal": {
+        "verification": "unverified",
+        "value": "unknown",
+        "nonHalalSources": []
+      },
+      "diet": {
+        "verification": "unverified",
+        "vegetarian": "unknown",
+        "vegan": "unknown"
+      },
+      "brandVaries": false,
+      "brandVariants": [],
+      "tkpiCode": null
+    },
+    {
+      "id": "fx_kit_krim",
+      "displayName": {
+        "id": "Krim fiksi",
+        "en": "Fiction cream"
+      },
+      "localNames": ["Crème fiksi"],
+      "category": "dairy",
+      "components": {
+        "verification": "unverified",
+        "ingredientIds": []
+      },
+      "allergens": {
+        "verification": "unverified",
+        "contains": [],
+        "mayContain": []
+      },
+      "halal": {
+        "verification": "unverified",
+        "value": "unknown",
+        "nonHalalSources": []
+      },
+      "diet": {
+        "verification": "unverified",
+        "vegetarian": "unknown",
+        "vegan": "unknown"
+      },
+      "brandVaries": false,
+      "brandVariants": [],
+      "tkpiCode": null
+    },
+    {
+      "id": "fx_kit_lain",
+      "displayName": {
+        "id": "Bahan lain fiksi",
+        "en": "Fiction other ingredient"
+      },
+      "localNames": [],
+      "category": "fixture-other",
+      "components": {
+        "verification": "unverified",
+        "ingredientIds": []
+      },
+      "allergens": {
+        "verification": "unverified",
+        "contains": [],
+        "mayContain": []
+      },
+      "halal": {
+        "verification": "unverified",
+        "value": "unknown",
+        "nonHalalSources": []
+      },
+      "diet": {
+        "verification": "unverified",
+        "vegetarian": "unknown",
+        "vegan": "unknown"
+      },
+      "brandVaries": false,
+      "brandVariants": [],
+      "tkpiCode": null
+    }
+  ]
+}

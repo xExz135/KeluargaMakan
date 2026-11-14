@@ -84,6 +84,9 @@ importers:
       '@keluargamakan/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@keluargamakan/reference-data':
+        specifier: workspace:*
+        version: link:../../packages/reference-data
       '@nestjs/common':
         specifier: 12.3.2
         version: 12.3.2(reflect-metadata@0.2.2)(rxjs@7.8.2)

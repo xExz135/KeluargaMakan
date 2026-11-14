@@ -88,3 +88,36 @@ export async function remember(
     if (rowCount !== 1) throw new ConcurrentUpdateError();
   });
 }
+
+/**
+ * Like `findReplay` for a request that is recorded under one of several
+ * operation names (for example "created" and "already there"), so a replay
+ * can answer like the first request. `requests` differ only in `operation`
+ * and `requestHash`. Returns the operation recorded and the resource.
+ */
+export async function findReplayOf(
+  tx: SqlExecutor,
+  requests: readonly IdempotentRequest[],
+): Promise<{ readonly operation: string; readonly resourceId: string } | null> {
+  const first = requests[0];
+  if (first === undefined) throw new Error("no idempotent request given");
+  for (const request of requests) {
+    if (!OPERATION.test(request.operation)) throw new Error("invalid idempotency operation name");
+  }
+  const { rows } = await withDbErrors(() =>
+    tx.query<{ operation: string; request_hash: Uint8Array; resource_id: string }>(
+      `SELECT operation, request_hash, resource_id FROM idempotency_record
+        WHERE account_id = $1 AND idempotency_key = $2 AND created_at >= $3`,
+      [first.accountId, first.key, first.keptSince],
+    ),
+  );
+  const row = rows[0];
+  if (row === undefined) return null;
+  const match = requests.find(
+    (request) =>
+      request.operation === row.operation &&
+      Buffer.from(row.request_hash).equals(request.requestHash),
+  );
+  if (match === undefined) throw idempotencyKeyReused();
+  return { operation: match.operation, resourceId: row.resource_id };
+}

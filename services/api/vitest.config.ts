@@ -11,6 +11,9 @@ export default defineConfig({
       "@keluargamakan/cek-aman": fileURLToPath(
         new URL("../../packages/cek-aman/src/index.ts", import.meta.url),
       ),
+      "@keluargamakan/reference-data": fileURLToPath(
+        new URL("../../packages/reference-data/src/index.ts", import.meta.url),
+      ),
     },
   },
   test: {
