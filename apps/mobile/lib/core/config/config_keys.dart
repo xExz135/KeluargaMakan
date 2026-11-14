@@ -116,6 +116,16 @@ abstract final class ConfigKeys {
     status: ConfigStatus.decided,
   );
 
+  /// Longest wait the sign-in screens accept from a 429 (`Retry-After`).
+  /// About a day: the server's daily wrong-code cap (T-017). The SRS has no
+  /// figure; treated as a (target) value.
+  static const maxRetryWaitSeconds = ConfigKey<int>(
+    'auth.maxRetryWaitSeconds',
+    86400,
+    requirementIds: ['ACC-01'],
+    min: 60,
+  );
+
   static const List<ConfigKey<Object>> all = [
     minTouchTargetDp,
     cookMinTouchTargetDp,
@@ -129,6 +139,7 @@ abstract final class ConfigKeys {
     planTabEnabled,
     apiRequestTimeoutMs,
     googleSignInEnabled,
+    maxRetryWaitSeconds,
   ];
 }
 

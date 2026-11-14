@@ -13,6 +13,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:keluargamakan/app/shell/app_shell.dart';
 import 'package:keluargamakan/core/api/api_client.dart';
+import 'package:keluargamakan/data/family_profiles_state.dart';
 import 'package:keluargamakan/features/auth/name_screen.dart';
 import 'package:keluargamakan/features/auth/sign_in_screen.dart';
 import 'package:keluargamakan/features/auth/startup_screen.dart';
@@ -388,43 +389,61 @@ void main() {
     });
   });
 
-  testWidgets('ACC-01 DAT-08 no phone number, email or code reaches the logs '
-      'or storage during sign-in', (tester) async {
-    final logs = <String>[];
-    final original = debugPrint;
-    debugPrint = (message, {wrapWidth}) {
-      if (message != null) logs.add(message);
-    };
-    try {
-      final phone = newPhone();
-      await pumpPhone(tester, server: server, phone: phone);
-      await tapKey(tester, 'welcome.haveAccount');
-      await tapKey(tester, 'signIn.phone');
-      await enterText(tester, 'contact.field', _phoneTyped);
-      await tapKey(tester, 'contact.send');
-      await enterText(tester, 'code.field', '000000');
-      await enterText(tester, 'code.field', fixtureCode);
-      await createHousehold(tester, 'Ibu');
-      expect(find.byType(HomeScreen), findsOneWidget);
+  for (final email in [false, true]) {
+    final channel = email ? 'email' : 'phone';
+    testWidgets('ACC-01 DAT-08 no phone number, email or code reaches the '
+        'logs or any stored table during $channel sign-in', (tester) async {
+      final logs = <String>[];
+      final original = debugPrint;
+      debugPrint = (message, {wrapWidth}) {
+        if (message != null) logs.add(message);
+      };
+      try {
+        final phone = newPhone();
+        final container = await pumpPhone(tester, server: server, phone: phone);
+        await tapKey(tester, 'welcome.haveAccount');
+        await tapKey(tester, email ? 'signIn.email' : 'signIn.phone');
+        await enterText(
+          tester,
+          'contact.field',
+          email ? 'nama@contoh.com' : _phoneTyped,
+        );
+        await tapKey(tester, 'contact.send');
+        await enterText(tester, 'code.field', '000000');
+        await enterText(tester, 'code.field', fixtureCode);
+        await createHousehold(tester, 'Ibu');
+        expect(find.byType(HomeScreen), findsOneWidget);
+        // Touch the other account paths too: the family cache and the
+        // masked "Masuk sebagai" in Settings.
+        await container.read(familyProfilesProvider.notifier).reload();
+        await tester.tap(find.byTooltip('Pengaturan'));
+        await tester.pumpAndSettle();
+        expect(find.textContaining('Masuk sebagai'), findsOneWidget);
 
-      const secrets = [
-        '81234567890',
-        '0812',
-        fixtureCode,
-        '000000',
-        'nama@contoh.com',
-      ];
-      final settings = await phone.db.select(phone.db.settings).get();
-      final stored = [
-        ...logs,
-        for (final row in settings) '${row.key}=${row.value}',
-        jsonEncode((await phone.tokens.read())!.toJson()),
-      ].join('\n');
-      for (final secret in secrets) {
-        expect(stored, isNot(contains(secret)), reason: secret);
+        const secrets = [
+          '81234567890',
+          '0812 3456',
+          fixtureCode,
+          '000000',
+          'nama@contoh.com',
+          'nama@',
+        ];
+        final rows = <String>[
+          for (final table in phone.db.allTables)
+            for (final row in await phone.db.select(table).get()) '$row',
+        ];
+        final stored = [
+          ...logs,
+          ...rows,
+          jsonEncode((await phone.tokens.read())!.toJson()),
+        ].join(' | ');
+        expect(rows, isNotEmpty, reason: 'the tables were written');
+        for (final secret in secrets) {
+          expect(stored, isNot(contains(secret)), reason: secret);
+        }
+      } finally {
+        debugPrint = original;
       }
-    } finally {
-      debugPrint = original;
-    }
-  });
+    });
+  }
 }

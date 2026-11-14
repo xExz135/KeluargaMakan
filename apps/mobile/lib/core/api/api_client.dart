@@ -17,6 +17,7 @@ import 'package:keluargamakan_api/api.dart' as api;
 import '../config/app_config.dart';
 import '../config/config_keys.dart';
 import '../storage/app_database.dart';
+import '../storage/key_value_store.dart';
 import '../time/household_time.dart';
 import 'api_problem.dart';
 import 'api_result.dart';
@@ -95,6 +96,7 @@ final sessionManagerProvider = Provider<SessionManager>((ref) {
     refresh: (refreshToken) => refreshApi.refreshSessionWithHttpInfo(
       api.SessionRefresh(refreshToken: refreshToken),
     ),
+    revocation: KeyValueRevocationMarker(ref.watch(keyValueStoreProvider)),
   );
   // Shared phones: when the session ends, the household's cached data goes
   // with it (contract-alignment.md 5, `refresh_token_invalid`).
@@ -106,6 +108,44 @@ final sessionManagerProvider = Provider<SessionManager>((ref) {
   ref.onDispose(manager.dispose);
   return manager;
 });
+
+/// The revocation marker in the app's settings table, which lives apart from
+/// the encrypted token store (security review T-027 L4).
+final class KeyValueRevocationMarker implements SessionRevocationMarker {
+  KeyValueRevocationMarker(this._store);
+
+  final KeyValueStore _store;
+
+  @override
+  bool get isSet => _store.getString(PreferenceKeys.sessionRevoked) != null;
+
+  @override
+  Future<void> set() => _store.setString(PreferenceKeys.sessionRevoked, '1');
+
+  @override
+  Future<void> clear() => _store.remove(PreferenceKeys.sessionRevoked);
+}
+
+/// The signed-in account, or null when signed out (security review T-027
+/// M1). Every provider that holds one household's data in memory (names,
+/// hard rules, consent, kitchen, anything from a household endpoint) must
+/// `ref.watch` this, so it is rebuilt empty the moment the session ends or
+/// another account signs in.
+final class CurrentAccountId extends Notifier<String?> {
+  @override
+  String? build() {
+    final session = ref.watch(sessionManagerProvider);
+    final sub = session.accountChanges.listen((id) {
+      if (id != state) state = id;
+    });
+    ref.onDispose(sub.cancel);
+    return session.current?.accountId;
+  }
+}
+
+final currentAccountIdProvider = NotifierProvider<CurrentAccountId, String?>(
+  CurrentAccountId.new,
+);
 
 final apiClientProvider = Provider<api.ApiClient>((ref) {
   final env = ref.watch(apiEnvironmentProvider);

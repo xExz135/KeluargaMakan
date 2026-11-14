@@ -42,6 +42,7 @@ void main() {
         'nav.planTabEnabled',
         'api.requestTimeoutMs',
         'auth.googleSignInEnabled',
+        'auth.maxRetryWaitSeconds',
       ]);
     });
 

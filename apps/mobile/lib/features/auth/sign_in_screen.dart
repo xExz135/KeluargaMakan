@@ -18,7 +18,6 @@ import '../../core/api/api_result.dart';
 import '../../core/config/app_config.dart';
 import '../../core/config/config_keys.dart';
 import '../../core/theme/tokens.dart';
-import '../../data/repositories/auth_repository.dart';
 import '../../l10n/generated/app_localizations.dart';
 import 'app_entry.dart';
 import 'auth_routes.dart';
@@ -63,13 +62,13 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
         return;
       case GoogleIdToken(:final idToken):
         final result = await ref
-            .read(authRepositoryProvider)
+            .read(appEntryProvider.notifier)
             .signInWithGoogle(idToken);
         if (!mounted) return;
         setState(() => _googleBusy = false);
         switch (result) {
-          case Ok(:final value):
-            ref.read(appEntryProvider.notifier).signedIn(value);
+          case Ok():
+            break;
           case Err(failure: NetworkFailure()):
             _snack(l10n.onboardingWelcomeOffline);
           case Err(:final failure)

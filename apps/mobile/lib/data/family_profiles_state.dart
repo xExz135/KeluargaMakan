@@ -8,9 +8,14 @@
 // - [FamilyLoadFailed]: anything else, including a payload this app version
 //   cannot decode. Nothing is shown from it.
 // - [FamilyLoaded] from the cache: names only, every member [RulesNotLoaded].
+//
+// The state belongs to one account: it is rebuilt empty when the session
+// ends or another account signs in (currentAccountIdProvider, security
+// review T-027 M1), and an answer for the previous account is dropped.
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../core/api/api_client.dart';
 import '../core/api/api_result.dart';
 import 'models/family.dart';
 import 'repositories/profiles_repository.dart';
@@ -51,11 +56,16 @@ FamilyProfilesState familyStateFrom(ApiResult<FamilyProfiles> result) =>
 final class FamilyProfilesController extends Notifier<FamilyProfilesState> {
   @override
   FamilyProfilesState build() {
-    Future.microtask(reload);
+    final account = ref.watch(currentAccountIdProvider);
+    // A load still running for the previous account must not be joined.
+    _loading = null;
+    _generation++;
+    if (account != null) Future.microtask(reload);
     return const FamilyLoading();
   }
 
   Future<void>? _loading;
+  int _generation = 0;
 
   /// Loads the profiles. A reload asked for while one is running joins it,
   /// so an older answer can never overwrite a newer state.
@@ -63,9 +73,11 @@ final class FamilyProfilesController extends Notifier<FamilyProfilesState> {
       _loading ??= _load().whenComplete(() => _loading = null);
 
   Future<void> _load() async {
+    if (ref.read(currentAccountIdProvider) == null) return;
+    final generation = _generation;
     state = const FamilyLoading();
     final result = await ref.read(profilesRepositoryProvider).listProfiles();
-    if (!ref.mounted) return;
+    if (!ref.mounted || generation != _generation) return;
     state = familyStateFrom(result);
   }
 }

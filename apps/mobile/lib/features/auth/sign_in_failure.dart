@@ -2,10 +2,13 @@
 // (contract-alignment.md 5; ACC-01). Text comes from the error code only.
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:keluargamakan_api/api.dart' as api;
 
 import '../../core/api/api_problem.dart';
 import '../../core/api/api_result.dart';
+import '../../core/config/app_config.dart';
+import '../../core/config/config_keys.dart';
 import '../../l10n/generated/app_localizations.dart';
 import 'widgets/onboarding_scaffold.dart';
 
@@ -51,15 +54,25 @@ enum SignInProblem {
   };
 }
 
-/// How long to wait after a 429: `retryAfterSeconds` or `Retry-After`, and
-/// one minute when the answer had neither.
-Duration retryWait(ApiFailure failure) {
+/// How long to wait after a 429: `retryAfterSeconds` or `Retry-After`, one
+/// minute when the answer had neither, and never more than [max]
+/// (`auth.maxRetryWaitSeconds`), so a huge value cannot overflow or throw
+/// (security review T-027 L3).
+Duration retryWait(ApiFailure failure, Duration max) {
   final seconds = switch (failure) {
     ProblemFailure(:final problem) => problem.retryAfterSeconds,
     _ => null,
   };
-  return Duration(seconds: seconds == null || seconds <= 0 ? 60 : seconds);
+  if (seconds == null || seconds <= 0) {
+    return max.inSeconds < 60 ? max : const Duration(seconds: 60);
+  }
+  return seconds >= max.inSeconds ? max : Duration(seconds: seconds);
 }
+
+/// The configured cap on 429 waits.
+Duration maxRetryWait(WidgetRef ref) => Duration(
+  seconds: ref.read(appConfigProvider).get(ConfigKeys.maxRetryWaitSeconds),
+);
 
 /// Guards the resend countdown against a phone clock that is far behind the
 /// server's: the server still refuses an early resend with 429.

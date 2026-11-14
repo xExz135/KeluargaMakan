@@ -29,15 +29,32 @@ enum SessionEndReason {
 }
 
 /// Reported on [SessionManager.ended] when the session ended but local user
-/// data could not be removed. The data stays unreadable: the cache is bound
-/// to the account that owned it.
+/// data, or the stored tokens, could not be removed. Cached data stays
+/// unreadable (the cache is bound to the account that owned it), and tokens
+/// that could not be removed are not trusted at the next start
+/// ([SessionRevocationMarker]).
 final class SessionDataNotCleared implements Exception {
-  const SessionDataNotCleared(this.reason);
+  const SessionDataNotCleared(this.reason, {this.tokensRemoved = true});
 
   final SessionEndReason reason;
 
+  /// False when the token store could not be cleared.
+  final bool tokensRemoved;
+
   @override
-  String toString() => 'SessionDataNotCleared(${reason.name})';
+  String toString() =>
+      'SessionDataNotCleared(${reason.name}, tokensRemoved: $tokensRemoved)';
+}
+
+/// Remembers, outside the token store, that the stored session was ended
+/// (security review T-027 L4). Set before the tokens are removed and cleared
+/// after; while it is set, stored tokens are never used.
+abstract interface class SessionRevocationMarker {
+  bool get isSet;
+
+  Future<void> set();
+
+  Future<void> clear();
 }
 
 /// Sends `POST /v1/auth/refresh` with [refreshToken], without a bearer token.
@@ -79,11 +96,20 @@ final class RefreshFailed extends RefreshOutcome {
 }
 
 final class SessionManager {
-  SessionManager({required this._store, required this._refresh});
+  SessionManager({
+    required this._store,
+    required this._refresh,
+    this._revocation,
+  });
 
   final TokenStore _store;
   final RefreshCall _refresh;
+  final SessionRevocationMarker? _revocation;
   final _ended = StreamController<SessionEndReason>.broadcast();
+
+  // Synchronous, so providers holding one account's data reset before
+  // anything else runs for the next account (security review T-027 M1).
+  final _accounts = StreamController<String?>.broadcast(sync: true);
   final List<Future<void> Function(SessionEndReason)> _endHandlers = [];
 
   SessionTokens? _tokens;
@@ -102,31 +128,61 @@ final class SessionManager {
   void addEndHandler(Future<void> Function(SessionEndReason) handler) =>
       _endHandlers.add(handler);
 
-  /// Reads the stored session at startup.
-  Future<void> load() async => _tokens = await _store.read();
+  /// The signed-in account ID on every change: load, sign-in, end. Null when
+  /// signed out. Delivered synchronously.
+  Stream<String?> get accountChanges => _accounts.stream;
+
+  /// Reads the stored session at startup. A session that was ended but whose
+  /// tokens could not be removed is not used: removal is tried again, and
+  /// the phone starts signed out either way.
+  Future<void> load() async {
+    final revocation = _revocation;
+    if (revocation != null && revocation.isSet) {
+      _tokens = null;
+      if (await _tryTwice(_store.clear)) await _tryTwice(revocation.clear);
+    } else {
+      _tokens = await _store.read();
+    }
+    _accounts.add(_tokens?.accountId);
+  }
 
   /// Starts a session after sign-in.
   Future<void> start(SessionTokens tokens) async {
     _tokens = tokens;
+    _accounts.add(tokens.accountId);
     await _store.write(tokens);
+    final revocation = _revocation;
+    // If this fails, the next start signs out: safe, never the reverse.
+    if (revocation != null && revocation.isSet) {
+      await _tryTwice(revocation.clear);
+    }
   }
 
   /// Ends the session. Local user data is removed first, then the tokens,
   /// so a crash in between leaves a signed-in phone that refetches, never a
   /// signed-out phone with someone's household on it (security review M2).
+  /// The revocation marker is set before the tokens are removed, so tokens
+  /// that cannot be removed are not used at the next start (T-027 L4).
   ///
-  /// Returns false when removing local data failed. The session is ended
-  /// anyway, and the failure is reported on [ended].
+  /// Never throws. Returns false when removing local data or the tokens
+  /// failed. The session is ended anyway, and the failure is reported on
+  /// [ended].
   Future<bool> end(SessionEndReason reason) async {
     final cleared = await clearLocalData(reason);
     _tokens = null;
-    await _store.clear();
-    if (cleared) {
+    _accounts.add(null);
+    final revocation = _revocation;
+    final marked = revocation != null && await _tryTwice(revocation.set);
+    final tokensRemoved = await _tryTwice(_store.clear);
+    if (tokensRemoved && marked) await _tryTwice(revocation.clear);
+    if (cleared && tokensRemoved) {
       _ended.add(reason);
     } else {
-      _ended.addError(SessionDataNotCleared(reason));
+      _ended.addError(
+        SessionDataNotCleared(reason, tokensRemoved: tokensRemoved),
+      );
     }
-    return cleared;
+    return cleared && tokensRemoved;
   }
 
   /// Runs the end handlers without ending the session. Sign-out calls this
@@ -226,5 +282,8 @@ final class SessionManager {
     }
   }
 
-  Future<void> dispose() => _ended.close();
+  Future<void> dispose() async {
+    await _ended.close();
+    await _accounts.close();
+  }
 }

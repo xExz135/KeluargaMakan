@@ -100,15 +100,15 @@ class _CodeEntryState extends ConsumerState<CodeEntryScreen> with SecondTicker {
     final code = _code.text;
     if (_verifying || _inputBlocked || code.length != draft.codeLength) return;
     setState(() => _verifying = true);
+    // The controller completes the sign-in even if this screen is gone by
+    // the time the answer arrives (security review T-027 L1).
     final result = await ref
-        .read(authRepositoryProvider)
-        .verifySignInCode(challengeId: draft.challenge.challengeId, code: code);
+        .read(appEntryProvider.notifier)
+        .verifyCode(challengeId: draft.challenge.challengeId, code: code);
     if (!mounted) return;
     switch (result) {
-      case Ok(:final value):
+      case Ok():
         _code.clear();
-        ref.read(appEntryProvider.notifier).signedIn(value);
-        ref.read(signInDraftProvider.notifier).clear();
       case Err(:final failure):
         final problem = SignInProblem.of(failure);
         setState(() {
@@ -123,7 +123,9 @@ class _CodeEntryState extends ConsumerState<CodeEntryScreen> with SecondTicker {
               _code.clear();
             case SignInProblem.tooMany:
               _problem = problem;
-              _verifyBlockedUntil = now().add(retryWait(failure));
+              _verifyBlockedUntil = now().add(
+                retryWait(failure, maxRetryWait(ref)),
+              );
               _code.clear();
               startTicking();
             case SignInProblem.unavailable ||
@@ -171,7 +173,9 @@ class _CodeEntryState extends ConsumerState<CodeEntryScreen> with SecondTicker {
         case Err(:final failure):
           final problem = SignInProblem.of(failure);
           if (problem == SignInProblem.tooMany) {
-            _resendBlockedUntil = now().add(retryWait(failure));
+            _resendBlockedUntil = now().add(
+              retryWait(failure, maxRetryWait(ref)),
+            );
           }
           _problem = problem == SignInProblem.invalidInput
               ? SignInProblem.generic
@@ -211,6 +215,35 @@ class _CodeEntryState extends ConsumerState<CodeEntryScreen> with SecondTicker {
       resendLabel = l10n.onboardingCodeResendIn(resendSeconds);
     }
 
+    // Leaving while the code is checked would hide a sign-in that is about
+    // to complete (security review T-027 L1).
+    return PopScope(
+      canPop: !_verifying,
+      child: _content(
+        context,
+        draft: draft,
+        l10n: l10n,
+        theme: theme,
+        resendLabel: resendLabel,
+        resendSeconds: resendSeconds,
+        waitSeconds: waitSeconds,
+        problem: problem,
+        complete: complete,
+      ),
+    );
+  }
+
+  Widget _content(
+    BuildContext context, {
+    required SignInDraft draft,
+    required AppLocalizations l10n,
+    required ThemeData theme,
+    required String resendLabel,
+    required int resendSeconds,
+    required int waitSeconds,
+    required SignInProblem? problem,
+    required bool complete,
+  }) {
     return OnboardingScaffold(
       title: l10n.onboardingCodeTitle,
       bottom: [
@@ -251,14 +284,18 @@ class _CodeEntryState extends ConsumerState<CodeEntryScreen> with SecondTicker {
           kind: OnboardingButtonKind.outlined,
           label: resendLabel,
           loadingLabel: _resending ? l10n.commonLoading : null,
-          onPressed: resendSeconds > 0 ? null : () => _resend(draft),
+          onPressed: resendSeconds > 0 || _verifying
+              ? null
+              : () => _resend(draft),
         ),
         const SizedBox(height: SpacingTokens.s),
         OnboardingButton(
           key: const Key('code.change'),
           kind: OnboardingButtonKind.text,
           label: l10n.onboardingCodeChange,
-          onPressed: () => context.go(AuthRoutes.contact(widget.channel)),
+          onPressed: _verifying
+              ? null
+              : () => context.go(AuthRoutes.contact(widget.channel)),
         ),
       ],
     );
