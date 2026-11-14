@@ -8,6 +8,7 @@ import 'package:keluargamakan/core/api/api_error_text.dart';
 import 'package:keluargamakan/core/api/api_problem.dart';
 import 'package:keluargamakan/core/api/api_result.dart';
 import 'package:keluargamakan/l10n/generated/app_localizations.dart';
+import 'package:keluargamakan_api/api.dart' as api;
 
 String _body(Map<String, Object?> json) => jsonEncode({
   'type': 'urn:keluargamakan:problem:x',
@@ -25,6 +26,41 @@ void main() {
       expect(p.code, ApiErrorCode.profileLimitReached);
       expect(p.status, 409);
       expect(p.requestId, 'req-9');
+    });
+
+    test('SET-03 every contract ErrorCode is known to the app (contract '
+        '0.1.2)', () {
+      for (final code in api.ErrorCode.values) {
+        expect(
+          ApiErrorCode.fromWire(code.toJson()).wire,
+          code.toJson(),
+          reason: code.toJson(),
+        );
+      }
+    });
+
+    test('SET-03 consent_changed and manager_profile_must_be_adult get their '
+        'own failure types', () {
+      expect(
+        ProblemFailure.of(
+          ApiProblem.parse(409, _body({'code': 'consent_changed'})),
+        ),
+        isA<ConsentChangedFailure>(),
+      );
+      expect(
+        ProblemFailure.of(
+          ApiProblem.parse(
+            409,
+            _body({'code': 'manager_profile_must_be_adult'}),
+          ),
+        ),
+        isA<ManagerProfileMustBeAdultFailure>(),
+      );
+      final plain = ProblemFailure.of(
+        ApiProblem.parse(409, _body({'code': 'consent_required'})),
+      );
+      expect(plain, isNot(isA<ConsentChangedFailure>()));
+      expect(plain, isNot(isA<ManagerProfileMustBeAdultFailure>()));
     });
 
     test('ACC-01 an unknown code maps to internal_error', () {

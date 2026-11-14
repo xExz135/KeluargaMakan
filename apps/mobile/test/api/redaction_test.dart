@@ -7,6 +7,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
+import 'package:keluargamakan/core/api/api_problem.dart';
 import 'package:keluargamakan/core/api/api_result.dart';
 import 'package:keluargamakan/core/api/session_manager.dart';
 import 'package:keluargamakan/data/decoders.dart';
@@ -80,6 +81,30 @@ void main() {
     expectClean(Ok(decodeHousehold(householdJson())));
     expectClean(const Err<Object>(DecodeFailure('listProfiles')));
     expect(Ok(member).toString(), 'Ok<FamilyMember>');
+  });
+
+  test('DAT-08 consent models and failures (contract 0.1.2) print no '
+      'secrets', () {
+    final renewal = decodeProfile(
+      profileJson(
+        name: 'Nenek Rahasia',
+        rules: rulesJson(
+          renewalRequired: true,
+          items: [freeTextRuleJson(_secretRule)],
+        ),
+      ),
+    );
+    expectClean(renewal);
+    expectClean(renewal.rules);
+    expectClean(renewal.rules.consentSnapshot!);
+    expect(renewal.rules.toString(), 'RulesSaved(1 rules, renewal required)');
+    final problem = ApiProblem.parse(
+      409,
+      '{"code":"consent_changed","detail":"$_secretRule","requestId":"r"}',
+    );
+    expectClean(ConsentChangedFailure(problem));
+    expectClean(Err<Object>(ConsentChangedFailure(problem)));
+    expectClean(ManagerProfileMustBeAdultFailure(problem));
   });
 
   test('DAT-08 log calls in lib/ interpolate only the operation name and '

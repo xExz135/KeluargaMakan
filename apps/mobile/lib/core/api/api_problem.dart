@@ -33,6 +33,8 @@ enum ApiErrorCode {
   consentRequired('consent_required'),
   consentTextOutdated('consent_text_outdated'),
   consentNotActive('consent_not_active'),
+  consentChanged('consent_changed'),
+  managerProfileMustBeAdult('manager_profile_must_be_adult'),
   hardRuleDuplicate('hard_rule_duplicate'),
   mappingNotApplicable('mapping_not_applicable'),
   idempotencyKeyReused('idempotency_key_reused'),

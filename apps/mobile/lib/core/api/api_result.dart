@@ -13,8 +13,20 @@ sealed class ApiFailure {
 }
 
 /// The API answered with an error (`application/problem+json`).
-final class ProblemFailure extends ApiFailure {
+///
+/// Codes a screen must handle in its own way get their own subtype
+/// ([ConsentChangedFailure], [ManagerProfileMustBeAdultFailure]); use
+/// [ProblemFailure.of] to build the right one.
+base class ProblemFailure extends ApiFailure {
   const ProblemFailure(this.problem);
+
+  factory ProblemFailure.of(ApiProblem problem) => switch (problem.code) {
+    ApiErrorCode.consentChanged => ConsentChangedFailure(problem),
+    ApiErrorCode.managerProfileMustBeAdult => ManagerProfileMustBeAdultFailure(
+      problem,
+    ),
+    _ => ProblemFailure(problem),
+  };
 
   final ApiProblem problem;
 
@@ -22,6 +34,26 @@ final class ProblemFailure extends ApiFailure {
 
   @override
   String toString() => 'ProblemFailure(${problem.code.wire})';
+}
+
+/// 409 `consent_changed` (contract 0.1.2, security review T-019 M1): the
+/// member's consent moved on the server since the manager was shown it
+/// (another phone decided or withdrew). Nothing was recorded. The screen
+/// reloads the member and asks again; it never resends the same request.
+final class ConsentChangedFailure extends ProblemFailure {
+  const ConsentChangedFailure(super.problem);
+
+  @override
+  String toString() => 'ConsentChangedFailure()';
+}
+
+/// 409 `manager_profile_must_be_adult` (QUESTIONS #46): the manager's own
+/// profile cannot take an infant, child or teen age group.
+final class ManagerProfileMustBeAdultFailure extends ProblemFailure {
+  const ManagerProfileMustBeAdultFailure(super.problem);
+
+  @override
+  String toString() => 'ManagerProfileMustBeAdultFailure()';
 }
 
 /// No answer: no connection, a timeout or a TLS error.
