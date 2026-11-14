@@ -62,10 +62,25 @@ void main() {
 
   setUpAll(() => verifier = SchemaVerifier(GeneratedHelper()));
 
-  test('NFR-05 a new database matches the v1 schema dump', () async {
-    final connection = await verifier.startAt(1);
+  test('NFR-05 a new database matches the v2 schema dump', () async {
+    final connection = await verifier.startAt(2);
     final db = AppDatabase(connection);
-    await verifier.migrateAndValidate(db, 1);
+    await verifier.migrateAndValidate(db, 2);
+    await db.close();
+  });
+
+  test('NFR-05 KIT-01 a v1 database upgrades to v2 with the kitchen and '
+      'catalog tables and keeps settings', () async {
+    final v1 = await verifier.schemaAt(1);
+    v1.rawDatabase.execute(
+      "INSERT INTO settings (key, value) VALUES ('settings.locale', 'en')",
+    );
+    final db = AppDatabase(v1.newConnection());
+    await verifier.migrateAndValidate(db, 2);
+    final settings = await db.select(db.settings).get();
+    expect(settings.single.value, 'en');
+    expect(await db.select(db.cachedKitchenItems).get(), isEmpty);
+    expect(await db.select(db.cachedCatalogIngredients).get(), isEmpty);
     await db.close();
   });
 
@@ -77,13 +92,14 @@ void main() {
     await _seed(v1);
     await v1.close();
 
-    final v2 = _FutureVersion(NativeDatabase(File(path)), 2);
-    expect(await v2.select(v2.cachedHouseholds).get(), isEmpty);
-    expect(await v2.select(v2.cachedAllergens).get(), isEmpty);
-    final settings = await v2.select(v2.settings).get();
+    final v3 = _FutureVersion(NativeDatabase(File(path)), 3);
+    expect(await v3.select(v3.cachedHouseholds).get(), isEmpty);
+    expect(await v3.select(v3.cachedAllergens).get(), isEmpty);
+    expect(await v3.select(v3.cachedCatalogs).get(), isEmpty);
+    final settings = await v3.select(v3.settings).get();
     expect(settings.single.key, 'settings.locale');
     expect(settings.single.value, 'en');
-    await v2.close();
+    await v3.close();
   });
 
   test('NFR-05 a downgrade from an unknown newer schema starts '
@@ -94,16 +110,18 @@ void main() {
     await _seed(newer);
     await newer.close();
 
-    final v1 = AppDatabase(NativeDatabase(File(path)));
-    expect(await v1.select(v1.settings).get(), isEmpty);
-    expect(await v1.select(v1.cachedHouseholds).get(), isEmpty);
-    final version = await v1.customSelect('PRAGMA user_version').getSingle();
-    expect(version.read<int>('user_version'), 1);
-    await v1.close();
+    final current = AppDatabase(NativeDatabase(File(path)));
+    expect(await current.select(current.settings).get(), isEmpty);
+    expect(await current.select(current.cachedHouseholds).get(), isEmpty);
+    final version = await current
+        .customSelect('PRAGMA user_version')
+        .getSingle();
+    expect(version.read<int>('user_version'), current.schemaVersion);
+    await current.close();
   });
 
-  test('ACC-13 clearing user data removes the household and profiles but '
-      'keeps settings and public reference data', () async {
+  test('ACC-13 KIT-01 clearing user data removes the household, profiles and '
+      'kitchen but keeps settings and public reference data', () async {
     final db = AppDatabase(NativeDatabase.memory());
     await _seed(db);
     await db
@@ -122,12 +140,49 @@ void main() {
           ),
         );
 
+    await db
+        .into(db.cachedKitchens)
+        .insert(
+          CachedKitchensCompanion.insert(
+            id: const Value(1),
+            maxItems: 300,
+            cachedAt: DateTime.utc(2026, 11, 1),
+          ),
+        );
+    await db
+        .into(db.cachedKitchenItems)
+        .insert(
+          CachedKitchenItemsCompanion.insert(
+            id: 'k-1',
+            position: 0,
+            isCustom: true,
+            customName: const Value('Sambal buatan Ibu'),
+            category: 'sauces_condiments',
+            state: 'available',
+            isDefaultStaple: false,
+            changedAt: DateTime.utc(2026, 11, 1),
+            createdAt: DateTime.utc(2026, 11, 1),
+          ),
+        );
+    await db
+        .into(db.cachedCatalogs)
+        .insert(
+          CachedCatalogsCompanion.insert(
+            id: const Value(1),
+            referenceVersion: 'fx-1',
+            cachedAt: DateTime.utc(2026, 11, 1),
+          ),
+        );
+
     await db.clearUserData();
 
     expect(await db.select(db.cachedProfiles).get(), isEmpty);
     expect(await db.select(db.cachedHouseholds).get(), isEmpty);
+    expect(await db.select(db.cachedKitchens).get(), isEmpty);
+    expect(await db.select(db.cachedKitchenItems).get(), isEmpty);
     expect(await db.select(db.settings).get(), hasLength(1));
     expect(await db.select(db.cachedAllergens).get(), hasLength(1));
+    expect(await db.select(db.cachedCatalogs).get(), hasLength(1));
     await db.close();
   });
 
