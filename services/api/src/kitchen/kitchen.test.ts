@@ -527,6 +527,9 @@ for (const target of DATABASE_TARGETS) {
           { customName: "!!!", category: "staples" },
           { customName: "Bum​bu", category: "staples" },
           { customName: "x".repeat(61), category: "staples" },
+          // L1: 60 characters whose NFKC form is 18 times longer than the database key allows.
+          { customName: "ﷺ".repeat(60), category: "staples" },
+          { customName: "Bumbu ﷺ".repeat(10), category: "staples" },
           { customName: "Bumbu", ingredientId: "fx_kit_tempe" },
           {},
           { category: "staples" },

@@ -21,18 +21,32 @@ export interface KitchenItemUpdateInput {
   readonly category?: KitchenCategory;
 }
 
+/** Longest comparison key the database stores (migration 0008 `kitchen_item_custom_key_check`). */
+export const CUSTOM_KEY_MAX = 240;
+
 /**
  * KIT-05: a custom name in NFC, trimmed, without hidden or control
- * characters, and its comparison key. Reports only the pointer, never the text.
+ * characters, and its comparison key; null when the name cannot be stored.
+ * The key is NFKC-folded, which can make it much longer than the name (one
+ * compatibility character can expand to 18), so it is bounded too (security
+ * review T-030 L1). The sync (T-032) uses the same check for its
+ * `KitchenIngredientKey.customName`.
  */
-function customRef(reader: BodyReader, value: string, pointer: string): IngredientRef | null {
+export function customIngredientRef(
+  value: string,
+): Extract<IngredientRef, { kind: "custom" }> | null {
   const clean = cleanUserText(value);
-  const key = clean === null ? "" : foldName(clean);
-  if (clean === null || codePointLength(clean) > CUSTOM_NAME_MAX || key === "") {
-    reader.fail(pointer, "invalid_format");
-    return null;
-  }
+  if (clean === null || codePointLength(clean) > CUSTOM_NAME_MAX) return null;
+  const key = foldName(clean);
+  if (key === "" || codePointLength(key) > CUSTOM_KEY_MAX) return null;
   return { kind: "custom", name: clean, key };
+}
+
+/** Reports only the pointer, never the text. */
+function customRef(reader: BodyReader, value: string, pointer: string): IngredientRef | null {
+  const ref = customIngredientRef(value);
+  if (ref === null) reader.fail(pointer, "invalid_format");
+  return ref;
 }
 
 export function parseKitchenItemCreate(body: unknown): KitchenItemCreateInput {
