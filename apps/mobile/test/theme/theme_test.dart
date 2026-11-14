@@ -173,7 +173,7 @@ void main() {
         (tester) async {
           await pumpApp(
             tester,
-            deviceLocale: locale,
+            appLocale: locale,
             size: size,
             textScale: 2.0,
             platformBrightness: brightness,

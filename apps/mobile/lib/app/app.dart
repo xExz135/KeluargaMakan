@@ -23,11 +23,10 @@ class KeluargaMakanApp extends ConsumerWidget {
       theme: _light,
       darkTheme: _dark,
       themeMode: ref.watch(themeModeControllerProvider),
-      // Null follows the device language (ACC-09).
+      // Bahasa Indonesia unless the user picked English on this phone; the
+      // device language is not used (ACC-09, QUESTIONS #57).
       locale: ref.watch(localeControllerProvider),
       supportedLocales: AppLocales.supported,
-      localeListResolutionCallback: (deviceLocales, _) =>
-          AppLocales.resolve(deviceLocales),
       localizationsDelegates: const [
         AppLocalizations.delegate,
         GlobalMaterialLocalizations.delegate,
