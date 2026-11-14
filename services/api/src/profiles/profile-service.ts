@@ -687,6 +687,8 @@ export class ProfileService {
         sentiment: "dislike" as const,
       })),
     ];
+    // Security review T-030 L4: no verified dataset is 503, not "unknown ingredient".
+    if (all.some((item) => item.ref.kind === "ingredient")) this.#catalog.requireIngredients();
     const names = await this.#namesFor(all.map((item) => item.ref));
     const unknown = all.filter((item) => !names.has(`${item.ref.kind}:${item.ref.refId}`));
     if (unknown.length > 0) {
@@ -794,6 +796,7 @@ export class ProfileService {
         ? (rule.mappedIngredientIds ?? [])
         : [];
     if (mappedIds.length > 0) {
+      this.#catalog.requireIngredients();
       const known = await this.#catalog.ingredientNames(mappedIds);
       const unknown = mappedIds
         .map((id, index) => ({ id, index }))

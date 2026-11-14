@@ -14,7 +14,6 @@ import { HealthDataKeys } from "./db/health-data-keys.js";
 import { createApp } from "./http/app.js";
 import { checkStaplesInReference } from "./kitchen/staples.js";
 import { jsonLogger } from "./logger.js";
-import { VerifiedReferenceCatalog } from "./reference/catalog.js";
 import {
   referenceSourceFromEnv,
   requireReferenceOutsideDevelopment,
@@ -52,10 +51,9 @@ async function main(): Promise<void> {
     targets: targetsFromEnv(env),
     profileConfig: profileConfigFromEnv(env),
     kitchenConfig,
+    // QUESTIONS #49: the kitchen, the search, likes, dislikes and rule
+    // mappings all use this one verified dataset (createApp's default catalog).
     reference,
-    // QUESTIONS #49: likes, dislikes and rule mappings accept the same
-    // ingredients the search finds.
-    catalog: new VerifiedReferenceCatalog(reference),
     // DAT-02: no default provider; a missing or unknown KEY_PROVIDER stops startup.
     // Cloud KMS needs its client, which T-023 wires in.
     keys: new HealthDataKeys(createKeyProvider(env)),
