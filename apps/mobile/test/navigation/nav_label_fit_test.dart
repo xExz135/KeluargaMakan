@@ -88,7 +88,7 @@ void main() {
         final handle = tester.ensureSemantics();
         await pumpApp(
           tester,
-          deviceLocale: Locale(lang),
+          appLocale: Locale(lang),
           size: size,
           textScale: 2.0,
         );
@@ -101,7 +101,7 @@ void main() {
     testWidgets('INT-05 at 100% nav labels keep the full system size ($lang)', (
       tester,
     ) async {
-      await pumpApp(tester, deviceLocale: Locale(lang));
+      await pumpApp(tester, appLocale: Locale(lang));
       for (final label in _labels[lang]!) {
         final paragraph = tester.renderObject<RenderParagraph>(
           _navLabel(label),

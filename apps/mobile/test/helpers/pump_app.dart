@@ -40,6 +40,10 @@ Future<InMemoryKeyValueStore> pumpApp(
   Map<String, Object?> config = const {},
   InMemoryKeyValueStore? store,
   double devicePixelRatio = 1.0,
+
+  /// The language the user picked on this phone (ACC-09). Without it the
+  /// app is in Bahasa Indonesia whatever [deviceLocale] is.
+  Locale? appLocale,
 }) async {
   final dispatcher = tester.platformDispatcher;
   dispatcher.localesTestValue = [deviceLocale];
@@ -52,6 +56,9 @@ Future<InMemoryKeyValueStore> pumpApp(
   addTearDown(tester.view.reset);
 
   final usedStore = store ?? InMemoryKeyValueStore();
+  if (appLocale != null) {
+    await usedStore.setString(PreferenceKeys.locale, appLocale.languageCode);
+  }
   await tester.pumpWidget(
     ProviderScope(
       overrides: [

@@ -183,7 +183,7 @@ void main() {
         'Not safe',
       ];
       for (final locale in const [Locale('id'), Locale('en')]) {
-        await pumpApp(tester, deviceLocale: locale);
+        await pumpApp(tester, appLocale: locale);
         final labels = bottomLabels(tester);
         for (final label in labels) {
           await tapNav(tester, label);

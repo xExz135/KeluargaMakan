@@ -19,8 +19,9 @@ Iterable<String> _messageKeys(Map<String, Object?> arb) =>
 void main() {
   setUpAll(loadAppFonts);
 
-  group('NFR-16 ACC-09 app language follows the device', () {
-    testWidgets('NFR-16 Indonesian device shows Bahasa Indonesia', (
+  group('ACC-09 NFR-16 the app starts in Bahasa Indonesia whatever the '
+      'device language (QUESTIONS #57)', () {
+    testWidgets('ACC-09 Indonesian device shows Bahasa Indonesia', (
       tester,
     ) async {
       await pumpApp(tester, deviceLocale: const Locale('id', 'ID'));
@@ -29,8 +30,27 @@ void main() {
       expect(find.text('Masak apa hari ini?'), findsOneWidget);
     });
 
-    testWidgets('NFR-16 English device shows English', (tester) async {
+    testWidgets('ACC-09 an English device still starts in Bahasa Indonesia', (
+      tester,
+    ) async {
       await pumpApp(tester, deviceLocale: const Locale('en', 'US'));
+      expect(find.text('Beranda'), findsOneWidget);
+      expect(find.text('Home'), findsNothing);
+    });
+
+    testWidgets('ACC-09 any other device language starts in Bahasa '
+        'Indonesia', (tester) async {
+      await pumpApp(tester, deviceLocale: const Locale('ja', 'JP'));
+      expect(find.text('Beranda'), findsOneWidget);
+    });
+
+    testWidgets('ACC-09 English shows only when the user picked it on this '
+        'phone, on any device language', (tester) async {
+      await pumpApp(
+        tester,
+        deviceLocale: const Locale('id', 'ID'),
+        store: InMemoryKeyValueStore({PreferenceKeys.locale: 'en'}),
+      );
       expect(find.text('Home'), findsOneWidget);
       expect(find.text('Recipes'), findsOneWidget);
       expect(find.text('What to cook today?'), findsOneWidget);
@@ -38,24 +58,12 @@ void main() {
       expect(find.text('Dapur Saya'), findsOneWidget);
     });
 
-    testWidgets(
-      'NFR-16 any other device language falls back to Bahasa Indonesia',
-      (tester) async {
-        await pumpApp(tester, deviceLocale: const Locale('ja', 'JP'));
-        expect(find.text('Beranda'), findsOneWidget);
-      },
-    );
-
-    test('NFR-16 locale resolution: English only for English devices', () {
-      expect(
-        AppLocales.resolve(const [Locale('en', 'GB')]),
-        AppLocales.english,
-      );
-      expect(AppLocales.resolve(const [Locale('id')]), AppLocales.indonesian);
-      expect(AppLocales.resolve(const [Locale('jv')]), AppLocales.indonesian);
-      expect(AppLocales.resolve(const []), AppLocales.indonesian);
-      expect(AppLocales.resolve(null), AppLocales.indonesian);
+    test('ACC-09 the fallback language is Bahasa Indonesia and listed '
+        'first', () {
+      expect(AppLocales.fallback, AppLocales.indonesian);
       expect(AppLocales.supported.first, AppLocales.indonesian);
+      expect(AppLocales.fromCode('en'), AppLocales.english);
+      expect(AppLocales.fromCode('jv'), isNull);
     });
   });
 
@@ -83,7 +91,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Home'), findsOneWidget);
 
-      // A fresh start on an Indonesian device keeps the choice.
+      // A fresh start keeps the choice.
       await tester.pumpWidget(const SizedBox());
       await pumpApp(tester, store: store);
       expect(find.text('Home'), findsOneWidget);
