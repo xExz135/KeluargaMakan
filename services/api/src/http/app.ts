@@ -20,6 +20,7 @@ import { ConsentController, ConsentTextController } from "../consent/consent.con
 import { ConsentService } from "../consent/consent-service.js";
 import type { SqlExecutor } from "../db/executor.js";
 import type { HealthDataKeys } from "../db/health-data-keys.js";
+import { HealthController } from "../health/health.controller.js";
 import { HouseholdService } from "../households/household-service.js";
 import { KitchenController } from "../kitchen/kitchen.controller.js";
 import { KitchenService } from "../kitchen/kitchen-service.js";
@@ -35,6 +36,7 @@ import {
   ACCOUNT_READER,
   AUTH_SERVICE,
   CONSENT_SERVICE,
+  HEALTH_CHECKS,
   HOUSEHOLD_SERVICE,
   KITCHEN_CONFIG,
   KITCHEN_SERVICE,
@@ -93,6 +95,7 @@ export const CONTROLLERS = Object.freeze([
   ReferenceController,
   ProfilesController,
   KitchenController,
+  HealthController,
 ] as const);
 
 /** Request bodies in this API are small JSON documents. */
@@ -196,6 +199,7 @@ export async function createApp(deps: AppDeps): Promise<NestFastifyApplication> 
       { provide: KITCHEN_SERVICE, useValue: kitchenService },
       { provide: KITCHEN_CONFIG, useValue: kitchenConfig },
       { provide: REFERENCE_SOURCE, useValue: reference },
+      { provide: HEALTH_CHECKS, useValue: { db: deps.db, reference } },
       { provide: ACCOUNT_READER, useValue: { read: (id: string) => readAccount(deps.db, id) } },
     ],
   })

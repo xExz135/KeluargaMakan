@@ -611,7 +611,9 @@ for (const target of DATABASE_TARGETS) {
         });
         expect(() => checkStaplesInReference(wrong, reference)).toThrow(/fx_kit_tidak_ada/);
         expect(() => checkStaplesInReference(staples, reference)).not.toThrow();
-        expect(() => checkStaplesInReference(wrong, unavailableReference)).not.toThrow();
+        expect(() => checkStaplesInReference(wrong, unavailableReference)).toThrow(
+          /cannot be checked/,
+        );
       });
     });
 

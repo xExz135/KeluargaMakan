@@ -15,7 +15,10 @@ import { createApp } from "./http/app.js";
 import { checkStaplesInReference } from "./kitchen/staples.js";
 import { jsonLogger } from "./logger.js";
 import { VerifiedReferenceCatalog } from "./reference/catalog.js";
-import { referenceSourceFromEnv } from "./reference/reference-data.js";
+import {
+  referenceSourceFromEnv,
+  requireReferenceOutsideDevelopment,
+} from "./reference/reference-data.js";
 
 /**
  * Starts the API. Configuration comes from the environment (see
@@ -34,10 +37,12 @@ async function main(): Promise<void> {
       "TRUST_PROXY is no longer read; set TRUSTED_PROXY_CIDRS to the load balancer ranges",
     );
   }
-  // DAT-06, SAF-13: the verified reference dataset. When it is missing or
-  // fails verification the API still starts, and the catalog routes and
-  // reference-ingredient writes answer 503 (fail closed).
+  // DAT-06, SAF-13: the verified reference dataset. Outside local and test
+  // the API refuses to start without it (security review T-030 L2). In local
+  // and test it starts, and the catalog routes and reference-ingredient
+  // writes answer 503 (fail closed).
   const reference = referenceSourceFromEnv(env, jsonLogger);
+  requireReferenceOutsideDevelopment(reference, env["APP_ENV"]);
   const kitchenConfig = kitchenConfigFromEnv(env);
   checkStaplesInReference(kitchenConfig, reference);
   const pool = new pg.Pool({ connectionString: databaseUrl });

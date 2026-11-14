@@ -5,6 +5,7 @@ import {
 } from "@keluargamakan/reference-data";
 
 import { ApiError } from "../api-error.js";
+import { isDevelopmentEnv } from "../app-env.js";
 import type { ApiLogger } from "../logger.js";
 import { CatalogFormatError, IngredientCatalog } from "./ingredient-catalog.js";
 
@@ -64,6 +65,25 @@ export function referenceSourceFromEnv(
     }
     logger.error("reference_data_unavailable", { error: error.name, reason: error.message });
     return unavailableReference;
+  }
+}
+
+/**
+ * Security review T-030 L2: outside local development and tests the API
+ * does not start without a verified dataset, so a wrong pin or a broken
+ * content update fails the deploy loudly instead of serving a kitchen where
+ * no reference ingredient can be added. Local and test keep starting, with
+ * the catalog routes answering 503 and `/health/ready` not ready.
+ */
+export function requireReferenceOutsideDevelopment(
+  reference: ReferenceSource,
+  appEnv: string | undefined,
+): void {
+  if (reference.current() === null && !isDevelopmentEnv(appEnv)) {
+    throw new Error(
+      "no verified reference dataset is loaded (REFERENCE_DATA_PATH, REFERENCE_DATA_SHA256); " +
+        "it is required outside APP_ENV local and test",
+    );
   }
 }
 
