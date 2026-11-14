@@ -190,6 +190,40 @@ void main() {
     );
   });
 
+  testWidgets('ACC-13 KIT-02 a toggle that meets an ended session (401, '
+      'refresh refused) signs out, clears the copy and sends nothing more', (
+    tester,
+  ) async {
+    late String id;
+    final a = await openKitchen(
+      tester,
+      server,
+      seed: (account) => id =
+          server.seedKitchenItem(account, ingredientId: 'fx_kit_tempe')['id']!
+              as String,
+    );
+    server.intercept = (r) => switch (r.url.path) {
+      '/v1/auth/refresh' => FakeServer.problem('refresh_token_invalid', 401),
+      final p when p.startsWith('/v1/household/kitchen') => FakeServer.problem(
+        'access_token_expired',
+        401,
+      ),
+      _ => null,
+    };
+    await tester.tap(itemToggle(id));
+    await tester.pumpAndSettle();
+    expect(find.text('Silakan masuk lagi'), findsOneWidget);
+    expect(await a.phone.tokens.read(), isNull);
+    expect(a.container.read(kitchenProvider), isA<KitchenLoading>());
+    expect(
+      await a.phone.db.select(a.phone.db.cachedKitchenItems).get(),
+      isEmpty,
+    );
+    final patches = requestsTo(server, 'PATCH', id);
+    // The first try and its one retry after the refresh attempt, no more.
+    expect(patches.length, lessThanOrEqualTo(2));
+  });
+
   testWidgets('DAT-08 KIT-04 no custom names or search queries reach the logs '
       'or a URL, even on failures', (tester) async {
     final logs = <String>[];
