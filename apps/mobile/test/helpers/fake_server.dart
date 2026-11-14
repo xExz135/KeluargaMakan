@@ -24,6 +24,7 @@ import 'package:keluargamakan/core/time/clock.dart';
 import 'package:keluargamakan/data/session_restore.dart';
 import 'package:keluargamakan/features/auth/google_id_token.dart';
 
+import 'api_fixtures.dart' show profileJson;
 import 'pump_app.dart';
 
 /// The fixture code every challenge accepts unless [FakeServer.code] says
@@ -57,6 +58,14 @@ final class FakeServer {
   /// Answers a request before the normal handling, when it returns non-null.
   http.Response? Function(http.Request request)? intercept;
 
+  /// Paths whose answer is held back this long (a slow network).
+  final Map<String, Duration> delays = {};
+
+  /// The family list each account gets from `GET /v1/household/profiles`,
+  /// contract-shaped (helpers/api_fixtures.dart). Missing: the manager only,
+  /// without rules.
+  final Map<String, List<Map<String, Object?>>> profilesByAccount = {};
+
   /// Every request received, in order.
   final List<http.Request> requests = [];
 
@@ -84,10 +93,29 @@ final class FakeServer {
 
   Future<http.Response> handle(http.Request request) async {
     requests.add(request);
+    final delay = delays[request.url.path];
+    if (delay != null) await Future<void>.delayed(delay);
     final intercepted = intercept?.call(request);
     if (intercepted != null) return intercepted;
     final path = request.url.path;
     switch ((request.method, path)) {
+      case ('GET', '/v1/household/profiles'):
+        final account = _account(request);
+        if (account == null) return problem('unauthenticated', 401);
+        if (!_householdNameByAccount.containsKey(account)) {
+          return problem('household_required', 409);
+        }
+        return json({
+          'items':
+              profilesByAccount[account] ??
+              [
+                profileJson(
+                  id: 'p-$account',
+                  name: _householdNameByAccount[account]!,
+                ),
+              ],
+          'maxProfiles': 12,
+        });
       case ('POST', '/v1/auth/code/request'):
         return _requestCode(request);
       case ('POST', '/v1/auth/code/verify'):
@@ -255,14 +283,32 @@ final class FakeServer {
 }
 
 /// One phone: its own token store, database and preferences.
+/// A token store whose [clear] can be made to fail, like a Keystore error.
+final class FlakyTokenStore implements TokenStore {
+  final _inner = InMemoryTokenStore();
+  bool failClear = false;
+
+  @override
+  Future<SessionTokens?> read() => _inner.read();
+
+  @override
+  Future<void> write(SessionTokens tokens) => _inner.write(tokens);
+
+  @override
+  Future<void> clear() async {
+    if (failClear) throw StateError('keystore unavailable');
+    await _inner.clear();
+  }
+}
+
 final class TestPhone {
-  TestPhone({InMemoryKeyValueStore? store, InMemoryTokenStore? tokens})
+  TestPhone({InMemoryKeyValueStore? store, TokenStore? tokens})
     : store = store ?? InMemoryKeyValueStore(),
       tokens = tokens ?? InMemoryTokenStore(),
       db = _memoryDb();
 
   final InMemoryKeyValueStore store;
-  final InMemoryTokenStore tokens;
+  final TokenStore tokens;
   final AppDatabase db;
 
   static AppDatabase _memoryDb() {

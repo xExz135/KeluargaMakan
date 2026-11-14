@@ -7,6 +7,10 @@
 // The household and profile caches belong to one account (security review
 // M2). They are read only while that account is signed in, and are wiped
 // before another account's data is written or a new session starts.
+//
+// The same holds in memory (security review T-027 M1): anything holding
+// household data in memory must reset on a session change, by watching
+// currentAccountIdProvider.
 
 import 'package:drift/drift.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';

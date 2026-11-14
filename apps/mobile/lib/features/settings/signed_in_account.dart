@@ -6,6 +6,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:keluargamakan_api/api.dart' as api;
 
+import '../../core/api/api_client.dart';
 import '../../core/api/api_result.dart';
 import '../../data/repositories/auth_repository.dart';
 import '../auth/contact_format.dart';
@@ -25,8 +26,9 @@ String? maskedAccountContact(api.Account account) {
 final signedInAccountProvider = FutureProvider.autoDispose<String?>((
   ref,
 ) async {
+  // Rebuilt for every account (security review T-027 M1).
+  if (ref.watch(currentAccountIdProvider) == null) return null;
   final auth = ref.watch(authRepositoryProvider);
-  if (!auth.isSignedIn) return null;
   return switch (await auth.getAccount()) {
     Ok(:final value) => maskedAccountContact(value),
     Err() => null,

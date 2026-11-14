@@ -74,7 +74,17 @@ abstract final class PreferenceKeys {
   /// Random ID of this app installation (contract `DeviceInfo`).
   static const installationId = 'device.installationId';
 
-  static const Set<String> all = {locale, themeMode, installationId};
+  /// Set while a stored session must not be used: it was ended but its
+  /// tokens may not have been removed (SessionRevocationMarker). Holds only
+  /// "1", never an account ID or token.
+  static const sessionRevoked = 'session.revoked';
+
+  static const Set<String> all = {
+    locale,
+    themeMode,
+    installationId,
+    sessionRevoked,
+  };
 }
 
 /// Overridden in main() with the opened store, and in tests with

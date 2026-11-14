@@ -81,6 +81,9 @@ abstract interface class TokenStore {
   /// together, so a rotated refresh token is never stored without its pair.
   Future<void> write(SessionTokens tokens);
 
+  /// Removes the stored session. Throws when it could not be removed, so
+  /// the caller can make sure the tokens are not used again (security review
+  /// T-027 L4).
   Future<void> clear();
 }
 
@@ -108,7 +111,7 @@ final class SecureTokenStore implements TokenStore {
     try {
       raw = await _storage.read(key: _key);
     } on Object {
-      await clear();
+      await _clearQuietly();
       return null;
     }
     if (raw == null) return null;
@@ -119,7 +122,7 @@ final class SecureTokenStore implements TokenStore {
       json = null;
     }
     final tokens = SessionTokens.fromJson(json);
-    if (tokens == null) await clear();
+    if (tokens == null) await _clearQuietly();
     return tokens;
   }
 
@@ -128,11 +131,15 @@ final class SecureTokenStore implements TokenStore {
       _storage.write(key: _key, value: jsonEncode(tokens.toJson()));
 
   @override
-  Future<void> clear() async {
+  Future<void> clear() => _storage.delete(key: _key);
+
+  /// For an entry that is unreadable anyway: a failure changes nothing, as
+  /// the next read fails again and nothing is signed in.
+  Future<void> _clearQuietly() async {
     try {
-      await _storage.delete(key: _key);
+      await clear();
     } on Object {
-      // Nothing more to do: the next read fails and clears again.
+      return;
     }
   }
 }

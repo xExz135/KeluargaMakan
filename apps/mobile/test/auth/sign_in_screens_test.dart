@@ -450,7 +450,7 @@ void main() {
       expect(_body(_last(server, '/v1/auth/code/verify'))['code'], fixtureCode);
       // A new account has no household yet: O3.
       expect(find.byType(NameScreen), findsOneWidget);
-      expect(phone.tokens.writes, 1);
+      expect(await phone.tokens.read(), isNotNull);
     });
 
     testWidgets('ACC-01 a wrong code clears the boxes and asks again', (

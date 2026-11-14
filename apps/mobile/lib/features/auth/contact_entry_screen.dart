@@ -47,9 +47,22 @@ class _ContactEntryState extends ConsumerState<ContactEntryScreen>
   @override
   bool stillWaiting() => secondsUntil(_limitedUntil) > 0;
 
+  late final SignInDraftController _draft;
+
+  @override
+  void initState() {
+    super.initState();
+    _draft = ref.read(signInDraftProvider.notifier);
+  }
+
   @override
   void dispose() {
     _field.dispose();
+    // Leaving O2a (back to O2, or on to the app after sign-in) drops the
+    // number or email from memory. After the frame: providers cannot change
+    // while the tree is being torn down.
+    final draft = _draft;
+    Future.microtask(draft.clear);
     super.dispose();
   }
 
@@ -106,7 +119,7 @@ class _ContactEntryState extends ConsumerState<ContactEntryScreen>
           if (problem == SignInProblem.invalidInput) {
             _invalid = true;
           } else if (problem == SignInProblem.tooMany) {
-            _limitedUntil = now().add(retryWait(failure));
+            _limitedUntil = now().add(retryWait(failure, maxRetryWait(ref)));
             _problem = problem;
             startTicking();
           } else {
@@ -157,6 +170,9 @@ class _ContactEntryState extends ConsumerState<ContactEntryScreen>
               : null,
           autocorrect: false,
           enableSuggestions: false,
+          // The keyboard must not learn the number or email (security
+          // review T-027 L2).
+          enableIMEPersonalizedLearning: false,
           textInputAction: TextInputAction.send,
           onSubmitted: (_) => _submit(),
           onChanged: (_) {

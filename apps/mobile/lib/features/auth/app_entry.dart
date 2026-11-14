@@ -21,6 +21,7 @@ import '../../core/api/api_result.dart';
 import '../../core/api/session_manager.dart';
 import '../../data/repositories/auth_repository.dart';
 import '../../data/repositories/household_repository.dart';
+import 'sign_in_draft.dart';
 
 @immutable
 sealed class AppEntry {
@@ -135,6 +136,35 @@ final class AppEntryController extends Notifier<AppEntry> {
         : const EntryResolving(returning: true);
   }
 
+  /// Verifies a sign-in code and, when it works, moves the app on and drops
+  /// the sign-in draft, whatever happened to the screen meanwhile. The
+  /// tokens are stored by the repository either way, so the app state must
+  /// follow even if the code screen was left (security review T-027 L1).
+  Future<ApiResult<SignedIn>> verifyCode({
+    required String challengeId,
+    required String code,
+  }) async {
+    final result = await ref
+        .read(authRepositoryProvider)
+        .verifySignInCode(challengeId: challengeId, code: code);
+    if (!ref.mounted) return result;
+    if (result case Ok(:final value)) {
+      signedIn(value);
+      ref.read(signInDraftProvider.notifier).clear();
+    }
+    return result;
+  }
+
+  /// Google sign-in (ACC-02), completed here for the same reason.
+  Future<ApiResult<SignedIn>> signInWithGoogle(String idToken) async {
+    final result = await ref
+        .read(authRepositoryProvider)
+        .signInWithGoogle(idToken);
+    if (!ref.mounted) return result;
+    if (result case Ok(:final value)) signedIn(value);
+    return result;
+  }
+
   /// O3 created the household, or found it already created.
   void householdReady() => state = const EntryReady();
 
@@ -170,16 +200,28 @@ final class AppEntryController extends Notifier<AppEntry> {
     if (returning) _notices.post(EntryNotice.welcomeBack);
   }
 
-  /// Signs out on this phone (ACC-13). Works without a connection.
+  /// Signs out on this phone (ACC-13). Works without a connection. The app
+  /// moves to signed out even if something fails on the way (security
+  /// review T-027 L4); a failure is reported once.
   Future<void> signOut() async {
     _dataNotClearedReported = false;
-    final outcome = await ref.read(authRepositoryProvider).signOut();
-    // [ended] may already have moved the state; a repeat is harmless.
-    if (state is! EntrySignedOut) state = const EntrySignedOut();
+    var outcome = SignOutOutcome.localDataNotCleared;
+    try {
+      outcome = await ref.read(authRepositoryProvider).signOut();
+    } on Object {
+      // Not expected (SessionManager.end does not throw); the outcome stays
+      // "not cleared", so the user is told.
+    } finally {
+      // [ended] may already have moved the state; a repeat is harmless.
+      if (ref.mounted && state is! EntrySignedOut) {
+        state = const EntrySignedOut();
+      }
+    }
     // Removing local data can fail on the first try and work on the retry
     // inside SessionManager.end; signOut still reports it, so it is shown
     // here unless [ended] already reported it.
     await Future<void>.delayed(Duration.zero);
+    if (!ref.mounted) return;
     if (outcome == SignOutOutcome.localDataNotCleared &&
         !_dataNotClearedReported) {
       _notices.post(EntryNotice.localDataNotCleared);
