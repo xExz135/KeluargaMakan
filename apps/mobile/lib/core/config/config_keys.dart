@@ -126,6 +126,17 @@ abstract final class ConfigKeys {
     min: 60,
   );
 
+  /// Days until a member's hard rules are deleted after consent is
+  /// withdrawn, shown before the manager withdraws (SET-04, 30 days
+  /// (target)). The server sets the real date (`deletionDueBy`), which the
+  /// app shows once the withdrawal is recorded.
+  static const consentWithdrawalDeletionDays = ConfigKey<int>(
+    'consent.withdrawalDeletionDays',
+    30,
+    requirementIds: ['SET-04'],
+    min: 1,
+  );
+
   static const List<ConfigKey<Object>> all = [
     minTouchTargetDp,
     cookMinTouchTargetDp,
@@ -140,6 +151,7 @@ abstract final class ConfigKeys {
     apiRequestTimeoutMs,
     googleSignInEnabled,
     maxRetryWaitSeconds,
+    consentWithdrawalDeletionDays,
   ];
 }
 
