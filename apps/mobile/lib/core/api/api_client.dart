@@ -18,7 +18,6 @@ import '../config/app_config.dart';
 import '../config/config_keys.dart';
 import '../storage/app_database.dart';
 import '../storage/key_value_store.dart';
-import '../time/household_time.dart';
 import 'api_problem.dart';
 import 'api_result.dart';
 import 'auth_http_client.dart';
@@ -99,12 +98,10 @@ final sessionManagerProvider = Provider<SessionManager>((ref) {
     revocation: KeyValueRevocationMarker(ref.watch(keyValueStoreProvider)),
   );
   // Shared phones: when the session ends, the household's cached data goes
-  // with it (contract-alignment.md 5, `refresh_token_invalid`).
-  manager
-    ..addEndHandler((_) => ref.read(appDatabaseProvider).clearUserData())
-    ..addEndHandler(
-      (_) async => ref.read(knownHouseholdTimeZoneProvider.notifier).set(null),
-    );
+  // with it (contract-alignment.md 5, `refresh_token_invalid`). The known
+  // household time zone resets itself on the account change
+  // (KnownHouseholdTimeZone watches currentAccountIdProvider).
+  manager.addEndHandler((_) => ref.read(appDatabaseProvider).clearUserData());
   ref.onDispose(manager.dispose);
   return manager;
 });
