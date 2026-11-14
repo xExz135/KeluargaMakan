@@ -190,8 +190,17 @@ function validate(config: ApiConfig): void {
   );
   check(positiveInt(sessions.lockTimeoutMs), "lock timeout");
   check(positiveInt(retention.endedSessionDays), "ended session retention");
-  check(positiveInt(retention.idempotencyKeyHours), "idempotency retention");
+  // Security review T-019 L1: records are kept no longer than an offline
+  // queue needs; consent writes do not rely on them (precondition, M1).
+  check(
+    positiveInt(retention.idempotencyKeyHours) &&
+      retention.idempotencyKeyHours <= MAX_IDEMPOTENCY_KEY_HOURS,
+    "idempotency retention 1-72 hours",
+  );
 }
+
+/** Upper bound for `retention.idempotencyKeyHours` in every environment. */
+export const MAX_IDEMPOTENCY_KEY_HOURS = 72;
 
 /**
  * Defaults with the given values replaced. Unknown keys and invalid values

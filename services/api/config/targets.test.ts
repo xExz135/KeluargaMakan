@@ -70,6 +70,55 @@ describe("targets config", () => {
     ).toThrow(/SET-04/);
   });
 
+  it("L1 SET-08 DAT-05 every target is type- and range-checked at startup (security review T-019)", () => {
+    const refused: unknown[] = [
+      { dataManagement: { accountDeletionDays: 3650 } },
+      { dataManagement: { accountDeletionDays: 31 } },
+      { dataManagement: { accountDeletionDays: "never" } },
+      { dataManagement: { accountDeletionDays: null } },
+      { dataManagement: { safetyLogRetentionYears: -1 } },
+      { dataManagement: { safetyLogRetentionYears: 0 } },
+      { dataManagement: { safetyLogRetentionYears: 1.5 } },
+      { dataManagement: { mealHistoryRetentionYears: 50 } },
+      { notifications: { maxPerDayDefault: "2" } },
+      { serviceLevels: { backendAvailabilityMonthlyPercent: 101 } },
+      { aiCost: { monthlyLimitPerHousehold: "unlimited" } },
+      { suggestions: { latencyP90Ms: Number.POSITIVE_INFINITY } },
+    ];
+    for (const overrides of refused) {
+      expect(() => resolveTargets(overrides as never), JSON.stringify(overrides)).toThrow(
+        /must be (a whole number|a number)/,
+      );
+    }
+    expect(() => resolveTargets({ dataManagement: { accountDeletionDays: 3650 } })).toThrow(
+      /SET-08/,
+    );
+    expect(() => resolveTargets({ dataManagement: { safetyLogRetentionYears: -1 } })).toThrow(
+      /DAT-05/,
+    );
+    // Allowed values within the ranges, including null where the SRS leaves it open.
+    const ok = resolveTargets({
+      dataManagement: { accountDeletionDays: 7, safetyLogRetentionYears: 3 },
+      serviceLevels: { backendAvailabilityMonthlyPercent: 99.9 },
+      aiCost: { monthlyLimitPerHousehold: 100 },
+    });
+    expect(ok.dataManagement.accountDeletionDays.value).toBe(7);
+    expect(
+      resolveTargets({ aiCost: { monthlyLimitPerHousehold: null } }).aiCost.monthlyLimitPerHousehold
+        .value,
+    ).toBeNull();
+  });
+
+  it("L1 TARGETS_JSON with __proto__ keys is refused, never merged", () => {
+    expect(() => targetsFromEnv({ TARGETS_JSON: '{"__proto__":{"toString":1}}' })).toThrow(
+      /Unknown target group/,
+    );
+    expect(() => targetsFromEnv({ TARGETS_JSON: '{"household":{"__proto__":5}}' })).toThrow(
+      /Unknown target: household\.__proto__/,
+    );
+    expect(() => targetsFromEnv({ TARGETS_JSON: '{"household":5}' })).toThrow(/must be an object/);
+  });
+
   it("TARGETS_JSON overrides values and rejects bad JSON", () => {
     expect(
       targetsFromEnv({ TARGETS_JSON: '{"household":{"maxProfiles":14}}' }).household.maxProfiles
