@@ -1,5 +1,62 @@
 {
   "$comment": "NFR-14 safety word check allowlist. Each entry exempts one ARB key from one rule for the listed words only, and needs a reason a reviewer can check. Only the rules in ALLOWLISTABLE_RULES (scripts/check-safety-words.mjs) can be allowlisted, and never an override word on a string that carries Tidak aman / Not safe or Cek label / Check the label. An entry that no longer matches a finding fails the check, so remove it when the string changes. Changes need qa-engineer and ux-designer review.",
   "schema": "keluargamakan.safety-words-allowlist/1",
-  "entries": []
+  "entries": [
+    {
+      "key": "rulesFreeTextUnmappedAll",
+      "rule": "state-word-outside-cek-aman",
+      "terms": ["cek"],
+      "locales": ["id"],
+      "reason": "Copy deck 24.2 (final): explains the Cek Aman state an unmapped free-text rule gives every recipe for the member (PRF-08, SAF-09). It names the real state shown in the badges, not a verdict of its own; mobile-engineer T-028, for qa-engineer and ux-designer review."
+    },
+    {
+      "key": "rulesFreeTextUnmappedAll",
+      "rule": "state-word-outside-cek-aman",
+      "terms": ["check the label"],
+      "locales": ["en"],
+      "reason": "Copy deck 24.2 (final): explains the Cek Aman state an unmapped free-text rule gives every recipe for the member (PRF-08, SAF-09). It names the real state shown in the badges, not a verdict of its own; mobile-engineer T-028, for qa-engineer and ux-designer review."
+    },
+    {
+      "key": "rulesFreeTextPendingAll",
+      "rule": "state-word-outside-cek-aman",
+      "terms": ["cek"],
+      "locales": ["id"],
+      "reason": "Copy deck 24.2 (final): explains the Cek Aman state an unmapped free-text rule gives every recipe for the member (PRF-08, SAF-09). It names the real state shown in the badges, not a verdict of its own; mobile-engineer T-028, for qa-engineer and ux-designer review."
+    },
+    {
+      "key": "rulesFreeTextPendingAll",
+      "rule": "state-word-outside-cek-aman",
+      "terms": ["check the label"],
+      "locales": ["en"],
+      "reason": "Copy deck 24.2 (final): explains the Cek Aman state an unmapped free-text rule gives every recipe for the member (PRF-08, SAF-09). It names the real state shown in the badges, not a verdict of its own; mobile-engineer T-028, for qa-engineer and ux-designer review."
+    },
+    {
+      "key": "rulesFreeTextWhyBody",
+      "rule": "state-word-outside-cek-aman",
+      "terms": ["cek"],
+      "locales": ["id"],
+      "reason": "Copy deck 24.2 (final): explains the Cek Aman state an unmapped free-text rule gives every recipe for the member (PRF-08, SAF-09). It names the real state shown in the badges, not a verdict of its own; mobile-engineer T-028, for qa-engineer and ux-designer review."
+    },
+    {
+      "key": "rulesFreeTextWhyBody",
+      "rule": "state-word-outside-cek-aman",
+      "terms": ["check the label"],
+      "locales": ["en"],
+      "reason": "Copy deck 24.2 (final): explains the Cek Aman state an unmapped free-text rule gives every recipe for the member (PRF-08, SAF-09). It names the real state shown in the badges, not a verdict of its own; mobile-engineer T-028, for qa-engineer and ux-designer review."
+    },
+    {
+      "key": "familyRulesStepLaterNote",
+      "rule": "state-word-outside-cek-aman",
+      "terms": ["aman"],
+      "locales": ["id"],
+      "reason": "Copy deck 24.3 (final): tells the manager that a member whose rules are not filled in never gets the Aman badge (ACC-08, F2r). It names the badge the member will not get, never calls anyone safe; mobile-engineer T-028, for qa-engineer and ux-designer review."
+    },
+    {
+      "key": "familyRulesStepLaterNote",
+      "rule": "state-word-outside-cek-aman",
+      "terms": ["safe"],
+      "locales": ["en"],
+      "reason": "Copy deck 24.3 (final): tells the manager that a member whose rules are not filled in never gets the Aman badge (ACC-08, F2r). It names the badge the member will not get, never calls anyone safe; mobile-engineer T-028, for qa-engineer and ux-designer review."
+    }
+  ]
 }
