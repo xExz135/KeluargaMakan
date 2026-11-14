@@ -43,6 +43,7 @@ void main() {
         'api.requestTimeoutMs',
         'auth.googleSignInEnabled',
         'auth.maxRetryWaitSeconds',
+        'consent.withdrawalDeletionDays',
       ]);
     });
 
