@@ -193,6 +193,10 @@ class ApiClient {
           return Avatar.fromJson(value);
         case 'AvatarStyle':
           return AvatarStyleTypeTransformer().decode(value);
+        case 'CatalogBrand':
+          return CatalogBrand.fromJson(value);
+        case 'CatalogIngredient':
+          return CatalogIngredient.fromJson(value);
         case 'ConsentAudience':
           return ConsentAudienceTypeTransformer().decode(value);
         case 'ConsentDecision':
@@ -251,6 +255,50 @@ class ApiClient {
           return HouseholdCreate.fromJson(value);
         case 'HouseholdUpdate':
           return HouseholdUpdate.fromJson(value);
+        case 'IngredientSearchHit':
+          return IngredientSearchHit.fromJson(value);
+        case 'IngredientSearchRequest':
+          return IngredientSearchRequest.fromJson(value);
+        case 'IngredientSearchResult':
+          return IngredientSearchResult.fromJson(value);
+        case 'IngredientSet':
+          return IngredientSet.fromJson(value);
+        case 'IngredientSetInput':
+          return IngredientSetInput.fromJson(value);
+        case 'IngredientSetList':
+          return IngredientSetList.fromJson(value);
+        case 'KitchenBrand':
+          return KitchenBrand.fromJson(value);
+        case 'KitchenBrandInput':
+          return KitchenBrandInput.fromJson(value);
+        case 'KitchenCategory':
+          return KitchenCategoryTypeTransformer().decode(value);
+        case 'KitchenChange':
+          return KitchenChange.fromJson(value);
+        case 'KitchenChangeOperation':
+          return KitchenChangeOperationTypeTransformer().decode(value);
+        case 'KitchenChangeOutcome':
+          return KitchenChangeOutcomeTypeTransformer().decode(value);
+        case 'KitchenChangeResult':
+          return KitchenChangeResult.fromJson(value);
+        case 'KitchenIngredientKey':
+          return KitchenIngredientKey.fromJson(value);
+        case 'KitchenItem':
+          return KitchenItem.fromJson(value);
+        case 'KitchenItemCreate':
+          return KitchenItemCreate.fromJson(value);
+        case 'KitchenItemList':
+          return KitchenItemList.fromJson(value);
+        case 'KitchenItemState':
+          return KitchenItemStateTypeTransformer().decode(value);
+        case 'KitchenItemUpdate':
+          return KitchenItemUpdate.fromJson(value);
+        case 'KitchenQuantity':
+          return KitchenQuantityTypeTransformer().decode(value);
+        case 'KitchenSyncRequest':
+          return KitchenSyncRequest.fromJson(value);
+        case 'KitchenSyncResponse':
+          return KitchenSyncResponse.fromJson(value);
         case 'Language':
           return LanguageTypeTransformer().decode(value);
         case 'LessOf':
@@ -269,6 +317,10 @@ class ApiClient {
           return MappingConfirmerTypeTransformer().decode(value);
         case 'MappingStatus':
           return MappingStatusTypeTransformer().decode(value);
+        case 'PhotoSession':
+          return PhotoSession.fromJson(value);
+        case 'PhotoSessionStatus':
+          return PhotoSessionStatusTypeTransformer().decode(value);
         case 'PortionSize':
           return PortionSizeTypeTransformer().decode(value);
         case 'Portions':
@@ -285,6 +337,24 @@ class ApiClient {
           return ProfileRules.fromJson(value);
         case 'ProfileUpdate':
           return ProfileUpdate.fromJson(value);
+        case 'RecognitionConfidence':
+          return RecognitionConfidenceTypeTransformer().decode(value);
+        case 'RecognitionConfirmation':
+          return RecognitionConfirmation.fromJson(value);
+        case 'RecognitionConfirmationItem':
+          return RecognitionConfirmationItem.fromJson(value);
+        case 'RecognitionConfirmationResult':
+          return RecognitionConfirmationResult.fromJson(value);
+        case 'RecognitionFailureReason':
+          return RecognitionFailureReasonTypeTransformer().decode(value);
+        case 'RecognitionOption':
+          return RecognitionOption.fromJson(value);
+        case 'RecognitionResult':
+          return RecognitionResult.fromJson(value);
+        case 'RecognizedItem':
+          return RecognizedItem.fromJson(value);
+        case 'ReferenceIngredientCatalog':
+          return ReferenceIngredientCatalog.fromJson(value);
         case 'RulesConsentState':
           return RulesConsentState.fromJson(value);
         case 'RulesConsentStatus':

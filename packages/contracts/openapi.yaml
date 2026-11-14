@@ -1,7 +1,7 @@
 openapi: 3.1.1
 info:
   title: KeluargaMakan API
-  version: 0.1.2
+  version: 0.2.0
   summary: Household manager API for KeluargaMakan (FamilyEats).
   description: >-
     Source of truth for API shapes: change this file first, then implement.
@@ -29,11 +29,35 @@ info:
     `manager_profile_must_be_adult`, QUESTIONS #46).
 
 
+    v0.2.0 (additive): Dapur Saya. Kitchen items with their state, category,
+    optional quantity and brand (KIT-01 to KIT-03, KIT-09), the reference
+    ingredient catalog and its search by name and by local or regional name
+    (KIT-04; the same search serves PRF-06 likes and dislikes and PRF-08 rule
+    mappings, QUESTIONS #49), custom ingredients (KIT-05, SAF-09), default
+    staples (KIT-07, ACC-05), ingredient sets (KIT-08) and the kitchen sync
+    with server timestamps (KIT-16). It also defines the photo session and
+    Confirm-and-Save recognition shapes (REC-01 to REC-06) as schemas only;
+    their endpoints come in a later version. Operations with
+    `x-server-task` are designed here and served from that backlog task; a
+    server without them answers 404 `not_found`.
+
+
+    Versioning (QUESTIONS #58): adding an operation, an optional request
+    field or a response field is backward compatible. A new value in a
+    response enum is not: installed apps fail closed on unknown values, so it
+    needs a version bump and a minimum app version. Response enums are
+    therefore chosen to cover V1 to V3 where the SRS allows. `ErrorCode` is
+    the exception: codes may be added, and clients treat an unknown code
+    like `internal_error`.
+
+
     Conventions: JSON bodies use camelCase. Timestamps are RFC 3339 in UTC.
     Identifiers are opaque strings. Clients must treat enum values they do not
     know as unknown and must never map an unknown value to a permissive state.
     Errors use `application/problem+json` (RFC 9457) with a stable `code`;
     clients localize messages from `code`, never from `title` or `detail`.
+    Free text a user types (custom ingredient names, search queries) travels
+    only in request bodies, never in a URL, so it stays out of access logs.
 
 
     Data classes: every schema carries `x-data-sensitivity` (`public`,
@@ -62,8 +86,15 @@ tags:
     description: Soft preferences, likes and dislikes, which may be relaxed (PRF-05, PRF-06).
   - name: Consent
     description: Health-data consent per member, recorded with date and text version and withdrawable (ACC-08, SET-03, SET-04, SET-10).
+  - name: Kitchen
+    description: >-
+      Dapur Saya: the household's saved ingredients, ingredient sets and the
+      kitchen sync (KIT-01 to KIT-09, KIT-16). Kitchen data is personal, not
+      health data.
   - name: Reference
-    description: Read-only reference vocabularies.
+    description: >-
+      Read-only reference vocabularies and the reference ingredient catalog
+      (PRF-04, KIT-04). Values come from the human-owned reference data.
 
 paths:
   # ---------------------------------------------------------------- Auth
@@ -746,7 +777,322 @@ paths:
         "409": { $ref: "#/components/responses/Conflict" }
         default: { $ref: "#/components/responses/UnexpectedError" }
 
+  # ---------------------------------------------------------------- Kitchen
+  /v1/household/kitchen/items:
+    get:
+      tags: [Kitchen]
+      operationId: listKitchenItems
+      summary: List the household's saved ingredients
+      description: >-
+        The saved kitchen of the session's household, the same on every phone
+        signed in to it (KIT-01). Items come in KIT-03 category order. The
+        default staples are created with the household as available and stay
+        available until the user marks them out (KIT-07, ACC-05). Reference
+        names come from the verified reference dataset; when it is not
+        available the list is still returned, with `displayName` null.
+      x-requirements: [KIT-01, KIT-02, KIT-03, KIT-05, KIT-06, KIT-07, ACC-05]
+      responses:
+        "200":
+          description: The saved ingredients.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/KitchenItemList" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+    post:
+      tags: [Kitchen]
+      operationId: addKitchenItem
+      summary: Add an ingredient to the kitchen
+      description: >-
+        Adds a reference ingredient found by search (KIT-04) or a custom
+        ingredient (KIT-05). A custom ingredient is stored with
+        `ingredientId: null` and `isCustom: true`; Cek Aman gives it "Check
+        the label" for every member with a hard rule (SAF-09). An unknown
+        `ingredientId` gives 400 `validation_failed`. When the reference
+        dataset cannot be verified, adding a reference ingredient gives 503
+        `reference_data_unavailable` (custom ingredients still work). If the
+        ingredient is already in the kitchen nothing is duplicated: the
+        existing item takes the requested state and is returned with 200.
+        Returns 409 `kitchen_item_limit_reached` at the configured limit.
+      x-requirements: [KIT-01, KIT-03, KIT-04, KIT-05, SAF-09]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/KitchenItemCreate" }
+      responses:
+        "200":
+          description: The ingredient was already in the kitchen; its updated item.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/KitchenItem" }
+        "201":
+          description: Added.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/KitchenItem" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+
+  /v1/household/kitchen/items/{itemId}:
+    parameters:
+      - $ref: "#/components/parameters/ItemId"
+    patch:
+      tags: [Kitchen]
+      operationId: updateKitchenItem
+      summary: Change an ingredient's state or details
+      description: >-
+        One tap toggles available and out (KIT-02). Only the fields present
+        are changed. The change is stamped with the server time and wins over
+        any earlier change to the same ingredient (KIT-16); sending the same
+        change again leaves the same result. `quantity` and `brand` (KIT-09)
+        are served from T-032; a server without them answers 400
+        `validation_failed` for those fields.
+      x-requirements: [KIT-02, KIT-03, KIT-07, KIT-09, KIT-16]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/KitchenItemUpdate" }
+      responses:
+        "200":
+          description: The updated item.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/KitchenItem" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+    delete:
+      tags: [Kitchen]
+      operationId: removeKitchenItem
+      summary: Remove an ingredient from the kitchen
+      description: >-
+        Removes the item and its set memberships. A default staple can be
+        removed too; marking it out keeps it in the list instead (KIT-07).
+      x-requirements: [KIT-01, KIT-07]
+      responses:
+        "204":
+          description: Removed.
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+
+  /v1/household/kitchen/sets:
+    get:
+      tags: [Kitchen]
+      operationId: listIngredientSets
+      summary: List the household's ingredient sets
+      x-requirements: [KIT-08]
+      x-server-task: T-032
+      responses:
+        "200":
+          description: The ingredient sets.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/IngredientSetList" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+    post:
+      tags: [Kitchen]
+      operationId: createIngredientSet
+      summary: Create an ingredient set
+      description: >-
+        A named group of kitchen items, for example "Belanja mingguan"
+        (KIT-08). Unknown item IDs give 404 `not_found`. Returns 409
+        `ingredient_set_limit_reached` at the configured limit.
+      x-requirements: [KIT-08]
+      x-server-task: T-032
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/IngredientSetInput" }
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/IngredientSet" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+
+  /v1/household/kitchen/sets/{setId}:
+    parameters:
+      - $ref: "#/components/parameters/SetId"
+    put:
+      tags: [Kitchen]
+      operationId: replaceIngredientSet
+      summary: Rename an ingredient set or change its items
+      description: The whole set is replaced, so an offline edit sent again is safe.
+      x-requirements: [KIT-08]
+      x-server-task: T-032
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/IngredientSetInput" }
+      responses:
+        "200":
+          description: The updated set.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/IngredientSet" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+    delete:
+      tags: [Kitchen]
+      operationId: deleteIngredientSet
+      summary: Delete an ingredient set
+      description: The items stay in the kitchen.
+      x-requirements: [KIT-08]
+      x-server-task: T-032
+      responses:
+        "204":
+          description: Deleted.
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+
+  /v1/household/kitchen/sets/{setId}/mark-available:
+    parameters:
+      - $ref: "#/components/parameters/SetId"
+    post:
+      tags: [Kitchen]
+      operationId: markIngredientSetAvailable
+      summary: Mark every item in a set available
+      description: >-
+        "Tandai semua ada" (KIT-08): every item in the set becomes available
+        in one call, stamped with the server time (KIT-16). No other item
+        changes, and nothing becomes out. Sending it again leaves the same
+        result. The response lists the set's items after the change; the
+        client keeps the earlier states for its undo.
+      x-requirements: [KIT-08, KIT-16]
+      x-server-task: T-032
+      responses:
+        "200":
+          description: The set's items after the change.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/KitchenItemList" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+
+  /v1/household/kitchen/sync:
+    post:
+      tags: [Kitchen]
+      operationId: syncKitchen
+      summary: Send queued kitchen changes and fetch changes from other phones
+      description: >-
+        KIT-16 offline sync. The phone sends the changes it queued while
+        offline, oldest first, and the cursor of its last sync. Each change
+        names its ingredient (a reference ID or a custom name), so an item
+        added offline needs no server ID. The server places each change on its
+        own clock at the time it was made (now minus `ageMs`, so a phone with
+        a wrong clock still orders correctly) and keeps, per ingredient, the
+        latest change: an older change than the stored one is `superseded`
+        and the stored item is returned. Every change has a `changeId`;
+        sending it again returns its first result without applying it twice,
+        so replaying the queue is safe. The response carries every item
+        changed or removed since the cursor (all items when `cursor` is null
+        or too old, with `full: true`) and a new cursor. A rejected change
+        (for example an unknown ingredient or the item limit) never stops the
+        rest.
+      x-requirements: [KIT-16, KIT-01, KIT-02, KIT-09]
+      x-server-task: T-032
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/KitchenSyncRequest" }
+      responses:
+        "200":
+          description: The outcome of each change and the changes since the cursor.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/KitchenSyncResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+
   # ---------------------------------------------------------------- Reference
+  /v1/reference/ingredients:
+    get:
+      tags: [Reference]
+      operationId: listReferenceIngredients
+      summary: Get the whole reference ingredient catalog
+      description: >-
+        Every ingredient of the verified reference dataset with its names,
+        local and regional names, kitchen category and brands, for the copy
+        the phone keeps for offline search (KIT-04). `referenceVersion`
+        changes whenever the data changes. When the dataset is not loaded or
+        fails verification the answer is 503 `reference_data_unavailable`,
+        never an empty catalog. No safety data (components, allergens, halal)
+        is included: only Cek Aman uses those.
+      x-requirements: [KIT-04, DAT-06]
+      responses:
+        "200":
+          description: The catalog.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReferenceIngredientCatalog" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+
+  /v1/reference/ingredients/search:
+    post:
+      tags: [Reference]
+      operationId: searchReferenceIngredients
+      summary: Search the reference ingredients by name or local name
+      description: >-
+        Searches the standard Indonesian ingredient list by name (Indonesian
+        or English) and by local or regional name, for example kemangi, daun
+        salam, tempe or kecap manis (KIT-04). Matching ignores case, accents
+        and spacing (Unicode NFKC); exact and starting matches come first.
+        The same search picks ingredients for likes and dislikes (PRF-06) and
+        for a rule mapping (PRF-08; QUESTIONS #49). The query is sent in the
+        body so it never appears in a URL or an access log. An empty `items`
+        means no ingredient matched; when the reference dataset is not loaded
+        or fails verification the answer is 503 `reference_data_unavailable`,
+        never an empty list.
+      x-requirements: [KIT-04, PRF-06, PRF-08]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/IngredientSearchRequest" }
+      responses:
+        "200":
+          description: The matching ingredients, best first.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/IngredientSearchResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+
   /v1/reference/allergens:
     get:
       tags: [Reference]
@@ -782,6 +1128,18 @@ components:
       name: ruleId
       in: path
       required: true
+      schema: { $ref: "#/components/schemas/Id" }
+    ItemId:
+      name: itemId
+      in: path
+      required: true
+      description: A kitchen item in the session's household.
+      schema: { $ref: "#/components/schemas/Id" }
+    SetId:
+      name: setId
+      in: path
+      required: true
+      description: An ingredient set in the session's household.
       schema: { $ref: "#/components/schemas/Id" }
     IdempotencyKey:
       name: Idempotency-Key
@@ -976,10 +1334,13 @@ components:
         - hard_rule_duplicate
         - mapping_not_applicable
         - idempotency_key_reused
+        - kitchen_item_limit_reached
+        - ingredient_set_limit_reached
         # 429
         - rate_limited
         # 5xx
         - rules_unavailable
+        - reference_data_unavailable
         - sign_in_method_unavailable
         - service_unavailable
         - internal_error
@@ -1954,3 +2315,685 @@ components:
           description: Newest first.
           type: array
           items: { $ref: "#/components/schemas/ConsentRecord" }
+
+    # ------------------------------------------------------------ Kitchen (Dapur Saya)
+    KitchenCategory:
+      description: >-
+        KIT-03 categories in display order: protein, vegetables, fruit, spices
+        and aromatics, staples, sauces and condiments, dairy, frozen and
+        leftovers. The app shows its own Bahasa Indonesia or English label for
+        each code. Leftovers holds custom items in V1; saved leftovers (KIT-13)
+        use the same code later.
+      x-data-sensitivity: public
+      type: string
+      enum:
+        [
+          protein,
+          vegetables,
+          fruit,
+          spices_aromatics,
+          staples,
+          sauces_condiments,
+          dairy,
+          frozen,
+          leftovers,
+        ]
+
+    KitchenItemState:
+      description: >-
+        KIT-02: available ("Ada") or out ("Habis"). Clients show an unknown
+        state as out, never as available.
+      x-data-sensitivity: public
+      type: string
+      enum: [available, out]
+
+    KitchenQuantity:
+      description: KIT-09 optional amount.
+      x-data-sensitivity: public
+      type: string
+      enum: [a_little, some, plenty]
+
+    KitchenCustomName:
+      description: >-
+        A custom ingredient's name as the user typed it (KIT-05), stored in
+        Unicode NFC with surrounding spaces removed. Text with control, format
+        or private-use characters is refused. Names that differ only in case,
+        accents, punctuation or spacing are the same ingredient.
+      x-data-sensitivity: personal
+      type: string
+      minLength: 1
+      maxLength: 60
+
+    KitchenBrand:
+      description: >-
+        The brand recorded for an item (KIT-09, SAF-07). `brandId` is one of
+        the ingredient's reference brands, or null for a brand typed as text,
+        for which Cek Aman keeps "Check the label" on brand-varying
+        components. A brand is never shown as safe or verified.
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required: [brandId, name]
+      properties:
+        brandId:
+          oneOf:
+            - $ref: "#/components/schemas/ReferenceId"
+            - type: "null"
+        name:
+          description: The reference brand name, or the text as typed.
+          type: string
+          minLength: 1
+          maxLength: 60
+
+    KitchenBrandInput:
+      description: >-
+        Exactly one of `brandId` (from the ingredient's catalog `brands`) or
+        `customName` (a brand not in the list). Only reference ingredients
+        take a `brandId`.
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      properties:
+        brandId: { $ref: "#/components/schemas/ReferenceId" }
+        customName:
+          type: string
+          minLength: 1
+          maxLength: 60
+
+    KitchenItem:
+      description: >-
+        SRS 18.1 Kitchen item. A reference ingredient has `ingredientId` and
+        its reference `displayName` (null while the reference data is not
+        available or no longer lists the ingredient). A custom ingredient
+        (KIT-05) has `ingredientId: null`, `isCustom: true` and
+        `customName`; Cek Aman gives "Check the label" for it to every member
+        with a hard rule (SAF-09). `changedAt` is the server time of the last
+        accepted change (KIT-16).
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required:
+        [
+          id,
+          ingredientId,
+          isCustom,
+          displayName,
+          customName,
+          category,
+          state,
+          quantity,
+          brand,
+          isDefaultStaple,
+          usageRank,
+          changedAt,
+          createdAt,
+        ]
+      properties:
+        id: { $ref: "#/components/schemas/Id" }
+        ingredientId:
+          oneOf:
+            - $ref: "#/components/schemas/ReferenceId"
+            - type: "null"
+        isCustom:
+          description: True exactly when `ingredientId` is null (KIT-05 flag).
+          type: boolean
+        displayName:
+          oneOf:
+            - $ref: "#/components/schemas/LocalizedText"
+            - type: "null"
+        customName:
+          oneOf:
+            - $ref: "#/components/schemas/KitchenCustomName"
+            - type: "null"
+        category: { $ref: "#/components/schemas/KitchenCategory" }
+        state: { $ref: "#/components/schemas/KitchenItemState" }
+        quantity:
+          oneOf:
+            - $ref: "#/components/schemas/KitchenQuantity"
+            - type: "null"
+        brand:
+          oneOf:
+            - $ref: "#/components/schemas/KitchenBrand"
+            - type: "null"
+        isDefaultStaple:
+          description: Created with the household as a default staple (KIT-07, ACC-05).
+          type: boolean
+        usageRank:
+          description: >-
+            KIT-06: 1 is the most used item in its category. Null until use is
+            recorded; clients then fall back to their own order.
+          type: [integer, "null"]
+          minimum: 1
+        changedAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+
+    KitchenItemList:
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required: [items, maxItems, referenceVersion]
+      properties:
+        items:
+          description: In KIT-03 category order.
+          type: array
+          items: { $ref: "#/components/schemas/KitchenItem" }
+        maxItems:
+          description: The configured limit of items per household.
+          type: integer
+          minimum: 1
+        referenceVersion:
+          description: >-
+            DAT-06 version of the reference data the names come from, or null
+            when it is not available.
+          type: [string, "null"]
+
+    KitchenItemCreate:
+      description: >-
+        Exactly one of `ingredientId` (a reference ingredient, KIT-04) or
+        `customName` (KIT-05). `category` is required for a custom ingredient
+        and for a reference ingredient whose catalog `category` is null;
+        otherwise the catalog category is used. `state` defaults to
+        `available`.
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      properties:
+        ingredientId: { $ref: "#/components/schemas/ReferenceId" }
+        customName: { $ref: "#/components/schemas/KitchenCustomName" }
+        category: { $ref: "#/components/schemas/KitchenCategory" }
+        state: { $ref: "#/components/schemas/KitchenItemState" }
+
+    KitchenItemUpdate:
+      description: >-
+        Only the fields present change. `quantity` and `brand` may be null to
+        clear them (KIT-09).
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        state: { $ref: "#/components/schemas/KitchenItemState" }
+        category: { $ref: "#/components/schemas/KitchenCategory" }
+        quantity:
+          oneOf:
+            - $ref: "#/components/schemas/KitchenQuantity"
+            - type: "null"
+        brand:
+          oneOf:
+            - $ref: "#/components/schemas/KitchenBrandInput"
+            - type: "null"
+
+    IngredientSetName:
+      x-data-sensitivity: personal
+      type: string
+      minLength: 1
+      maxLength: 40
+      example: Belanja mingguan
+
+    IngredientSet:
+      description: SRS 18.1 Ingredient set (KIT-08).
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required: [id, name, itemIds, createdAt, updatedAt]
+      properties:
+        id: { $ref: "#/components/schemas/Id" }
+        name: { $ref: "#/components/schemas/IngredientSetName" }
+        itemIds:
+          description: Kitchen items in the set; a removed item leaves the set.
+          type: array
+          uniqueItems: true
+          items: { $ref: "#/components/schemas/Id" }
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    IngredientSetList:
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required: [items, maxSets]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/IngredientSet" }
+        maxSets:
+          description: The configured limit of sets per household.
+          type: integer
+          minimum: 1
+
+    IngredientSetInput:
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required: [name, itemIds]
+      properties:
+        name: { $ref: "#/components/schemas/IngredientSetName" }
+        itemIds:
+          type: array
+          maxItems: 200
+          uniqueItems: true
+          items: { $ref: "#/components/schemas/Id" }
+
+    KitchenIngredientKey:
+      description: >-
+        The ingredient a sync change is for (KIT-16: the latest change wins
+        per ingredient): exactly one of `ingredientId` or `customName`. Custom
+        names are compared ignoring case, accents, punctuation and spacing.
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      properties:
+        ingredientId: { $ref: "#/components/schemas/ReferenceId" }
+        customName: { $ref: "#/components/schemas/KitchenCustomName" }
+
+    KitchenChangeOperation:
+      description: >-
+        `upsert` adds the ingredient if needed and sets the fields present;
+        `remove` takes it out of the kitchen.
+      x-data-sensitivity: public
+      type: string
+      enum: [upsert, remove]
+
+    KitchenChange:
+      description: >-
+        One change queued on the phone. For `upsert`, `category` is needed
+        when the ingredient is new and has no catalog category; `quantity`
+        and `brand` may be null to clear them.
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required: [changeId, ingredient, operation, ageMs]
+      properties:
+        changeId:
+          description: Random UUID made with the change; a repeat returns the first result.
+          type: string
+          format: uuid
+        ingredient: { $ref: "#/components/schemas/KitchenIngredientKey" }
+        operation: { $ref: "#/components/schemas/KitchenChangeOperation" }
+        ageMs:
+          description: >-
+            Milliseconds from the edit to sending this request, measured on the
+            phone. The server dates the change at its own time minus this age
+            (KIT-16), so the phone's clock setting does not matter. Changes
+            older than the server's limit are superseded by any later change.
+          type: integer
+          minimum: 0
+          maximum: 2592000000
+        category: { $ref: "#/components/schemas/KitchenCategory" }
+        state: { $ref: "#/components/schemas/KitchenItemState" }
+        quantity:
+          oneOf:
+            - $ref: "#/components/schemas/KitchenQuantity"
+            - type: "null"
+        brand:
+          oneOf:
+            - $ref: "#/components/schemas/KitchenBrandInput"
+            - type: "null"
+
+    KitchenSyncRequest:
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required: [cursor, changes]
+      properties:
+        cursor:
+          description: The `cursor` of the last sync response, or null for a first sync.
+          type: [string, "null"]
+          maxLength: 512
+        changes:
+          description: Oldest first.
+          type: array
+          maxItems: 100
+          items: { $ref: "#/components/schemas/KitchenChange" }
+
+    KitchenChangeOutcome:
+      description: >-
+        `applied`: the change is the latest for its ingredient (also for a
+        repeat of an applied change). `superseded`: a later change to the
+        ingredient was already stored; the stored item is in `items`.
+        `rejected`: the change cannot be applied (see `errorCode`); nothing
+        changed.
+      x-data-sensitivity: public
+      type: string
+      enum: [applied, superseded, rejected]
+
+    KitchenChangeResult:
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required: [changeId, outcome, itemId, errorCode]
+      properties:
+        changeId:
+          type: string
+          format: uuid
+        outcome: { $ref: "#/components/schemas/KitchenChangeOutcome" }
+        itemId:
+          description: The server's item for the ingredient, or null when there is none.
+          oneOf:
+            - $ref: "#/components/schemas/Id"
+            - type: "null"
+        errorCode:
+          description: Why a change was rejected, for example `validation_failed` or `kitchen_item_limit_reached`.
+          oneOf:
+            - $ref: "#/components/schemas/ErrorCode"
+            - type: "null"
+
+    KitchenSyncResponse:
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required: [cursor, full, items, removedItemIds, results, maxItems, referenceVersion]
+      properties:
+        cursor:
+          description: Opaque; send it with the next sync.
+          type: string
+          minLength: 1
+          maxLength: 512
+        full:
+          description: >-
+            True when `items` is the whole kitchen (first sync, or a cursor too
+            old to continue from); the phone then replaces its copy, keeping
+            only changes still queued.
+          type: boolean
+        items:
+          description: Items changed since the cursor, in KIT-03 category order.
+          type: array
+          items: { $ref: "#/components/schemas/KitchenItem" }
+        removedItemIds:
+          description: Items removed since the cursor (empty when `full`).
+          type: array
+          items: { $ref: "#/components/schemas/Id" }
+        results:
+          description: One result per sent change, in the same order.
+          type: array
+          items: { $ref: "#/components/schemas/KitchenChangeResult" }
+        maxItems:
+          type: integer
+          minimum: 1
+        referenceVersion:
+          type: [string, "null"]
+
+    # ------------------------------------------------------------ Reference ingredient catalog
+    CatalogBrand:
+      description: A reference brand of an ingredient (KIT-09, SAF-07). Not a safety result.
+      x-data-sensitivity: public
+      type: object
+      additionalProperties: false
+      required: [brandId, name]
+      properties:
+        brandId: { $ref: "#/components/schemas/ReferenceId" }
+        name: { type: string }
+
+    CatalogIngredient:
+      description: >-
+        A reference ingredient as the kitchen and search use it (SRS 18.1
+        Ingredient: names, local names, category, brands). It carries no
+        components, allergens or halal data: only Cek Aman reads those.
+      x-data-sensitivity: public
+      type: object
+      additionalProperties: false
+      required: [ingredientId, displayName, localNames, category, brandVaries, brands]
+      properties:
+        ingredientId: { $ref: "#/components/schemas/ReferenceId" }
+        displayName: { $ref: "#/components/schemas/LocalizedText" }
+        localNames:
+          description: Local, regional and alternative names (KIT-04).
+          type: array
+          items: { type: string }
+        category:
+          description: >-
+            The kitchen category, or null when the reference data gives none;
+            the app then asks for one when the ingredient is added.
+          oneOf:
+            - $ref: "#/components/schemas/KitchenCategory"
+            - type: "null"
+        brandVaries:
+          description: >-
+            SAF-07: what the ingredient contains can differ by brand, so the
+            app offers to record a brand (KIT-09). This is not a safety
+            result.
+          type: boolean
+        brands:
+          type: array
+          items: { $ref: "#/components/schemas/CatalogBrand" }
+
+    ReferenceIngredientCatalog:
+      x-data-sensitivity: public
+      type: object
+      additionalProperties: false
+      required: [referenceVersion, items]
+      properties:
+        referenceVersion:
+          description: DAT-06 version and content hash of the verified dataset.
+          type: string
+        items:
+          description: Sorted by Indonesian display name.
+          type: array
+          items: { $ref: "#/components/schemas/CatalogIngredient" }
+
+    IngredientSearchRequest:
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required: [query]
+      properties:
+        query:
+          description: >-
+            What the user typed. Hidden or control characters are refused
+            (400). The query is never stored or logged.
+          type: string
+          minLength: 1
+          maxLength: 60
+        limit:
+          description: At most this many results (default and upper limit from configuration).
+          type: integer
+          minimum: 1
+          maximum: 50
+
+    IngredientSearchHit:
+      x-data-sensitivity: public
+      type: object
+      additionalProperties: false
+      required: [ingredient, matchedName]
+      properties:
+        ingredient: { $ref: "#/components/schemas/CatalogIngredient" }
+        matchedName:
+          description: >-
+            The local or regional name that matched, shown next to the display
+            name; null when a display name matched.
+          type: [string, "null"]
+
+    IngredientSearchResult:
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required: [referenceVersion, items]
+      properties:
+        referenceVersion: { type: string }
+        items:
+          description: Best match first. Empty only when nothing matched.
+          type: array
+          items: { $ref: "#/components/schemas/IngredientSearchHit" }
+
+    # ------------------------------------------------------------ Photo setup (schemas only)
+    PhotoSessionStatus:
+      description: >-
+        Confirm-and-Save session (REC-01 to REC-04). `collecting`: photos are
+        being added; `processing`: they are being read; `ready`: a result
+        waits for confirmation; `failed`: see `failureReason`; `confirmed`
+        and `discarded`: closed by the user; `expired`: the result was not
+        confirmed in time and was dropped. Clients treat an unknown status
+        like `failed` and offer manual entry.
+      x-data-sensitivity: public
+      type: string
+      enum: [collecting, processing, ready, failed, confirmed, discarded, expired]
+
+    RecognitionFailureReason:
+      description: >-
+        `ai_not_enabled`: the household has not turned on AI features
+        (SET-09); `ai_unavailable`: the recognizer is down, out of quota or
+        too slow (INT-06 fallback: manual entry); `photos_unreadable`: the
+        photos could not be read; `processing_failed`: any other failure.
+      x-data-sensitivity: public
+      type: string
+      enum: [ai_not_enabled, ai_unavailable, photos_unreadable, processing_failed]
+
+    RecognitionConfidence:
+      description: >-
+        REC-02. `high` and `medium` items start ticked; `low` items are asked
+        as a question with likely options and nothing preselected (REC-03).
+        Clients treat an unknown value like `low`.
+      x-data-sensitivity: public
+      type: string
+      enum: [high, medium, low]
+
+    RecognitionOption:
+      description: A likely reference ingredient for a low-confidence item (REC-03).
+      x-data-sensitivity: public
+      type: object
+      additionalProperties: false
+      required: [ingredientId, displayName]
+      properties:
+        ingredientId: { $ref: "#/components/schemas/ReferenceId" }
+        displayName: { $ref: "#/components/schemas/LocalizedText" }
+
+    RecognizedItem:
+      description: >-
+        One line of the checklist (REC-02). It carries no safety, allergen or
+        halal field: a photo is never evidence for Cek Aman (REC-06, SAF-10).
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required: [id, label, ingredientId, displayName, confidence, options, kitchenItemId]
+      properties:
+        id: { $ref: "#/components/schemas/Id" }
+        label:
+          description: The name as read from the photo, shown when there is no reference match.
+          type: string
+          minLength: 1
+          maxLength: 60
+        ingredientId:
+          description: >-
+            The reference ingredient the API matched by name, or null. A name
+            that does not match is never guessed into an ID (AI-06).
+          oneOf:
+            - $ref: "#/components/schemas/ReferenceId"
+            - type: "null"
+        displayName:
+          oneOf:
+            - $ref: "#/components/schemas/LocalizedText"
+            - type: "null"
+        confidence: { $ref: "#/components/schemas/RecognitionConfidence" }
+        options:
+          description: Likely options for a low-confidence item, for example tempe or tofu (REC-03).
+          type: array
+          maxItems: 5
+          items: { $ref: "#/components/schemas/RecognitionOption" }
+        kitchenItemId:
+          description: The saved kitchen item this matches, preferred over new ones (REC-05).
+          oneOf:
+            - $ref: "#/components/schemas/Id"
+            - type: "null"
+
+    RecognitionResult:
+      description: >-
+        The checklist. Nothing in it is saved until the user confirms (REC-04),
+        and an unconfirmed result never reaches suggestions.
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required: [items, referenceVersion]
+      properties:
+        items:
+          description: Items matching saved kitchen items first (REC-05). Empty when nothing was recognized.
+          type: array
+          items: { $ref: "#/components/schemas/RecognizedItem" }
+        referenceVersion: { type: string }
+
+    PhotoSession:
+      description: >-
+        A photo setup session (REC-01). Photos are kept only in temporary
+        storage and deleted as soon as they are processed (REC-07, SET-05,
+        DAT-03); no response ever carries a photo or a link to one.
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required: [id, status, photoCount, maxPhotos, failureReason, result, createdAt, expiresAt]
+      properties:
+        id: { $ref: "#/components/schemas/Id" }
+        status: { $ref: "#/components/schemas/PhotoSessionStatus" }
+        photoCount:
+          type: integer
+          minimum: 0
+        maxPhotos:
+          description: Photos allowed per session, from configuration (REC-01, 5 target).
+          type: integer
+          minimum: 1
+        failureReason:
+          oneOf:
+            - $ref: "#/components/schemas/RecognitionFailureReason"
+            - type: "null"
+        result:
+          description: Set when `status` is `ready`.
+          oneOf:
+            - $ref: "#/components/schemas/RecognitionResult"
+            - type: "null"
+        createdAt:
+          type: string
+          format: date-time
+        expiresAt:
+          description: When an unconfirmed result is dropped (configuration, QUESTIONS #55).
+          type: string
+          format: date-time
+
+    RecognitionConfirmationItem:
+      description: >-
+        One ticked line, as the user left it: exactly one of `ingredientId`
+        (a recognized, chosen or searched reference ingredient) or
+        `customName` (a free-text rename, saved as a flagged custom item,
+        KIT-05). `category` follows the `KitchenItemCreate` rules.
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      properties:
+        recognizedItemId:
+          description: The checklist line it came from; absent for an item the user added.
+          allOf:
+            - $ref: "#/components/schemas/Id"
+        ingredientId: { $ref: "#/components/schemas/ReferenceId" }
+        customName: { $ref: "#/components/schemas/KitchenCustomName" }
+        category: { $ref: "#/components/schemas/KitchenCategory" }
+
+    RecognitionConfirmation:
+      description: >-
+        "Simpan" (REC-04): only these items become available. Unticked lines
+        are ignored, and no other kitchen item is removed or marked out.
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items: { $ref: "#/components/schemas/RecognitionConfirmationItem" }
+
+    RecognitionConfirmationResult:
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          description: The confirmed items, each now available.
+          type: array
+          items: { $ref: "#/components/schemas/KitchenItem" }

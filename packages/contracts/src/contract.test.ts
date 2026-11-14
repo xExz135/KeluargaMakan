@@ -10,6 +10,7 @@ import {
   operation,
   operations,
   propertyEnum,
+  reachableSchemas,
   refName,
   schema,
 } from "./testing/openapi-document.js";
@@ -54,7 +55,21 @@ function isPublic(operationId: string): boolean {
   return Array.isArray(security) && security.length === 0;
 }
 
-describe("OpenAPI v0.1 structure", () => {
+/** Requirement IDs that T-030 (OpenAPI v0.2, Dapur Saya) supports. */
+const T030_REQUIREMENTS = [
+  "KIT-01",
+  "KIT-02",
+  "KIT-03",
+  "KIT-04",
+  "KIT-05",
+  "KIT-06",
+  "KIT-07",
+  "KIT-08",
+  "KIT-09",
+  "KIT-16",
+] as const;
+
+describe("OpenAPI structure", () => {
   it("every operation has a unique operationId, one tag and requirement IDs", () => {
     const ids = operations().map((entry) => entry.operation.operationId);
     expect(ids.every((id) => typeof id === "string" && id.length > 0)).toBe(true);
@@ -72,12 +87,15 @@ describe("OpenAPI v0.1 structure", () => {
     for (const path of Object.keys(SPEC.paths)) expect(path).toMatch(/^\/v1\//);
   });
 
-  it.each(T015_REQUIREMENTS)("%s is covered by at least one operation", (id) => {
-    const covering = operations().filter((entry) =>
-      entry.operation["x-requirements"]?.includes(id),
-    );
-    expect(covering.length).toBeGreaterThan(0);
-  });
+  it.each([...T015_REQUIREMENTS, ...T030_REQUIREMENTS])(
+    "%s is covered by at least one operation",
+    (id) => {
+      const covering = operations().filter((entry) =>
+        entry.operation["x-requirements"]?.includes(id),
+      );
+      expect(covering.length).toBeGreaterThan(0);
+    },
+  );
 
   it("requires a bearer token by default; only sign-in, verify and refresh are public", () => {
     expect(SPEC.security).toEqual([{ bearerAuth: [] }]);
@@ -101,6 +119,8 @@ describe("OpenAPI v0.1 structure", () => {
       "createProfile",
       "createHardRule",
       "recordHealthDataConsent",
+      "addKitchenItem",
+      "createIngredientSet",
     ]) {
       const refs = (operation(id).operation.parameters ?? []).map((p) => p.$ref);
       expect(refs, id).toContain("#/components/parameters/IdempotencyKey");
@@ -246,8 +266,18 @@ describe("Keluarga Saya profiles", () => {
     expect(schema("AgeGroup").enum).toEqual(["infant", "child", "teen", "adult", "elderly"]);
   });
 
-  it("PRF-01 / QUESTIONS #27 has avatars only: no photo, image or picture field anywhere", () => {
-    expect(allPropertyNames().filter((p) => /photo|image|picture/i.test(p))).toEqual([]);
+  it("PRF-01 / QUESTIONS #27 profiles have avatars only: no photo, image or picture field", () => {
+    const profileSchemas = reachableSchemas([
+      "Profile",
+      "ProfileList",
+      "ProfileCreate",
+      "ProfileUpdate",
+      "HouseholdCreate",
+    ]);
+    expect(profileSchemas).toContain("Avatar");
+    const names = profileSchemas.flatMap((name) => Object.keys(schema(name).properties ?? {}));
+    expect(names.filter((p) => /photo|image|picture/i.test(p))).toEqual([]);
+    expect(profileSchemas.filter((n) => /photo|image|picture|recogni/i.test(n))).toEqual([]);
     expect(schema("AvatarStyle").enum).toEqual(["initials", "illustration"]);
   });
 
@@ -430,6 +460,296 @@ describe("consent", () => {
   it("SET-04 a withdrawal reports when the member's rules will have been deleted", () => {
     expect(schema("ConsentRecord").properties?.deletionDueBy).toBeDefined();
     expect(schema("RulesConsentState").properties?.deletionDueBy).toBeDefined();
+  });
+});
+
+describe("Dapur Saya kitchen (T-030, contract 0.2)", () => {
+  const path = (id: string) => `${operation(id).method} ${operation(id).path}`;
+  const kitchenOps = operations().filter((entry) => entry.operation.tags?.[0] === "Kitchen");
+
+  it("KIT-01 the saved kitchen is read and changed in the session's household only", () => {
+    expect(path("listKitchenItems")).toBe("get /v1/household/kitchen/items");
+    expect(path("addKitchenItem")).toBe("post /v1/household/kitchen/items");
+    expect(path("updateKitchenItem")).toBe("patch /v1/household/kitchen/items/{itemId}");
+    expect(path("removeKitchenItem")).toBe("delete /v1/household/kitchen/items/{itemId}");
+    expect(kitchenOps.length).toBeGreaterThanOrEqual(10);
+    for (const { path: p, operation: op } of kitchenOps) {
+      expect(p, op.operationId).toMatch(/^\/v1\/household\/kitchen\//);
+      expect(isPublic(op.operationId ?? ""), op.operationId).toBe(false);
+      expect(p, op.operationId).not.toMatch(/householdId/);
+    }
+    for (const name of ["KitchenItemCreate", "KitchenItemUpdate", "KitchenChange"]) {
+      expect(Object.keys(schema(name).properties ?? {}), name).not.toContain("householdId");
+    }
+    expect(responseSchemaName("listKitchenItems", "200")).toBe("KitchenItemList");
+  });
+
+  it("KIT-02 an item is available or out; an unknown state is never read as available", () => {
+    expect(schema("KitchenItemState").enum).toEqual(["available", "out"]);
+    expect(schema("KitchenItemState").description).toMatch(/unknown\s+state as out/);
+    expect(schema("KitchenItemUpdate").properties?.state?.$ref).toBe(
+      "#/components/schemas/KitchenItemState",
+    );
+  });
+
+  it("KIT-03 the nine categories, as stable codes in SRS order", () => {
+    expect(schema("KitchenCategory").enum).toEqual([
+      "protein",
+      "vegetables",
+      "fruit",
+      "spices_aromatics",
+      "staples",
+      "sauces_condiments",
+      "dairy",
+      "frozen",
+      "leftovers",
+    ]);
+    expect(schema("KitchenItem").required).toContain("category");
+  });
+
+  it("KIT-04 the catalog and search cover names and local names, and fail closed with 503", () => {
+    expect(path("listReferenceIngredients")).toBe("get /v1/reference/ingredients");
+    expect(path("searchReferenceIngredients")).toBe("post /v1/reference/ingredients/search");
+    expect(requestSchemaName("searchReferenceIngredients")).toBe("IngredientSearchRequest");
+    expect(schema("CatalogIngredient").required).toEqual(
+      expect.arrayContaining(["ingredientId", "displayName", "localNames", "category"]),
+    );
+    expect(schema("IngredientSearchHit").required).toEqual(["ingredient", "matchedName"]);
+    expect(errorCodes).toContain("reference_data_unavailable");
+    for (const id of ["listReferenceIngredients", "searchReferenceIngredients"]) {
+      const op = operation(id).operation;
+      expect(op.responses["503"]?.$ref, id).toBe("#/components/responses/ServiceUnavailable");
+      expect(op.description, id).toContain("503 `reference_data_unavailable`");
+      expect(op.description, id).toMatch(/never an empty/);
+    }
+    // QUESTIONS #49: the same search serves likes, dislikes and rule mappings.
+    expect(operation("searchReferenceIngredients").operation["x-requirements"]).toEqual(
+      expect.arrayContaining(["KIT-04", "PRF-06", "PRF-08"]),
+    );
+  });
+
+  it("KIT-04 the catalog never carries safety data: only Cek Aman reads it", () => {
+    const names = reachableSchemas(["ReferenceIngredientCatalog", "IngredientSearchResult"]);
+    const props = names.flatMap((name) => Object.keys(schema(name).properties ?? {}));
+    expect(
+      props.filter((p) => /allergen|halal|component|diet|safe|verified|status/i.test(p)),
+    ).toEqual([]);
+  });
+
+  it("KIT-05 custom ingredients have no reference ID and are flagged", () => {
+    const item = schema("KitchenItem");
+    expect(item.required).toEqual(
+      expect.arrayContaining(["ingredientId", "isCustom", "customName"]),
+    );
+    expect(item.properties?.ingredientId?.oneOf?.map((o) => o.$ref ?? o.type)).toEqual([
+      "#/components/schemas/ReferenceId",
+      "null",
+    ]);
+    expect(Object.keys(schema("KitchenItemCreate").properties ?? {})).toEqual([
+      "ingredientId",
+      "customName",
+      "category",
+      "state",
+    ]);
+    expect(operation("addKitchenItem").operation.description).toContain("SAF-09");
+  });
+
+  it("KIT-06 KIT-07 items carry a usage rank and the default staple flag", () => {
+    expect(schema("KitchenItem").required).toEqual(
+      expect.arrayContaining(["usageRank", "isDefaultStaple"]),
+    );
+    expect(operation("listKitchenItems").operation["x-requirements"]).toEqual(
+      expect.arrayContaining(["KIT-07", "ACC-05"]),
+    );
+  });
+
+  it("KIT-08 sets are created, replaced, deleted and marked available in one call", () => {
+    expect(path("listIngredientSets")).toBe("get /v1/household/kitchen/sets");
+    expect(path("createIngredientSet")).toBe("post /v1/household/kitchen/sets");
+    expect(path("replaceIngredientSet")).toBe("put /v1/household/kitchen/sets/{setId}");
+    expect(path("deleteIngredientSet")).toBe("delete /v1/household/kitchen/sets/{setId}");
+    expect(path("markIngredientSetAvailable")).toBe(
+      "post /v1/household/kitchen/sets/{setId}/mark-available",
+    );
+    expect(errorCodes).toContain("ingredient_set_limit_reached");
+  });
+
+  it("KIT-09 quantity is a little, some or plenty; a brand is a reference brand or text", () => {
+    expect(schema("KitchenQuantity").enum).toEqual(["a_little", "some", "plenty"]);
+    expect(Object.keys(schema("KitchenBrandInput").properties ?? {})).toEqual([
+      "brandId",
+      "customName",
+    ]);
+    expect(schema("KitchenBrand").required).toEqual(["brandId", "name"]);
+  });
+
+  it("KIT-16 sync: change IDs, ages on the phone's clock, server timestamps and a cursor", () => {
+    expect(path("syncKitchen")).toBe("post /v1/household/kitchen/sync");
+    expect(schema("KitchenChange").required).toEqual([
+      "changeId",
+      "ingredient",
+      "operation",
+      "ageMs",
+    ]);
+    expect(schema("KitchenChangeOperation").enum).toEqual(["upsert", "remove"]);
+    expect(schema("KitchenChangeOutcome").enum).toEqual(["applied", "superseded", "rejected"]);
+    expect(schema("KitchenSyncResponse").required).toEqual(
+      expect.arrayContaining(["cursor", "full", "items", "removedItemIds", "results"]),
+    );
+    expect(schema("KitchenItem").required).toContain("changedAt");
+    expect(operation("syncKitchen").operation.description).toMatch(/latest change/);
+  });
+
+  it("operations designed ahead of their server work name the task that serves them", () => {
+    const planned = operations()
+      .filter((entry) => entry.operation["x-server-task"] !== undefined)
+      .map((entry) => `${entry.operation.operationId} ${entry.operation["x-server-task"]}`)
+      .sort();
+    expect(planned).toEqual(
+      [
+        "createIngredientSet T-032",
+        "deleteIngredientSet T-032",
+        "listIngredientSets T-032",
+        "markIngredientSetAvailable T-032",
+        "replaceIngredientSet T-032",
+        "syncKitchen T-032",
+      ].sort(),
+    );
+  });
+
+  it("text a user types never travels in a URL (search queries, custom names)", () => {
+    const queryParams = operations().flatMap((entry) =>
+      (entry.operation.parameters ?? [])
+        .filter((p) => p.in === "query")
+        .map((p) => `${entry.operation.operationId}:${p.name ?? ""}`),
+    );
+    const pathLevel = Object.values(SPEC.paths).flatMap((item) =>
+      ((item["parameters"] ?? []) as { in?: string; name?: string }[])
+        .filter((p) => p.in === "query")
+        .map((p) => p.name ?? ""),
+    );
+    expect(queryParams).toEqual([]);
+    expect(pathLevel.sort()).toEqual(["audience", "language"]);
+  });
+
+  it("kitchen data is personal, never health data", () => {
+    const kitchen = reachableSchemas([
+      "KitchenItemList",
+      "KitchenItemCreate",
+      "KitchenItemUpdate",
+      "KitchenSyncRequest",
+      "KitchenSyncResponse",
+      "IngredientSetList",
+      "IngredientSetInput",
+    ]);
+    for (const name of kitchen) {
+      expect(schema(name)["x-data-sensitivity"], name).not.toBe("sensitive_health");
+    }
+  });
+});
+
+describe("photo setup and Confirm-and-Save shapes (schemas only)", () => {
+  const recognition = reachableSchemas([
+    "PhotoSession",
+    "RecognitionConfirmation",
+    "RecognitionConfirmationResult",
+  ]);
+  const recognitionOnly = recognition.filter((name) => /photo|recogni/i.test(name));
+
+  it("no endpoint for photos or recognition exists yet (T-035, T-038)", () => {
+    expect(Object.keys(SPEC.paths).filter((p) => /photo|recogni/i.test(p))).toEqual([]);
+  });
+
+  it("REC-01 to REC-05 sessions, confidence, likely options, kitchen match and confirmation", () => {
+    expect(schema("PhotoSessionStatus").enum).toEqual([
+      "collecting",
+      "processing",
+      "ready",
+      "failed",
+      "confirmed",
+      "discarded",
+      "expired",
+    ]);
+    expect(schema("RecognitionConfidence").enum).toEqual(["high", "medium", "low"]);
+    expect(schema("PhotoSession").required).toContain("maxPhotos");
+    expect(schema("RecognizedItem").required).toEqual(
+      expect.arrayContaining(["confidence", "options", "kitchenItemId", "ingredientId"]),
+    );
+    expect(schema("RecognitionConfirmation").required).toEqual(["items"]);
+    expect(Object.keys(schema("RecognitionConfirmationItem").properties ?? {})).toEqual([
+      "recognizedItemId",
+      "ingredientId",
+      "customName",
+      "category",
+    ]);
+  });
+
+  it("REC-06 SAF-10 recognition output carries no safety, allergen or halal field", () => {
+    const props = recognitionOnly.flatMap((name) => Object.keys(schema(name).properties ?? {}));
+    expect(props.length).toBeGreaterThan(10);
+    expect(
+      props.filter((p) => /safe|allergen|halal|component|diet|verdict|cekAman/i.test(p)),
+    ).toEqual([]);
+    for (const name of recognition) {
+      expect(name).not.toMatch(/Safety|Allergen|Halal|HardRule/);
+    }
+  });
+
+  it("REC-07 SET-05 DAT-03 no schema carries a photo, a URL or a link", () => {
+    expect(allPropertyNames().filter((p) => /url|uri|href|link|bytes|base64/i.test(p))).toEqual([]);
+    for (const name of recognitionOnly) {
+      expect(JSON.stringify(schema(name)), name).not.toMatch(/"format":"(binary|byte)"/);
+    }
+  });
+});
+
+describe("QUESTIONS #58 response enums are chosen once", () => {
+  it("the kitchen and recognition enums match the reviewed lists (a change needs a version bump)", () => {
+    const enums = Object.fromEntries(
+      [
+        "KitchenCategory",
+        "KitchenItemState",
+        "KitchenQuantity",
+        "KitchenChangeOperation",
+        "KitchenChangeOutcome",
+        "PhotoSessionStatus",
+        "RecognitionFailureReason",
+        "RecognitionConfidence",
+      ].map((name) => [name, schema(name).enum]),
+    );
+    expect(enums).toEqual({
+      KitchenCategory: [
+        "protein",
+        "vegetables",
+        "fruit",
+        "spices_aromatics",
+        "staples",
+        "sauces_condiments",
+        "dairy",
+        "frozen",
+        "leftovers",
+      ],
+      KitchenItemState: ["available", "out"],
+      KitchenQuantity: ["a_little", "some", "plenty"],
+      KitchenChangeOperation: ["upsert", "remove"],
+      KitchenChangeOutcome: ["applied", "superseded", "rejected"],
+      PhotoSessionStatus: [
+        "collecting",
+        "processing",
+        "ready",
+        "failed",
+        "confirmed",
+        "discarded",
+        "expired",
+      ],
+      RecognitionFailureReason: [
+        "ai_not_enabled",
+        "ai_unavailable",
+        "photos_unreadable",
+        "processing_failed",
+      ],
+      RecognitionConfidence: ["high", "medium", "low"],
+    });
   });
 });
 

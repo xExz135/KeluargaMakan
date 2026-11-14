@@ -35,8 +35,11 @@ enum ErrorCode {
   hardRuleDuplicate._(r'hard_rule_duplicate'),
   mappingNotApplicable._(r'mapping_not_applicable'),
   idempotencyKeyReused._(r'idempotency_key_reused'),
+  kitchenItemLimitReached._(r'kitchen_item_limit_reached'),
+  ingredientSetLimitReached._(r'ingredient_set_limit_reached'),
   rateLimited._(r'rate_limited'),
   rulesUnavailable._(r'rules_unavailable'),
+  referenceDataUnavailable._(r'reference_data_unavailable'),
   signInMethodUnavailable._(r'sign_in_method_unavailable'),
   serviceUnavailable._(r'service_unavailable'),
   internalError._(r'internal_error'),
@@ -122,8 +125,11 @@ class ErrorCodeTypeTransformer {
         case r'hard_rule_duplicate': return ErrorCode.hardRuleDuplicate;
         case r'mapping_not_applicable': return ErrorCode.mappingNotApplicable;
         case r'idempotency_key_reused': return ErrorCode.idempotencyKeyReused;
+        case r'kitchen_item_limit_reached': return ErrorCode.kitchenItemLimitReached;
+        case r'ingredient_set_limit_reached': return ErrorCode.ingredientSetLimitReached;
         case r'rate_limited': return ErrorCode.rateLimited;
         case r'rules_unavailable': return ErrorCode.rulesUnavailable;
+        case r'reference_data_unavailable': return ErrorCode.referenceDataUnavailable;
         case r'sign_in_method_unavailable': return ErrorCode.signInMethodUnavailable;
         case r'service_unavailable': return ErrorCode.serviceUnavailable;
         case r'internal_error': return ErrorCode.internalError;
