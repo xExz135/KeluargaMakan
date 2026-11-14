@@ -22,6 +22,18 @@ describe("api config (T-017)", () => {
     expect(config.sessions.refreshGraceSeconds).toBe(0);
   });
 
+  it("L1 idempotency records are kept at most 72 hours (security review T-019)", () => {
+    expect(
+      resolveApiConfig({ retention: { idempotencyKeyHours: 72 } }).retention.idempotencyKeyHours,
+    ).toBe(72);
+    for (const hours of [73, 87_600, 0]) {
+      expect(
+        () => resolveApiConfig({ retention: { idempotencyKeyHours: hours } }),
+        String(hours),
+      ).toThrow(/idempotency retention 1-72/);
+    }
+  });
+
   it("rejects unknown keys and out-of-range values", () => {
     expect(() => resolveApiConfig({ signInCode: { lenght: 6 } } as never)).toThrow(/Unknown/);
     expect(() => resolveApiConfig({ signInCode: { length: 3 } })).toThrow(/4-8/);

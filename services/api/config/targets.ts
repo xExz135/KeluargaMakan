@@ -128,52 +128,118 @@ export function resolveTargets(overrides: TargetOverrides = {}): Targets {
   const defaults = defaultTargets as unknown as Record<string, Record<string, Target<unknown>>>;
   const given = overrides as Record<string, Record<string, unknown> | undefined>;
 
+  // Own properties only: a `__proto__` key from JSON must not match a default.
   for (const [group, entries] of Object.entries(given)) {
-    const known = defaults[group];
-    if (known === undefined) {
-      throw new Error(`Unknown target group: ${group}`);
+    if (!Object.hasOwn(defaults, group)) throw new Error(`Unknown target group: ${group}`);
+    const known = defaults[group]!;
+    if (
+      entries !== undefined &&
+      (typeof entries !== "object" || entries === null || Array.isArray(entries))
+    ) {
+      throw new Error(`Target group ${group} must be an object`);
     }
     for (const key of Object.keys(entries ?? {})) {
-      if (!(key in known)) {
-        throw new Error(`Unknown target: ${group}.${key}`);
-      }
+      if (!Object.hasOwn(known, key)) throw new Error(`Unknown target: ${group}.${key}`);
     }
   }
 
   const resolved: Record<string, Record<string, Target<unknown>>> = {};
   for (const [group, entries] of Object.entries(defaults)) {
-    const groupOverrides = given[group] ?? {};
+    const groupOverrides = Object.hasOwn(given, group) ? (given[group] ?? {}) : {};
     const out: Record<string, Target<unknown>> = {};
     for (const [key, entry] of Object.entries(entries)) {
-      const value = groupOverrides[key];
+      const value = Object.hasOwn(groupOverrides, key) ? groupOverrides[key] : undefined;
       out[key] = value === undefined ? entry : { ...entry, value };
     }
     resolved[group] = out;
   }
   const targets = resolved as unknown as Targets;
-  checkFloors(targets);
+  checkBounds(targets);
   return deepFreeze(targets);
 }
 
 /**
- * Values the SRS sets as a minimum, whatever the validated target becomes.
- * PRF-02: "at least 12 profiles per household".
+ * Security review T-019 L1: every target has a type and a range. Where the
+ * SRS states a limit (PRF-02 "at least 12", SET-04 and SET-08 "within 30
+ * days"), the range enforces it; elsewhere it only stops values that would
+ * be absurd or break a requirement (negative retention, "never"). A value
+ * outside its range stops startup.
  */
-export const TARGET_FLOORS = Object.freeze({ minMaxProfiles: 12, maxMaxProfiles: 100 });
+interface Bound {
+  readonly min: number;
+  readonly max: number;
+  readonly integer: boolean;
+  readonly nullable?: boolean;
+  readonly why: string;
+}
 
-function checkFloors(targets: Targets): void {
-  const maxProfiles = targets.household.maxProfiles.value;
-  if (
-    !Number.isInteger(maxProfiles) ||
-    maxProfiles < TARGET_FLOORS.minMaxProfiles ||
-    maxProfiles > TARGET_FLOORS.maxMaxProfiles
-  ) {
-    throw new Error("household.maxProfiles must be a whole number from 12 to 100 (PRF-02)");
-  }
-  const withdrawalDays = targets.dataManagement.healthConsentWithdrawalDeletionDays.value;
-  if (!Number.isInteger(withdrawalDays) || withdrawalDays < 0 || withdrawalDays > 30) {
-    // SET-04: deletion within 30 days; a longer window would break the requirement.
-    throw new Error("dataManagement.healthConsentWithdrawalDeletionDays must be 0 to 30 (SET-04)");
+const whole = (min: number, max: number, why: string): Bound => ({
+  min,
+  max,
+  integer: true,
+  why,
+});
+
+export const TARGET_BOUNDS: Readonly<{
+  readonly [G in keyof Targets]: { readonly [K in keyof Targets[G]]: Bound };
+}> = Object.freeze({
+  household: { maxProfiles: whole(12, 100, "PRF-02: at least 12 profiles") },
+  recognition: {
+    maxPhotosPerSession: whole(1, 20, "REC-01"),
+    latencyP90Ms: whole(1, 60_000, "REC-08, NFR-03"),
+  },
+  suggestions: {
+    repetitionWindowDays: whole(0, 30, "SUG-07"),
+    maxConsecutiveSameMainProtein: whole(1, 14, "SUG-07"),
+    latencyP90Ms: whole(1, 60_000, "SUG-13, NFR-03"),
+  },
+  tasteAndTweak: { latencyP90Ms: whole(1, 60_000, "TNT-07, NFR-03") },
+  referenceData: { maxPropagationHours: whole(1, 72, "SAF-13") },
+  notifications: { maxPerDayDefault: whole(0, 10, "NTF-03") },
+  dataManagement: {
+    healthConsentWithdrawalDeletionDays: whole(0, 30, "SET-04: deletion within 30 days"),
+    accountDeletionDays: whole(0, 30, "SET-08: deletion within 30 days"),
+    safetyLogRetentionYears: whole(1, 5, "DAT-05: a positive retention"),
+    mealHistoryRetentionYears: whole(1, 5, "DAT-04: a positive retention"),
+    backupRestoreTestIntervalMonths: whole(1, 12, "DAT-07: restore tested at least yearly"),
+  },
+  serviceLevels: {
+    backendAvailabilityMonthlyPercent: { min: 90, max: 100, integer: false, why: "NFR-04" },
+    crashFreeSessionsPercent: { min: 90, max: 100, integer: false, why: "NFR-06" },
+  },
+  aiCost: {
+    monthlyLimitPerHousehold: {
+      min: 1,
+      max: 1_000_000,
+      integer: true,
+      nullable: true,
+      why: "AI-09: null means no limit",
+    },
+  },
+});
+
+function checkBounds(targets: Targets): void {
+  const values = targets as unknown as Record<string, Record<string, Target<unknown>>>;
+  const bounds = TARGET_BOUNDS as unknown as Record<string, Record<string, Bound>>;
+  for (const [group, entries] of Object.entries(values)) {
+    for (const [key, entry] of Object.entries(entries)) {
+      const bound = bounds[group]?.[key];
+      if (bound === undefined) throw new Error(`target ${group}.${key} has no bound`);
+      const value = entry.value;
+      if (value === null && bound.nullable === true) continue;
+      const ok =
+        typeof value === "number" &&
+        Number.isFinite(value) &&
+        (!bound.integer || Number.isInteger(value)) &&
+        value >= bound.min &&
+        value <= bound.max;
+      if (!ok) {
+        throw new Error(
+          `${group}.${key} must be ${bound.integer ? "a whole number" : "a number"} from ` +
+            `${bound.min} to ${bound.max}${bound.nullable === true ? " or null" : ""} (${bound.why})`,
+        );
+      }
+    }
   }
 }
 
