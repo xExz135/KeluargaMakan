@@ -195,7 +195,7 @@ export interface paths {
         head?: never;
         /**
          * Edit a profile
-         * @description Only the fields present are changed. Setting `portionSize` or `ricePortion` to null returns it to the age-group default from configuration (PRF-07). Changing an adult profile to an infant, child or teen age group needs `guardianConfirmation` (SET-10). The child flag follows the age group and cannot be set directly (PRF-18).
+         * @description Only the fields present are changed. Setting `portionSize` or `ricePortion` to null returns it to the age-group default from configuration (PRF-07). Changing an adult profile to an infant, child or teen age group needs `guardianConfirmation` (SET-10). The child flag follows the age group and cannot be set directly (PRF-18). The manager's own profile cannot take a child age group (409 `manager_profile_must_be_adult`, QUESTIONS #46). When a change moves the member between adult and child, a health-data consent given on the other text version no longer allows new health data: the stored rules stay and are still checked by Cek Aman, and `rules.consent.renewalRequired` is true until a new decision is recorded on the matching text (QUESTIONS #62).
          */
         patch: operations["updateProfile"];
         trace?: never;
@@ -261,7 +261,7 @@ export interface paths {
         put?: never;
         /**
          * Add a hard rule
-         * @description Adds an allergy from the standard list, halal, vegetarian, vegan, a medical exclusion or a free-text rule (PRF-03, PRF-04). Needs a current health-data consent for the member, else 409 `consent_required` (ACC-08); for a child the guardian confirmation must also be on record (SET-10). Free-text and medical-exclusion rules are saved as unmapped unless the manager picked matching ingredients (`mappedIngredientIds`). An unmapped rule makes Cek Aman return "Check the label" for related recipes, never "Safe" (PRF-08, SAF-09). Online only: the server re-evaluates affected safety results.
+         * @description Adds an allergy from the standard list, halal, vegetarian, vegan, a medical exclusion or a free-text rule (PRF-03, PRF-04). Needs a current health-data consent for the member, else 409 `consent_required` (ACC-08), also while `consent.renewalRequired` is true; for a child the guardian confirmation must also be on record (SET-10). Free-text and medical-exclusion rules are saved as unmapped unless the manager picked matching ingredients (`mappedIngredientIds`). An unmapped rule makes Cek Aman return "Check the label" for related recipes, never "Safe" (PRF-08, SAF-09). Online only: the server re-evaluates affected safety results.
          */
         post: operations["createHardRule"];
         delete?: never;
@@ -324,6 +324,8 @@ export interface paths {
         parameters: {
             query: {
                 language: components["schemas"]["Language"];
+                /** @description For `health_data`: `child` for an infant, child or teen profile, `adult` otherwise (default). Ignored for `guardian_confirmation`. */
+                audience?: components["schemas"]["ConsentAudience"];
             };
             header?: never;
             path: {
@@ -333,7 +335,7 @@ export interface paths {
         };
         /**
          * Get the current consent text for a purpose
-         * @description Returns the current text and its version, which the client sends back when recording a decision (SET-03). Texts are served from content, not built into the app, so legal changes need no release. `isDraft` stays true until legal approval.
+         * @description Returns the current text and its version, which the client sends back when recording a decision (SET-03). Texts are served from content, not built into the app, so legal changes need no release. `isDraft` stays true until legal approval. The health-data text has an adult and a child version (SET-10, QUESTIONS #62).
          */
         get: operations["getConsentText"];
         put?: never;
@@ -379,7 +381,7 @@ export interface paths {
         put?: never;
         /**
          * Record the manager's health-data consent decision for a member
-         * @description Records an explicit decision, given or declined, on storing the member's hard rules (ACC-08, SET-03). Nothing is pre-given. `textVersion` must be the current version from `getConsentText`, else 409 `consent_text_outdated`. For a child profile the guardian confirmation must be on record, else 409 `guardian_confirmation_required` (SET-10). A decline stores no rules; the member shows "rules not saved".
+         * @description Records an explicit decision, given or declined, on storing the member's hard rules (ACC-08, SET-03). Nothing is pre-given. `textVersion` must be the current version from `getConsentText` for the member's audience (the child text for an infant, child or teen profile), else 409 `consent_text_outdated`. `expectedConsent` is the member's `rules.consent` the manager was shown; if the stored state has moved since (another phone decided or withdrew), nothing is recorded and the answer is 409 `consent_changed`. For a child profile the guardian confirmation must be on record, else 409 `guardian_confirmation_required` (SET-10). A decline stores no rules; the member shows "rules not saved". Online only: never queue this request offline; ask again after a 409.
          */
         post: operations["recordHealthDataConsent"];
         delete?: never;
@@ -401,7 +403,7 @@ export interface paths {
         put?: never;
         /**
          * Withdraw a member's health-data consent
-         * @description Withdraws the current consent (SET-03). The member's hard rules stop being used at once and are deleted by `deletionDueBy`, set from the configured period (SET-04, 30 days target). Cek Aman no longer checks rules for this member, and clients show "rules not saved". Returns 409 `consent_not_active` when there is no current consent.
+         * @description Withdraws the current consent (SET-03). The member's hard rules stop being used at once and are deleted by `deletionDueBy`, set from the configured period (SET-04, 30 days target). Cek Aman no longer checks rules for this member, and clients show "rules not saved". `expectedConsent` is the state the manager was shown; if it has moved since, nothing changes and the answer is 409 `consent_changed`. Returns 409 `consent_not_active` when there is no current consent. Online only: never queue this request offline.
          */
         post: operations["withdrawHealthDataConsent"];
         delete?: never;
@@ -487,7 +489,7 @@ export interface components {
          * @description Stable machine-readable error code. New codes may be added; clients treat an unknown code like `internal_error`.
          * @enum {string}
          */
-        ErrorCode: "validation_failed" | "code_invalid" | "code_expired" | "code_attempts_exceeded" | "unauthenticated" | "access_token_expired" | "refresh_token_invalid" | "google_token_invalid" | "forbidden" | "not_found" | "household_required" | "household_exists" | "profile_limit_reached" | "manager_profile_not_deletable" | "guardian_confirmation_required" | "consent_required" | "consent_text_outdated" | "consent_not_active" | "hard_rule_duplicate" | "mapping_not_applicable" | "idempotency_key_reused" | "rate_limited" | "rules_unavailable" | "sign_in_method_unavailable" | "service_unavailable" | "internal_error";
+        ErrorCode: "validation_failed" | "code_invalid" | "code_expired" | "code_attempts_exceeded" | "unauthenticated" | "access_token_expired" | "refresh_token_invalid" | "google_token_invalid" | "forbidden" | "not_found" | "household_required" | "household_exists" | "profile_limit_reached" | "manager_profile_not_deletable" | "guardian_confirmation_required" | "consent_required" | "consent_text_outdated" | "consent_not_active" | "consent_changed" | "manager_profile_must_be_adult" | "hard_rule_duplicate" | "mapping_not_applicable" | "idempotency_key_reused" | "rate_limited" | "rules_unavailable" | "sign_in_method_unavailable" | "service_unavailable" | "internal_error";
         /** @enum {string} */
         SignInChannel: "phone" | "email";
         /** @enum {string} */
@@ -819,6 +821,8 @@ export interface components {
          */
         RulesConsentStatus: "none" | "given" | "declined" | "withdrawn";
         RulesConsentState: {
+            /** @description True when the consent was given on the other audience's text (the member changed between adult and child, QUESTIONS #62). The stored rules are still returned and still checked by Cek Aman, but no new health data is saved (409 `consent_required`) until a new decision is recorded on the current text for the member's audience. */
+            renewalRequired: boolean;
             status: components["schemas"]["RulesConsentStatus"];
             /** @description The latest health-data consent record, or null for `none`. */
             consentRecordId: components["schemas"]["Id"] | null;
@@ -848,6 +852,11 @@ export interface components {
          * @enum {string}
          */
         ConsentPurpose: "health_data" | "guardian_confirmation";
+        /**
+         * @description Which health-data consent text applies: `child` for infant, child and teen profiles (the manager decides as parent or guardian, SET-10), `adult` otherwise.
+         * @enum {string}
+         */
+        ConsentAudience: "adult" | "child";
         /** @enum {string} */
         ConsentDecision: "given" | "declined";
         /** @example health-data-draft-1 */
@@ -873,6 +882,15 @@ export interface components {
             textVersion: components["schemas"]["ConsentTextVersion"];
             /** @description Language of the text the manager was shown. */
             language: components["schemas"]["Language"];
+            expectedConsent: components["schemas"]["ExpectedConsentState"];
+        };
+        HealthDataConsentWithdrawal: {
+            expectedConsent: components["schemas"]["ExpectedConsentState"];
+        };
+        /** @description Precondition for a consent write (security review T-019 M1): the `status` and `consentRecordId` of the member's `rules.consent` as the manager was shown it. `{status: none, consentRecordId: null}` for a member with no decision yet. */
+        ExpectedConsentState: {
+            status: components["schemas"]["RulesConsentStatus"];
+            consentRecordId: components["schemas"]["Id"] | null;
         };
         /** @description SRS 18.1 Consent record (SET-03). */
         ConsentRecord: {
@@ -1566,6 +1584,8 @@ export interface operations {
         parameters: {
             query: {
                 language: components["schemas"]["Language"];
+                /** @description For `health_data`: `child` for an infant, child or teen profile, `adult` otherwise (default). Ignored for `guardian_confirmation`. */
+                audience?: components["schemas"]["ConsentAudience"];
             };
             header?: never;
             path: {
@@ -1658,7 +1678,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HealthDataConsentWithdrawal"];
+            };
+        };
         responses: {
             /** @description The withdrawn consent record. */
             200: {

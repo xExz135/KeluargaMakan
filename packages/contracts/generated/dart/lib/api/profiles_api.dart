@@ -242,7 +242,7 @@ class ProfilesApi {
 
   /// Edit a profile
   ///
-  /// Only the fields present are changed. Setting `portionSize` or `ricePortion` to null returns it to the age-group default from configuration (PRF-07). Changing an adult profile to an infant, child or teen age group needs `guardianConfirmation` (SET-10). The child flag follows the age group and cannot be set directly (PRF-18).
+  /// Only the fields present are changed. Setting `portionSize` or `ricePortion` to null returns it to the age-group default from configuration (PRF-07). Changing an adult profile to an infant, child or teen age group needs `guardianConfirmation` (SET-10). The child flag follows the age group and cannot be set directly (PRF-18). The manager's own profile cannot take a child age group (409 `manager_profile_must_be_adult`, QUESTIONS #46). When a change moves the member between adult and child, a health-data consent given on the other text version no longer allows new health data: the stored rules stay and are still checked by Cek Aman, and `rules.consent.renewalRequired` is true until a new decision is recorded on the matching text (QUESTIONS #62).
   ///
   /// Note: This method returns the HTTP [Response].
   ///
@@ -280,7 +280,7 @@ class ProfilesApi {
 
   /// Edit a profile
   ///
-  /// Only the fields present are changed. Setting `portionSize` or `ricePortion` to null returns it to the age-group default from configuration (PRF-07). Changing an adult profile to an infant, child or teen age group needs `guardianConfirmation` (SET-10). The child flag follows the age group and cannot be set directly (PRF-18).
+  /// Only the fields present are changed. Setting `portionSize` or `ricePortion` to null returns it to the age-group default from configuration (PRF-07). Changing an adult profile to an infant, child or teen age group needs `guardianConfirmation` (SET-10). The child flag follows the age group and cannot be set directly (PRF-18). The manager's own profile cannot take a child age group (409 `manager_profile_must_be_adult`, QUESTIONS #46). When a change moves the member between adult and child, a health-data consent given on the other text version no longer allows new health data: the stored rules stay and are still checked by Cek Aman, and `rules.consent.renewalRequired` is true until a new decision is recorded on the matching text (QUESTIONS #62).
   ///
   /// Parameters:
   ///

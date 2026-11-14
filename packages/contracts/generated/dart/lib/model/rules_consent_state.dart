@@ -13,12 +13,16 @@ part of keluargamakan_api;
 class RulesConsentState {
   /// Returns a new [RulesConsentState] instance.
   RulesConsentState({
+    required this.renewalRequired,
     required this.status,
     required this.consentRecordId,
     required this.decidedAt,
     required this.textVersion,
     required this.deletionDueBy,
   });
+
+  /// True when the consent was given on the other audience's text (the member changed between adult and child, QUESTIONS #62). The stored rules are still returned and still checked by Cek Aman, but no new health data is saved (409 `consent_required`) until a new decision is recorded on the current text for the member's audience.
+  final bool renewalRequired;
 
   final RulesConsentStatus status;
 
@@ -34,6 +38,7 @@ class RulesConsentState {
 
   @override
   bool operator ==(Object other) => identical(this, other) || other is RulesConsentState &&
+    other.renewalRequired == renewalRequired &&
     other.status == status &&
     other.consentRecordId == consentRecordId &&
     other.decidedAt == decidedAt &&
@@ -43,6 +48,7 @@ class RulesConsentState {
   @override
   int get hashCode =>
     // ignore: unnecessary_parenthesis
+    (renewalRequired.hashCode) +
     (status.hashCode) +
     (consentRecordId == null ? 0 : consentRecordId!.hashCode) +
     (decidedAt == null ? 0 : decidedAt!.hashCode) +
@@ -50,10 +56,11 @@ class RulesConsentState {
     (deletionDueBy == null ? 0 : deletionDueBy!.hashCode);
 
   @override
-  String toString() => 'RulesConsentState[status=$status, consentRecordId=$consentRecordId, decidedAt=$decidedAt, textVersion=$textVersion, deletionDueBy=$deletionDueBy]';
+  String toString() => 'RulesConsentState[renewalRequired=$renewalRequired, status=$status, consentRecordId=$consentRecordId, decidedAt=$decidedAt, textVersion=$textVersion, deletionDueBy=$deletionDueBy]';
 
   Map<String, dynamic> toJson() {
     final json = <String, dynamic>{};
+      json[r'renewalRequired'] = this.renewalRequired;
       json[r'status'] = this.status;
     if (this.consentRecordId != null) {
       json[r'consentRecordId'] = this.consentRecordId;
@@ -81,6 +88,7 @@ class RulesConsentState {
   /// Clones this instance of [RulesConsentState] and returns a new one where some of the
   /// properties have changed.
   RulesConsentState copyWith({
+    bool? renewalRequired,
     RulesConsentStatus? status,
     String? consentRecordId,
     bool consentRecordIdSetToNull = false,
@@ -91,6 +99,7 @@ class RulesConsentState {
     DateTime? deletionDueBy,
     bool deletionDueBySetToNull = false,
   }) => RulesConsentState(
+    renewalRequired: renewalRequired ?? this.renewalRequired,
     status: status ?? this.status,
     consentRecordId: consentRecordIdSetToNull ? null : consentRecordId ?? this.consentRecordId,
     decidedAt: decidedAtSetToNull ? null : decidedAt ?? this.decidedAt,
@@ -109,6 +118,8 @@ class RulesConsentState {
       // Note 1: the values aren't checked for validity beyond being non-null.
       // Note 2: this code is stripped in release mode!
       assert(() {
+        assert(json.containsKey(r'renewalRequired'), 'Required key "RulesConsentState[renewalRequired]" is missing from JSON.');
+        assert(json[r'renewalRequired'] != null, 'Required key "RulesConsentState[renewalRequired]" has a null value in JSON.');
         assert(json.containsKey(r'status'), 'Required key "RulesConsentState[status]" is missing from JSON.');
         assert(json[r'status'] != null, 'Required key "RulesConsentState[status]" has a null value in JSON.');
         assert(json.containsKey(r'consentRecordId'), 'Required key "RulesConsentState[consentRecordId]" is missing from JSON.');
@@ -119,6 +130,7 @@ class RulesConsentState {
       }());
 
       return RulesConsentState(
+        renewalRequired: mapValueOfType<bool>(json, r'renewalRequired')!,
         status: RulesConsentStatus.fromJson(json[r'status'])!,
         consentRecordId: mapValueOfType<String>(json, r'consentRecordId'),
         decidedAt: mapDateTime(json, r'decidedAt', r''),
@@ -171,6 +183,7 @@ class RulesConsentState {
 
   /// The list of required keys that must be present in a JSON.
   static const requiredKeys = <String>{
+    'renewalRequired',
     'status',
     'consentRecordId',
     'decidedAt',

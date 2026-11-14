@@ -44,6 +44,8 @@ const TITLES: Readonly<Partial<Record<ErrorCode, string>>> = {
   consent_required: "Consent required",
   consent_text_outdated: "Consent text outdated",
   consent_not_active: "Consent not active",
+  consent_changed: "Consent changed",
+  manager_profile_must_be_adult: "Manager profile must be adult",
   hard_rule_duplicate: "Hard rule duplicate",
   mapping_not_applicable: "Mapping not applicable",
   idempotency_key_reused: "Idempotency key reused",

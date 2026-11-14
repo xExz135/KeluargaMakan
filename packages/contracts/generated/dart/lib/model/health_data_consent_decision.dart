@@ -16,6 +16,7 @@ class HealthDataConsentDecision {
     required this.decision,
     required this.textVersion,
     required this.language,
+    required this.expectedConsent,
   });
 
   final ConsentDecision decision;
@@ -25,27 +26,32 @@ class HealthDataConsentDecision {
   /// Language of the text the manager was shown.
   final Language language;
 
+  final ExpectedConsentState expectedConsent;
+
   @override
   bool operator ==(Object other) => identical(this, other) || other is HealthDataConsentDecision &&
     other.decision == decision &&
     other.textVersion == textVersion &&
-    other.language == language;
+    other.language == language &&
+    other.expectedConsent == expectedConsent;
 
   @override
   int get hashCode =>
     // ignore: unnecessary_parenthesis
     (decision.hashCode) +
     (textVersion.hashCode) +
-    (language.hashCode);
+    (language.hashCode) +
+    (expectedConsent.hashCode);
 
   @override
-  String toString() => 'HealthDataConsentDecision[decision=$decision, textVersion=$textVersion, language=$language]';
+  String toString() => 'HealthDataConsentDecision[decision=$decision, textVersion=$textVersion, language=$language, expectedConsent=$expectedConsent]';
 
   Map<String, dynamic> toJson() {
     final json = <String, dynamic>{};
       json[r'decision'] = this.decision;
       json[r'textVersion'] = this.textVersion;
       json[r'language'] = this.language;
+      json[r'expectedConsent'] = this.expectedConsent;
     return json;
   }
 
@@ -55,10 +61,12 @@ class HealthDataConsentDecision {
     ConsentDecision? decision,
     String? textVersion,
     Language? language,
+    ExpectedConsentState? expectedConsent,
   }) => HealthDataConsentDecision(
     decision: decision ?? this.decision,
     textVersion: textVersion ?? this.textVersion,
     language: language ?? this.language,
+    expectedConsent: expectedConsent ?? this.expectedConsent,
   );
 
   /// Returns a new [HealthDataConsentDecision] instance and imports its values from
@@ -78,6 +86,8 @@ class HealthDataConsentDecision {
         assert(json[r'textVersion'] != null, 'Required key "HealthDataConsentDecision[textVersion]" has a null value in JSON.');
         assert(json.containsKey(r'language'), 'Required key "HealthDataConsentDecision[language]" is missing from JSON.');
         assert(json[r'language'] != null, 'Required key "HealthDataConsentDecision[language]" has a null value in JSON.');
+        assert(json.containsKey(r'expectedConsent'), 'Required key "HealthDataConsentDecision[expectedConsent]" is missing from JSON.');
+        assert(json[r'expectedConsent'] != null, 'Required key "HealthDataConsentDecision[expectedConsent]" has a null value in JSON.');
         return true;
       }());
 
@@ -85,6 +95,7 @@ class HealthDataConsentDecision {
         decision: ConsentDecision.fromJson(json[r'decision'])!,
         textVersion: mapValueOfType<String>(json, r'textVersion')!,
         language: Language.fromJson(json[r'language'])!,
+        expectedConsent: ExpectedConsentState.fromJson(json[r'expectedConsent'])!,
       );
     }
     return null;
@@ -135,6 +146,7 @@ class HealthDataConsentDecision {
     'decision',
     'textVersion',
     'language',
+    'expectedConsent',
   };
 }
 

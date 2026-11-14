@@ -22,9 +22,10 @@ import {
 } from "../http/testing/harness.js";
 import { AGE_GROUPS, dataHandlingFor } from "./child-data-policy.js";
 import { assertHealthDataWritable } from "./consent-service.js";
-import { CONSENT_TEXTS } from "./consent-texts.js";
+import { CONSENT_TEXTS, HEALTH_DATA_TEXTS } from "./consent-texts.js";
 
 const HEALTH_VERSION = CONSENT_TEXTS.health_data.version;
+const CHILD_VERSION = HEALTH_DATA_TEXTS.child.version;
 const WITHDRAWAL_DAYS = 7;
 
 function expectProblem(response: Response, status: number, code: string): void {
@@ -62,10 +63,36 @@ for (const target of DATABASE_TARGETS) {
     });
 
     const consentsUrl = (profileId: string) => `/v1/household/profiles/${profileId}/consents`;
-    const decide = (
+    /** The member's consent state as a client shows it (contract `ExpectedConsentState`). */
+    const expectedOf = async (home: HouseholdSession, profileId: string) => {
+      const state = consentStateOf(
+        (await latestHealthConsents(db, home.householdId, [profileId])).get(profileId),
+      );
+      return { status: state.status, consentRecordId: state.consentRecordId };
+    };
+    const versionFor = async (profileId: string) => {
+      const { rows } = await db.query<{ is_child: boolean }>(
+        `SELECT is_child FROM profile WHERE id = $1`,
+        [profileId],
+      );
+      return rows[0]?.is_child === true ? CHILD_VERSION : HEALTH_VERSION;
+    };
+    /** A decision made on a fresh screen: the current state as precondition, the member's text. */
+    const freshDecision = async (
       home: HouseholdSession,
       profileId: string,
-      body: object = { decision: "given", textVersion: HEALTH_VERSION, language: "id" },
+      fields: object = {},
+    ): Promise<object> => ({
+      decision: "given",
+      textVersion: await versionFor(profileId),
+      language: "id",
+      expectedConsent: await expectedOf(home, profileId),
+      ...fields,
+    });
+    const send = (
+      home: HouseholdSession,
+      profileId: string,
+      body: object,
       idempotencyKey?: string,
     ) =>
       api.request("POST", `${consentsUrl(profileId)}/health-data`, {
@@ -73,11 +100,15 @@ for (const target of DATABASE_TARGETS) {
         body,
         ...(idempotencyKey === undefined ? {} : { headers: { "idempotency-key": idempotencyKey } }),
       });
-    const withdraw = (home: HouseholdSession, profileId: string) =>
-      api.request("POST", `${consentsUrl(profileId)}/health-data/withdraw`, { token: home.token });
+    const decide = async (home: HouseholdSession, profileId: string, fields: object = {}) =>
+      send(home, profileId, await freshDecision(home, profileId, fields));
+    const withdraw = async (home: HouseholdSession, profileId: string, expected?: object) =>
+      api.request("POST", `${consentsUrl(profileId)}/health-data/withdraw`, {
+        token: home.token,
+        body: { expectedConsent: expected ?? (await expectedOf(home, profileId)) },
+      });
     const stateOf = async (home: HouseholdSession, profileId: string) =>
-      consentStateOf((await latestHealthConsents(db, home.householdId, [profileId])).get(profileId))
-        .status;
+      (await expectedOf(home, profileId)).status;
     const ruleCount = async (profileId: string) =>
       Number(
         (
@@ -188,13 +219,40 @@ for (const target of DATABASE_TARGETS) {
 
       it("SET-03 nothing is pre-given: a decision must be explicit and well formed", async () => {
         const home = await signInWithHousehold(api);
+        const none = { status: "none", consentRecordId: null };
         for (const body of [
           {},
-          { textVersion: HEALTH_VERSION, language: "id" },
-          { decision: "yes", textVersion: HEALTH_VERSION, language: "id" },
-          { decision: "given", textVersion: HEALTH_VERSION, language: "id", profileId: "x" },
+          { textVersion: HEALTH_VERSION, language: "id", expectedConsent: none },
+          { decision: "yes", textVersion: HEALTH_VERSION, language: "id", expectedConsent: none },
+          {
+            decision: "given",
+            textVersion: HEALTH_VERSION,
+            language: "id",
+            expectedConsent: none,
+            profileId: "x",
+          },
+          // M1: the precondition is required and must be consistent.
+          { decision: "given", textVersion: HEALTH_VERSION, language: "id" },
+          {
+            decision: "given",
+            textVersion: HEALTH_VERSION,
+            language: "id",
+            expectedConsent: { status: "none", consentRecordId: randomUUID() },
+          },
+          {
+            decision: "given",
+            textVersion: HEALTH_VERSION,
+            language: "id",
+            expectedConsent: { status: "given", consentRecordId: null },
+          },
+          {
+            decision: "given",
+            textVersion: HEALTH_VERSION,
+            language: "id",
+            expectedConsent: { status: "unknown", consentRecordId: null },
+          },
         ]) {
-          expectProblem(await decide(home, home.managerProfileId, body), 400, "validation_failed");
+          expectProblem(await send(home, home.managerProfileId, body), 400, "validation_failed");
         }
         expect(await stateOf(home, home.managerProfileId)).toBe("none");
       });
@@ -217,8 +275,9 @@ for (const target of DATABASE_TARGETS) {
       it("SET-03 a repeated decision with the same Idempotency-Key returns the first record", async () => {
         const home = await signInWithHousehold(api);
         const key = randomUUID();
-        const first = await decide(home, home.managerProfileId, undefined, key);
-        const again = await decide(home, home.managerProfileId, undefined, key);
+        const body = await freshDecision(home, home.managerProfileId);
+        const first = await send(home, home.managerProfileId, body, key);
+        const again = await send(home, home.managerProfileId, body, key);
         expect(again.status).toBe(201);
         expect(again.body).toEqual(first.body);
         const listed = await api.request("GET", consentsUrl(home.managerProfileId), {
@@ -226,14 +285,81 @@ for (const target of DATABASE_TARGETS) {
         });
         expect((listed.body as { items: unknown[] }).items).toHaveLength(1);
         expectProblem(
-          await decide(
-            home,
-            home.managerProfileId,
-            { decision: "declined", textVersion: HEALTH_VERSION, language: "id" },
-            key,
-          ),
+          await send(home, home.managerProfileId, { ...body, decision: "declined" }, key),
           409,
           "idempotency_key_reused",
+        );
+      });
+    });
+
+    describe("M1 consent writes are conditional on the state the manager was shown (security review T-019)", () => {
+      it("M1 P3 a decision replayed after the idempotency window does not re-activate a withdrawn consent", async () => {
+        const home = await signInWithHousehold(api);
+        const id = home.managerProfileId;
+        const key = randomUUID();
+        const body = await freshDecision(home, id);
+        expect((await send(home, id, body, key)).status).toBe(201);
+        await insertHardRule(db, keys, {
+          householdId: home.householdId,
+          profileId: id,
+          rule: { type: "halal" },
+          mappingConfirmedBy: null,
+        });
+        expect((await withdraw(home, id)).status).toBe(200);
+
+        // Within the window: the first answer (now withdrawn) comes back.
+        const early = await send(home, id, body, key);
+        expect(early.status).toBe(201);
+        expect((early.body as { withdrawnAt: string | null }).withdrawnAt).not.toBeNull();
+
+        // After the window the key is forgotten, but the state moved: 409.
+        await db.query(
+          `UPDATE idempotency_record SET created_at = created_at - interval '25 hours'
+            WHERE account_id = $1`,
+          [home.accountId],
+        );
+        expectProblem(await send(home, id, body, key), 409, "consent_changed");
+        expect(await stateOf(home, id)).toBe("withdrawn");
+        await expect(assertHealthDataWritable(db, home.householdId, id)).rejects.toBeInstanceOf(
+          ConsentRequiredError,
+        );
+      });
+
+      it("M1 a decision made on a stale screen (another phone withdrew meanwhile) is refused", async () => {
+        const home = await signInWithHousehold(api);
+        const id = home.managerProfileId;
+        await decide(home, id);
+        // Phone 1 shows "given" and prepares a renewed consent.
+        const stale = await freshDecision(home, id);
+        // Phone 2 withdraws.
+        expect((await withdraw(home, id)).status).toBe(200);
+        expectProblem(await send(home, id, stale), 409, "consent_changed");
+        expect(await stateOf(home, id)).toBe("withdrawn");
+      });
+
+      it("M1 a stale withdrawal does not remove a newer consent's rules", async () => {
+        const home = await signInWithHousehold(api);
+        const id = home.managerProfileId;
+        await decide(home, id);
+        const seen = await expectedOf(home, id);
+        await withdraw(home, id);
+        api.clock.advance(1);
+        await decide(home, id);
+        await insertHardRule(db, keys, {
+          householdId: home.householdId,
+          profileId: id,
+          rule: { type: "vegan" },
+          mappingConfirmedBy: null,
+        });
+        expectProblem(await withdraw(home, id, seen), 409, "consent_changed");
+        expect(await stateOf(home, id)).toBe("given");
+        expect(await ruleCount(id)).toBe(1);
+        expectProblem(
+          await api.request("POST", `${consentsUrl(id)}/health-data/withdraw`, {
+            token: home.token,
+          }),
+          400,
+          "validation_failed",
         );
       });
     });
@@ -352,6 +478,40 @@ for (const target of DATABASE_TARGETS) {
           (r) => r.purpose,
         );
         expect(purposes).toEqual(["health_data", "guardian_confirmation"]);
+        await expect(
+          assertHealthDataWritable(db, home.householdId, child),
+        ).resolves.toBeUndefined();
+      });
+
+      it("SET-10 Q62 a child's consent is given on the child text; the adult text is refused", async () => {
+        const home = await signInWithHousehold(api);
+        const text = await api.request(
+          "GET",
+          "/v1/consent-texts/health_data?language=id&audience=child",
+          { token: home.token },
+        );
+        expect(contractErrors("ConsentText", text.body)).toEqual([]);
+        expect(text.body).toMatchObject({ version: CHILD_VERSION, isDraft: true });
+        expectProblem(
+          await api.request("GET", "/v1/consent-texts/health_data?language=id&audience=teen", {
+            token: home.token,
+          }),
+          400,
+          "validation_failed",
+        );
+        const child = await addProfile(db, home, "teen");
+        expectProblem(
+          await decide(home, child, { textVersion: HEALTH_VERSION }),
+          409,
+          "consent_text_outdated",
+        );
+        // And an adult cannot be given the child text.
+        expectProblem(
+          await decide(home, home.managerProfileId, { textVersion: CHILD_VERSION }),
+          409,
+          "consent_text_outdated",
+        );
+        expect(await stateOf(home, child)).toBe("none");
       });
 
       it("SET-10 a child profile cannot exist without the guardian confirmation (database)", async () => {

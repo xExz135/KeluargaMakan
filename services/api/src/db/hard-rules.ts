@@ -457,6 +457,13 @@ export async function insertHardRule(
      * stored. It must not call the key service (N2).
      */
     readonly onInserted?: (tx: SqlExecutor, ruleId: string) => Promise<void>;
+    /**
+     * Runs under the member lock before the insert, with the member's current
+     * rules (decrypted with the key unwrapped before the lock, so no key
+     * service call happens here, N2). Throwing stops the insert, for example
+     * for a duplicate rule or a consent that needs renewal.
+     */
+    readonly beforeInsert?: (tx: SqlExecutor, existing: readonly HardRuleRecord[]) => Promise<void>;
   },
 ): Promise<HardRuleRecord> {
   const now = input.now ?? new Date();
@@ -470,6 +477,13 @@ export async function insertHardRule(
         await lockMembers(tx, input.householdId, [input.profileId]);
         const consentRecordId = await activeConsentId(tx, input.householdId, input.profileId);
         const key = await keys.claim(tx, input.householdId, input.profileId, prepared);
+        if (input.beforeInsert !== undefined) {
+          const known = new Map([[input.profileId, key]]);
+          const member = (
+            await readMembers(tx, keys, input.householdId, [input.profileId], known)
+          ).get(input.profileId);
+          await input.beforeInsert(tx, member?.rules ?? []);
+        }
         const id = randomUUID();
         const details = encryptField(
           key.dataKey,

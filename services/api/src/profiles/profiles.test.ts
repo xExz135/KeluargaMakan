@@ -15,7 +15,8 @@ import { RequestMethod } from "@nestjs/common";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { resolveProfileConfig } from "../../config/profiles.js";
-import { CONSENT_TEXTS } from "../consent/consent-texts.js";
+import { CONSENT_TEXTS, HEALTH_DATA_TEXTS } from "../consent/consent-texts.js";
+import { consentStateOf, latestHealthConsents } from "../db/consent.js";
 import { KeyServiceError, type KeyProvider } from "../db/crypto/key-provider.js";
 import type { SqlExecutor } from "../db/executor.js";
 import { loadRulesForEvaluation } from "../db/hard-rules.js";
@@ -34,6 +35,7 @@ import {
 } from "../http/testing/harness.js";
 
 const HEALTH_VERSION = CONSENT_TEXTS.health_data.version;
+const CHILD_VERSION = HEALTH_DATA_TEXTS.child.version;
 const GUARDIAN = {
   confirmed: true,
   textVersion: CONSENT_TEXTS.guardian_confirmation.version,
@@ -189,13 +191,43 @@ for (const target of DATABASE_TARGETS) {
         body,
         ...(key === undefined ? {} : { headers: { "idempotency-key": key } }),
       });
-    const giveConsent = async (home: HouseholdSession, profileId: string, decision = "given") => {
+    /** The member's consent state as the app shows it (precondition for consent writes, M1). */
+    const expectedConsentOf = async (home: HouseholdSession, profileId: string) => {
+      const state = consentStateOf(
+        (await latestHealthConsents(db, home.householdId, [profileId])).get(profileId),
+      );
+      return { status: state.status, consentRecordId: state.consentRecordId };
+    };
+    const isChildInDb = async (profileId: string) =>
+      (
+        await db.query<{ is_child: boolean }>(`SELECT is_child FROM profile WHERE id = $1`, [
+          profileId,
+        ])
+      ).rows[0]?.is_child === true;
+    const giveConsent = async (
+      home: HouseholdSession,
+      profileId: string,
+      decision = "given",
+      textVersion?: string,
+    ) => {
+      const version =
+        textVersion ?? ((await isChildInDb(profileId)) ? CHILD_VERSION : HEALTH_VERSION);
       const response = await api.request("POST", `${profileUrl(profileId)}/consents/health-data`, {
         token: home.token,
-        body: { decision, textVersion: HEALTH_VERSION, language: "id" },
+        body: {
+          decision,
+          textVersion: version,
+          language: "id",
+          expectedConsent: await expectedConsentOf(home, profileId),
+        },
       });
       expect(response.status, response.raw).toBe(201);
     };
+    const withdrawConsent = async (home: HouseholdSession, profileId: string) =>
+      api.request("POST", `${profileUrl(profileId)}/consents/health-data/withdraw`, {
+        token: home.token,
+        body: { expectedConsent: await expectedConsentOf(home, profileId) },
+      });
     const addRule = (
       home: HouseholdSession,
       profileId: string,
@@ -450,6 +482,7 @@ for (const target of DATABASE_TARGETS) {
             decidedAt: null,
             textVersion: null,
             deletionDueBy: null,
+            renewalRequired: false,
           },
           items: [],
         });
@@ -493,6 +526,129 @@ for (const target of DATABASE_TARGETS) {
         });
         expect(changed.status, changed.raw).toBe(200);
         expect(changed.body).toMatchObject({ ageGroup: "teen", isChild: true });
+      });
+    });
+
+    describe("QUESTIONS #46 #62 owner decisions (2026-11-12)", () => {
+      interface RulesBody {
+        consent: { status: string; renewalRequired: boolean };
+        items: { id: string }[];
+      }
+      const rulesOf = async (home: HouseholdSession, id: string) =>
+        (await api.request("GET", rulesUrl(id), { token: home.token })).body as RulesBody;
+      /** Cek Aman input for the member, as the safety pipeline reads it. */
+      const shrimpResult = async (home: HouseholdSession, id: string) => {
+        const [member] = await loadRulesForEvaluation(db, keys, home.householdId, [id]);
+        if (member?.hardRules == null) throw new Error("rules dropped from the safety check");
+        return evaluate({
+          ingredients: [{ ingredientId: "fx_api_udang", rawName: "udang fiksi" }],
+          recordedBrands: [],
+          members: [{ memberId: id, hardRules: member.hardRules }],
+          reference: REFERENCE,
+        }).perMember[0]?.status;
+      };
+      const setAge = (home: HouseholdSession, id: string, ageGroup: string, guardian = false) =>
+        api.request("PATCH", profileUrl(id), {
+          token: home.token,
+          body: { ageGroup, ...(guardian ? { guardianConfirmation: GUARDIAN } : {}) },
+        });
+
+      it("Q46 the manager's own profile can never take a child age group", async () => {
+        const home = await signInWithHousehold(api);
+        for (const ageGroup of ["infant", "child", "teen"]) {
+          expectProblem(
+            await setAge(home, home.managerProfileId, ageGroup, true),
+            409,
+            "manager_profile_must_be_adult",
+          );
+        }
+        expect((await setAge(home, home.managerProfileId, "elderly")).status).toBe(200);
+        const profile = await api.request("GET", profileUrl(home.managerProfileId), {
+          token: home.token,
+        });
+        expect(profile.body).toMatchObject({
+          ageGroup: "elderly",
+          isChild: false,
+          isManager: true,
+        });
+        // At creation the manager's profile is always an adult: no age group can be given.
+        const consents = await db.query(
+          `SELECT 1 FROM consent_record WHERE profile_id = $1 AND purpose = 'guardian_confirmation'`,
+          [home.managerProfileId],
+        );
+        expect(consents.rows).toHaveLength(0);
+      });
+
+      it("Q62 adult to child: rules are kept and still applied; new health data waits for re-consent on the child text", async () => {
+        const home = await signInWithHousehold(api);
+        const id = (
+          (await createProfile(home, { name: "Remaja", ageGroup: "adult" })).body as ProfileBody
+        ).id;
+        await giveConsent(home, id);
+        expect((await addRule(home, id, { type: "allergy", allergen: "shrimp" })).status).toBe(201);
+        expect(await shrimpResult(home, id)).toBe("not_safe");
+
+        expect((await setAge(home, id, "teen", true)).status).toBe(200);
+        const after = await rulesOf(home, id);
+        expect(after.consent).toMatchObject({ status: "given", renewalRequired: true });
+        expect(after.items).toHaveLength(1);
+        // Fail closed: Cek Aman still applies the stored allergy.
+        expect(await shrimpResult(home, id)).toBe("not_safe");
+        expectProblem(await addRule(home, id, { type: "halal" }), 409, "consent_required");
+
+        // Re-consent must use the child text.
+        const adultText = await api.request("POST", `${profileUrl(id)}/consents/health-data`, {
+          token: home.token,
+          body: {
+            decision: "given",
+            textVersion: HEALTH_VERSION,
+            language: "id",
+            expectedConsent: await expectedConsentOf(home, id),
+          },
+        });
+        expectProblem(adultText, 409, "consent_text_outdated");
+        await giveConsent(home, id, "given", CHILD_VERSION);
+        expect((await rulesOf(home, id)).consent.renewalRequired).toBe(false);
+        expect((await addRule(home, id, { type: "halal" })).status).toBe(201);
+        expect(await ruleRows(id)).toBe(2);
+      });
+
+      it("Q62 child to adult: a child-text consent needs renewal; an adult-text consent from before still counts", async () => {
+        const home = await signInWithHousehold(api);
+        // A member who was a child when consent was given.
+        const child = (
+          (
+            await createProfile(home, {
+              name: "Kakak",
+              ageGroup: "teen",
+              guardianConfirmation: GUARDIAN,
+            })
+          ).body as ProfileBody
+        ).id;
+        await giveConsent(home, child);
+        expect((await addRule(home, child, { type: "allergy", allergen: "shrimp" })).status).toBe(
+          201,
+        );
+        expect((await setAge(home, child, "adult")).status).toBe(200);
+        const grown = await rulesOf(home, child);
+        expect(grown.consent.renewalRequired).toBe(true);
+        expect(grown.items).toHaveLength(1);
+        expect(await shrimpResult(home, child)).toBe("not_safe");
+        expectProblem(await addRule(home, child, { type: "vegan" }), 409, "consent_required");
+        await giveConsent(home, child, "given", HEALTH_VERSION);
+        expect((await addRule(home, child, { type: "vegan" })).status).toBe(201);
+
+        // A member whose latest consent is on the adult text: adult, teen, adult again.
+        const adult = (
+          (await createProfile(home, { name: "Sepupu", ageGroup: "adult" })).body as ProfileBody
+        ).id;
+        await giveConsent(home, adult);
+        await addRule(home, adult, { type: "halal" });
+        expect((await setAge(home, adult, "teen", true)).status).toBe(200);
+        expect((await rulesOf(home, adult)).consent.renewalRequired).toBe(true);
+        expect((await setAge(home, adult, "adult")).status).toBe(200);
+        expect((await rulesOf(home, adult)).consent.renewalRequired).toBe(false);
+        expect((await addRule(home, adult, { type: "vegan" })).status).toBe(201);
       });
     });
 
@@ -617,9 +773,7 @@ for (const target of DATABASE_TARGETS) {
         expectProblem(await addRule(home, id, { type: "halal" }), 409, "consent_required");
         await giveConsent(home, id);
         expect((await addRule(home, id, { type: "halal" })).status).toBe(201);
-        await api.request("POST", `${profileUrl(id)}/consents/health-data/withdraw`, {
-          token: home.token,
-        });
+        expect((await withdrawConsent(home, id)).status).toBe(200);
         expectProblem(await addRule(home, id, { type: "halal" }), 409, "consent_required");
         expect(await ruleRows(id)).toBe(0);
         // The gate answers before the key service: even with it down the answer is 409.
@@ -870,7 +1024,7 @@ for (const target of DATABASE_TARGETS) {
           503,
           "rules_unavailable",
         );
-        // A member who already has rules: the duplicate check cannot read them.
+        // A member who already has rules: their key cannot be unwrapped before the lock.
         expectProblem(
           await addRule(
             home,
@@ -880,7 +1034,7 @@ for (const target of DATABASE_TARGETS) {
             down,
           ),
           503,
-          "rules_unavailable",
+          "service_unavailable",
         );
         // A member with consent but no key yet: the new key cannot be wrapped.
         const member = (
@@ -971,6 +1125,9 @@ for (const target of DATABASE_TARGETS) {
         const before = await snapshot(b.householdId);
 
         const v = HEALTH_VERSION;
+        // Valid bodies with the foreign member's real consent state, so a 404
+        // can only come from household scoping, never from validation.
+        const realState = (p: string) => expectedConsentOf(b, p);
         // One entry per route that takes an ID, with every foreign ID combination.
         const matrix: Record<string, (profileId: string, ruleId: string) => Promise<Response>> = {
           "GET /v1/household/profiles/:profileId": (p) =>
@@ -997,14 +1154,20 @@ for (const target of DATABASE_TARGETS) {
             api.request("DELETE", `${rulesUrl(p)}/${r}`, { token: a.token }),
           "GET /v1/household/profiles/:profileId/consents": (p) =>
             api.request("GET", `${profileUrl(p)}/consents`, { token: a.token }),
-          "POST /v1/household/profiles/:profileId/consents/health-data": (p) =>
+          "POST /v1/household/profiles/:profileId/consents/health-data": async (p) =>
             api.request("POST", `${profileUrl(p)}/consents/health-data`, {
               token: a.token,
-              body: { decision: "declined", textVersion: v, language: "id" },
+              body: {
+                decision: "declined",
+                textVersion: v,
+                language: "id",
+                expectedConsent: await realState(p),
+              },
             }),
-          "POST /v1/household/profiles/:profileId/consents/health-data/withdraw": (p) =>
+          "POST /v1/household/profiles/:profileId/consents/health-data/withdraw": async (p) =>
             api.request("POST", `${profileUrl(p)}/consents/health-data/withdraw`, {
               token: a.token,
+              body: { expectedConsent: await realState(p) },
             }),
         };
         // The matrix covers every route with an ID in its path.

@@ -10,7 +10,12 @@ import type { Clock } from "../auth/auth-service.js";
 import { systemClock } from "../auth/auth-service.js";
 import type { HouseholdScope } from "../authz/access.js";
 import { dataHandlingFor, isChildAgeGroup, type AgeGroup } from "../consent/child-data-policy.js";
-import { assertHealthDataWritable, recordGuardian } from "../consent/consent-service.js";
+import {
+  assertHealthDataWritable,
+  isChildProfile,
+  recordGuardian,
+  renewalRequired,
+} from "../consent/consent-service.js";
 import type { RulesConsentState } from "../db/consent.js";
 import { deleteProfile } from "../db/deletion.js";
 import { ConcurrentUpdateError, NotFoundError, withDbErrors } from "../db/errors.js";
@@ -72,6 +77,12 @@ import type {
 
 export const profileLimitReached = () =>
   new ApiError("profile_limit_reached", 409, "The household has reached its profile limit");
+export const managerProfileMustBeAdult = () =>
+  new ApiError(
+    "manager_profile_must_be_adult",
+    409,
+    "The manager's own profile cannot take a child age group",
+  );
 export const hardRuleDuplicate = () =>
   new ApiError("hard_rule_duplicate", 409, "The member already has this hard rule");
 
@@ -101,7 +112,7 @@ export interface HardRuleView {
 }
 
 export interface ProfileRulesView {
-  readonly consent: RulesConsentState;
+  readonly consent: RulesConsentState & { readonly renewalRequired: boolean };
   readonly items: readonly HardRuleView[];
 }
 
@@ -191,8 +202,12 @@ function ruleIdentity(rule: {
   readonly freeText: string | null;
   readonly mappedIds: readonly string[];
 }): string {
+  // L5: compatibility forms (full-width letters and the like) and case fold
+  // together, so a look-alike text is the same rule.
   const text =
-    rule.freeText === null ? null : rule.freeText.trim().replace(/\s+/g, " ").toLowerCase();
+    rule.freeText === null
+      ? null
+      : rule.freeText.normalize("NFKC").trim().replace(/\s+/g, " ").toLowerCase();
   return JSON.stringify([rule.type, rule.allergen, text, [...rule.mappedIds].sort()]);
 }
 
@@ -348,16 +363,19 @@ export class ProfileService {
           illustrationId: row.avatar_illustration_id,
         },
         ageGroup: row.age_group,
-        isChild: handling.isChild && row.is_child,
+        // L6: if the policy and the stored flag ever disagree, the stricter one wins.
+        isChild: handling.isChild || row.is_child,
         isManager: row.is_manager,
-        guardianConfirmation: handling.isChild ? guardian : null,
+        guardianConfirmation: handling.isChild || row.is_child ? guardian : null,
         portions: {
           portionSize: row.portion_size ?? defaults.portionSize,
           portionSizeIsDefault: row.portion_size === null,
           ricePortion: row.rice_portion ?? defaults.ricePortion,
           ricePortionIsDefault: row.rice_portion === null,
         },
-        rules: this.#rulesView(memberRules, (id) => nameOf("ingredient", id)),
+        rules: this.#rulesView(memberRules, handling.isChild || row.is_child, (id) =>
+          nameOf("ingredient", id),
+        ),
         preferences: {
           spiceLevel: row.spice_level,
           lessOf: row.less_of ?? [],
@@ -387,9 +405,15 @@ export class ProfileService {
     });
   }
 
-  #rulesView(rules: ProfileRules, nameOf: (id: string) => LocalizedName): ProfileRulesView {
+  #rulesView(
+    rules: ProfileRules,
+    isChild: boolean,
+    nameOf: (id: string) => LocalizedName,
+  ): ProfileRulesView {
     return {
-      consent: rules.consent,
+      // QUESTIONS #62: the stored rules are still returned (and still used by
+      // Cek Aman) while a renewal is needed; only new health data waits.
+      consent: { ...rules.consent, renewalRequired: renewalRequired(rules.consent, isChild) },
       // Contract: `items` is empty unless consent is given (the data layer guarantees it too).
       items:
         rules.consent.status === "given" ? rules.items.map((rule) => ruleView(rule, nameOf)) : [],
@@ -542,13 +566,18 @@ export class ProfileService {
     await withDbErrors(() =>
       this.#db.transaction(async (tx) => {
         await lockMembers(tx, scope.householdId, [profileId]);
-        const { rows } = await tx.query<{ age_group: AgeGroup }>(
-          `SELECT age_group FROM profile WHERE id = $1 AND household_id = $2`,
+        const { rows } = await tx.query<{ age_group: AgeGroup; is_manager: boolean }>(
+          `SELECT p.age_group, (p.id = h.manager_profile_id) AS is_manager
+             FROM profile p JOIN household h ON h.id = p.household_id
+            WHERE p.id = $1 AND p.household_id = $2`,
           [profileId, scope.householdId],
         );
         const current = rows[0];
         if (current === undefined) throw new NotFoundError("profile");
         const nextAge = input.ageGroup ?? current.age_group;
+        // QUESTIONS #46 (owner, 2026-11-12): the manager gives every consent and
+        // guardian confirmation, so the manager's own profile stays an adult.
+        if (current.is_manager && isChildAgeGroup(nextAge)) throw managerProfileMustBeAdult();
         const becomesChild = isChildAgeGroup(nextAge) && !isChildAgeGroup(current.age_group);
         if (becomesChild) {
           await recordGuardian(tx, scope, profileId, input.guardianConfirmation ?? null, now);
@@ -719,13 +748,14 @@ export class ProfileService {
   async listRules(scope: HouseholdScope, profileId: string): Promise<ProfileRulesView> {
     if (!isUuid(profileId)) throw new NotFoundError("profile");
     const rules = await listProfileRules(this.#db, this.#keys, scope.householdId, profileId);
-    return this.#withNames(rules);
+    const child = await isChildProfile(this.#db, scope.householdId, profileId);
+    return this.#rulesView(rules, child, await this.#names(rules.items));
   }
 
-  async #withNames(rules: ProfileRules): Promise<ProfileRulesView> {
-    const ids = rules.items.flatMap((rule) => rule.mapping?.ingredientIds ?? []);
+  async #names(items: readonly HardRuleRecord[]): Promise<(id: string) => LocalizedName> {
+    const ids = items.flatMap((rule) => rule.mapping?.ingredientIds ?? []);
     const names = await this.#catalog.ingredientNames(ids);
-    return this.#rulesView(rules, (id) => names.get(id) ?? fallbackName(id));
+    return (id) => names.get(id) ?? fallbackName(id);
   }
 
   /**
@@ -752,7 +782,7 @@ export class ProfileService {
         if (stored === undefined || identityOfStored(stored) !== identityOfInput(rule)) {
           throw idempotencyKeyReused();
         }
-        return (await this.#withNames({ consent: current.consent, items: [stored] })).items[0]!;
+        return ruleView(stored, await this.#names([stored]));
       }
     }
 
@@ -778,11 +808,6 @@ export class ProfileService {
       }
     }
 
-    const current = await listProfileRules(this.#db, this.#keys, scope.householdId, profileId);
-    const identity = identityOfInput(rule);
-    if (current.items.some((item) => identityOfStored(item) === identity))
-      throw hardRuleDuplicate();
-
     const stored = await insertHardRule(this.#db, this.#keys, {
       householdId: scope.householdId,
       profileId,
@@ -791,11 +816,20 @@ export class ProfileService {
       // from the authenticated role, never from the request (PR #5 L6).
       mappingConfirmedBy: mappedIds.length > 0 ? "manager" : null,
       now,
+      // L5: under the member lock, so concurrent identical creates cannot both
+      // pass; the consent gate runs again there too.
+      beforeInsert: async (tx: SqlExecutor, existing: readonly HardRuleRecord[]) => {
+        await assertHealthDataWritable(tx, scope.householdId, profileId);
+        const identity = identityOfInput(rule);
+        if (existing.some((item) => identityOfStored(item) === identity)) {
+          throw hardRuleDuplicate();
+        }
+      },
       ...(request === null
         ? {}
         : { onInserted: (tx: SqlExecutor, ruleId: string) => remember(tx, request, ruleId, now) }),
     });
-    return (await this.#withNames({ consent: current.consent, items: [stored] })).items[0]!;
+    return ruleView(stored, await this.#names([stored]));
   }
 
   /** PRF-03: the manager removes a rule (an edit of the profile, never a safety override). */

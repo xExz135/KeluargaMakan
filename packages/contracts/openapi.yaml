@@ -1,7 +1,7 @@
 openapi: 3.1.1
 info:
   title: KeluargaMakan API
-  version: 0.1.1
+  version: 0.1.2
   summary: Household manager API for KeluargaMakan (FamilyEats).
   description: >-
     Source of truth for API shapes: change this file first, then implement.
@@ -15,6 +15,18 @@ info:
     PRF-08), soft preferences and likes (PRF-05, PRF-06), health-data consent
     (ACC-08, SET-03, SET-10) and the error model. There is no Apple sign-in
     (Android only, owner decision 2026-11-10).
+
+
+    v0.1.2 (breaking for consent writes): health-data consent decisions and
+    withdrawals carry `expectedConsent`, the consent state the manager was
+    shown, and answer 409 `consent_changed` when it has moved (security
+    review T-019 M1). Consent writes are online only and are never queued
+    offline. The health-data consent text has an adult and a child version
+    (`audience`). A member whose consent was given on the other version keeps
+    its stored rules, which Cek Aman still applies, but needs a new decision
+    before new health data is saved (`RulesConsentState.renewalRequired`,
+    QUESTIONS #62). The manager's own profile stays an adult (409
+    `manager_profile_must_be_adult`, QUESTIONS #46).
 
 
     Conventions: JSON bodies use camelCase. Timestamps are RFC 3339 in UTC.
@@ -369,7 +381,14 @@ paths:
         `ricePortion` to null returns it to the age-group default from
         configuration (PRF-07). Changing an adult profile to an infant, child
         or teen age group needs `guardianConfirmation` (SET-10). The child flag
-        follows the age group and cannot be set directly (PRF-18).
+        follows the age group and cannot be set directly (PRF-18). The
+        manager's own profile cannot take a child age group (409
+        `manager_profile_must_be_adult`, QUESTIONS #46). When a change moves
+        the member between adult and child, a health-data consent given on
+        the other text version no longer allows new health data: the stored
+        rules stay and are still checked by Cek Aman, and
+        `rules.consent.renewalRequired` is true until a new decision is
+        recorded on the matching text (QUESTIONS #62).
       x-requirements: [PRF-01, PRF-07, PRF-18, SET-10]
       requestBody:
         required: true
@@ -497,8 +516,8 @@ paths:
         Adds an allergy from the standard list, halal, vegetarian, vegan, a
         medical exclusion or a free-text rule (PRF-03, PRF-04). Needs a current
         health-data consent for the member, else 409 `consent_required`
-        (ACC-08); for a child the guardian confirmation must also be on record
-        (SET-10). Free-text and medical-exclusion rules are saved as unmapped
+        (ACC-08), also while `consent.renewalRequired` is true; for a child the
+        guardian confirmation must also be on record (SET-10). Free-text and medical-exclusion rules are saved as unmapped
         unless the manager picked matching ingredients (`mappedIngredientIds`).
         An unmapped rule makes Cek Aman return "Check the label" for related
         recipes, never "Safe" (PRF-08, SAF-09). Online only: the server
@@ -606,6 +625,13 @@ paths:
         in: query
         required: true
         schema: { $ref: "#/components/schemas/Language" }
+      - name: audience
+        in: query
+        required: false
+        description: >-
+          For `health_data`: `child` for an infant, child or teen profile,
+          `adult` otherwise (default). Ignored for `guardian_confirmation`.
+        schema: { $ref: "#/components/schemas/ConsentAudience" }
     get:
       tags: [Consent]
       operationId: getConsentText
@@ -614,7 +640,8 @@ paths:
         Returns the current text and its version, which the client sends back
         when recording a decision (SET-03). Texts are served from content, not
         built into the app, so legal changes need no release. `isDraft` stays
-        true until legal approval.
+        true until legal approval. The health-data text has an adult and a
+        child version (SET-10, QUESTIONS #62).
       x-requirements: [ACC-08, SET-03, SET-10]
       responses:
         "200":
@@ -656,10 +683,16 @@ paths:
       description: >-
         Records an explicit decision, given or declined, on storing the
         member's hard rules (ACC-08, SET-03). Nothing is pre-given. `textVersion`
-        must be the current version from `getConsentText`, else 409
-        `consent_text_outdated`. For a child profile the guardian confirmation
-        must be on record, else 409 `guardian_confirmation_required` (SET-10).
-        A decline stores no rules; the member shows "rules not saved".
+        must be the current version from `getConsentText` for the member's
+        audience (the child text for an infant, child or teen profile), else
+        409 `consent_text_outdated`. `expectedConsent` is the member's
+        `rules.consent` the manager was shown; if the stored state has moved
+        since (another phone decided or withdrew), nothing is recorded and the
+        answer is 409 `consent_changed`. For a child profile the guardian
+        confirmation must be on record, else 409
+        `guardian_confirmation_required` (SET-10). A decline stores no rules;
+        the member shows "rules not saved". Online only: never queue this
+        request offline; ask again after a 409.
       x-requirements: [ACC-08, SET-03, SET-10]
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -691,9 +724,17 @@ paths:
         Withdraws the current consent (SET-03). The member's hard rules stop
         being used at once and are deleted by `deletionDueBy`, set from the
         configured period (SET-04, 30 days target). Cek Aman no longer checks
-        rules for this member, and clients show "rules not saved". Returns 409
-        `consent_not_active` when there is no current consent.
+        rules for this member, and clients show "rules not saved".
+        `expectedConsent` is the state the manager was shown; if it has moved
+        since, nothing changes and the answer is 409 `consent_changed`.
+        Returns 409 `consent_not_active` when there is no current consent.
+        Online only: never queue this request offline.
       x-requirements: [SET-03, SET-04]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/HealthDataConsentWithdrawal" }
       responses:
         "200":
           description: The withdrawn consent record.
@@ -930,6 +971,8 @@ components:
         - consent_required
         - consent_text_outdated
         - consent_not_active
+        - consent_changed
+        - manager_profile_must_be_adult
         - hard_rule_duplicate
         - mapping_not_applicable
         - idempotency_key_reused
@@ -1703,8 +1746,16 @@ components:
       x-data-sensitivity: personal
       type: object
       additionalProperties: false
-      required: [status, consentRecordId, decidedAt, textVersion, deletionDueBy]
+      required: [status, consentRecordId, decidedAt, textVersion, deletionDueBy, renewalRequired]
       properties:
+        renewalRequired:
+          description: >-
+            True when the consent was given on the other audience's text (the
+            member changed between adult and child, QUESTIONS #62). The stored
+            rules are still returned and still checked by Cek Aman, but no new
+            health data is saved (409 `consent_required`) until a new decision
+            is recorded on the current text for the member's audience.
+          type: boolean
         status: { $ref: "#/components/schemas/RulesConsentStatus" }
         consentRecordId:
           description: The latest health-data consent record, or null for `none`.
@@ -1763,6 +1814,15 @@ components:
       type: string
       enum: [health_data, guardian_confirmation]
 
+    ConsentAudience:
+      description: >-
+        Which health-data consent text applies: `child` for infant, child and
+        teen profiles (the manager decides as parent or guardian, SET-10),
+        `adult` otherwise.
+      x-data-sensitivity: public
+      type: string
+      enum: [adult, child]
+
     ConsentDecision:
       x-data-sensitivity: personal
       type: string
@@ -1809,7 +1869,7 @@ components:
       x-data-sensitivity: personal
       type: object
       additionalProperties: false
-      required: [decision, textVersion, language]
+      required: [decision, textVersion, language, expectedConsent]
       properties:
         decision: { $ref: "#/components/schemas/ConsentDecision" }
         textVersion: { $ref: "#/components/schemas/ConsentTextVersion" }
@@ -1817,6 +1877,32 @@ components:
           description: Language of the text the manager was shown.
           allOf:
             - $ref: "#/components/schemas/Language"
+        expectedConsent: { $ref: "#/components/schemas/ExpectedConsentState" }
+
+    HealthDataConsentWithdrawal:
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required: [expectedConsent]
+      properties:
+        expectedConsent: { $ref: "#/components/schemas/ExpectedConsentState" }
+
+    ExpectedConsentState:
+      description: >-
+        Precondition for a consent write (security review T-019 M1): the
+        `status` and `consentRecordId` of the member's `rules.consent` as the
+        manager was shown it. `{status: none, consentRecordId: null}` for a
+        member with no decision yet.
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required: [status, consentRecordId]
+      properties:
+        status: { $ref: "#/components/schemas/RulesConsentStatus" }
+        consentRecordId:
+          oneOf:
+            - $ref: "#/components/schemas/Id"
+            - type: "null"
 
     ConsentRecord:
       description: SRS 18.1 Consent record (SET-03).

@@ -126,12 +126,83 @@ const GUARDIAN_CONFIRMATION: ConsentTextContent = {
   },
 };
 
+/**
+ * SET-10, QUESTIONS #62: the health-data text a manager accepts for a child
+ * (infant, child or teen) as parent or guardian. Same sections as the adult
+ * text, plus the copy deck's `consent.member.childNote` and
+ * `consent.child.note` (names removed). DRAFT: needs legal review.
+ */
+const HEALTH_DATA_CHILD: ConsentTextContent = {
+  purpose: "health_data",
+  version: "health-data-child-draft-1",
+  effectiveDate: "2026-11-12",
+  isDraft: true,
+  languages: {
+    id: {
+      title: HEALTH_DATA.languages.id.title,
+      sections: [
+        {
+          heading: "Untuk anak",
+          body: "Anggota ini masih anak-anak. Sebagai orang tua atau wali, Anda yang memberi izin ini. Data anak dijaga lebih ketat dan tidak pernah dipakai untuk pemasaran.",
+        },
+        ...HEALTH_DATA.languages.id.sections,
+      ],
+    },
+    en: {
+      title: HEALTH_DATA.languages.en.title,
+      sections: [
+        {
+          heading: "For a child",
+          body: "This family member is a child. As their parent or guardian, you give this consent. Children's data gets extra protection and is never used for marketing.",
+        },
+        ...HEALTH_DATA.languages.en.sections,
+      ],
+    },
+  },
+};
+
+export type ConsentAudience = "adult" | "child";
+
 export const CONSENT_TEXTS: Readonly<Record<ConsentPurpose, ConsentTextContent>> = Object.freeze({
   health_data: HEALTH_DATA,
   guardian_confirmation: GUARDIAN_CONFIRMATION,
 });
 
+/** The current health-data text per audience. */
+export const HEALTH_DATA_TEXTS: Readonly<Record<ConsentAudience, ConsentTextContent>> =
+  Object.freeze({ adult: HEALTH_DATA, child: HEALTH_DATA_CHILD });
+
+/**
+ * Every health-data text version ever served, with its audience. When legal
+ * replaces a text, the old version stays here so earlier consents keep their
+ * audience. A version not listed belongs to no audience, so its consent does
+ * not allow new health data (fail closed).
+ */
+const HEALTH_DATA_VERSION_AUDIENCE: ReadonlyMap<string, ConsentAudience> = new Map([
+  [HEALTH_DATA.version, "adult"],
+  [HEALTH_DATA_CHILD.version, "child"],
+]);
+
+export function audienceOfHealthVersion(version: string | null): ConsentAudience | null {
+  return version === null ? null : (HEALTH_DATA_VERSION_AUDIENCE.get(version) ?? null);
+}
+
+export function audienceFor(isChild: boolean): ConsentAudience {
+  return isChild ? "child" : "adult";
+}
+
+/** The text served for a purpose; `audience` selects the health-data version. */
+export function consentTextFor(
+  purpose: ConsentPurpose,
+  audience: ConsentAudience = "adult",
+): ConsentTextContent {
+  return purpose === "health_data" ? HEALTH_DATA_TEXTS[audience] : CONSENT_TEXTS[purpose];
+}
+
 /** The current text version for a purpose. A decision must quote it (409 `consent_text_outdated`). */
-export function currentConsentVersion(purpose: ConsentPurpose): string {
-  return CONSENT_TEXTS[purpose].version;
+export function currentConsentVersion(
+  purpose: ConsentPurpose,
+  audience: ConsentAudience = "adult",
+): string {
+  return consentTextFor(purpose, audience).version;
 }

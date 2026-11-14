@@ -23,6 +23,7 @@ import { CONSENT_SERVICE } from "../http/tokens.js";
 import { BodyReader } from "../http/validation.js";
 import type {
   ConsentService,
+  ExpectedConsent,
   GuardianConfirmationInput,
   HealthDataDecisionInput,
 } from "./consent-service.js";
@@ -65,9 +66,52 @@ export function consentRecordBody(row: ConsentRecordRow): Schemas["ConsentRecord
   };
 }
 
+const CONSENT_STATUSES = ["none", "given", "declined", "withdrawn"] as const;
+
+/** Contract `ExpectedConsentState` (security review T-019 M1). Required on every consent write. */
+function parseExpectedConsent(
+  reader: BodyReader,
+  record: Readonly<Record<string, unknown>>,
+): ExpectedConsent | undefined {
+  if (!Object.hasOwn(record, "expectedConsent")) {
+    reader.fail("/expectedConsent", "required");
+    return undefined;
+  }
+  const expected = reader.object(record["expectedConsent"], "/expectedConsent", [
+    "status",
+    "consentRecordId",
+  ]);
+  if (expected === null) return undefined;
+  const status = reader.enumValue(expected, "status", "/expectedConsent", CONSENT_STATUSES, true);
+  let consentRecordId: string | null | undefined;
+  if (!Object.hasOwn(expected, "consentRecordId")) {
+    reader.fail("/expectedConsent/consentRecordId", "required");
+  } else if (expected["consentRecordId"] === null) {
+    consentRecordId = null;
+  } else if (isUuid(expected["consentRecordId"])) {
+    consentRecordId = expected["consentRecordId"];
+  } else {
+    reader.fail("/expectedConsent/consentRecordId", "invalid_format");
+  }
+  // `none` has no record; every other state names one.
+  if (status !== undefined && consentRecordId !== undefined) {
+    if ((status === "none") !== (consentRecordId === null)) {
+      reader.fail("/expectedConsent/consentRecordId", "invalid_value");
+      return undefined;
+    }
+    return { status, consentRecordId };
+  }
+  return undefined;
+}
+
 export function parseHealthDataDecision(body: unknown): HealthDataDecisionInput {
   const reader = new BodyReader();
-  const record = reader.object(body, "", ["decision", "textVersion", "language"]);
+  const record = reader.object(body, "", [
+    "decision",
+    "textVersion",
+    "language",
+    "expectedConsent",
+  ]);
   if (record === null) return reader.done() as never;
   const decision = reader.enumValue(record, "decision", "", ["given", "declined"] as const, true);
   const textVersion = reader.string(record, "textVersion", "", {
@@ -75,8 +119,23 @@ export function parseHealthDataDecision(body: unknown): HealthDataDecisionInput 
     pattern: TEXT_VERSION_PATTERN,
   });
   const language = reader.enumValue(record, "language", "", LANGUAGES, true);
+  const expectedConsent = parseExpectedConsent(reader, record);
   reader.done();
-  return { decision: decision!, textVersion: textVersion!, language: language! };
+  return {
+    decision: decision!,
+    textVersion: textVersion!,
+    language: language!,
+    expectedConsent: expectedConsent!,
+  };
+}
+
+export function parseHealthDataWithdrawal(body: unknown): ExpectedConsent {
+  const reader = new BodyReader();
+  const record = reader.object(body, "", ["expectedConsent"]);
+  if (record === null) return reader.done() as never;
+  const expectedConsent = parseExpectedConsent(reader, record);
+  reader.done();
+  return expectedConsent!;
 }
 
 /** Contract `GuardianConfirmationInput`, at `pointer` inside a profile body. */
@@ -112,14 +171,22 @@ export class ConsentTextController {
   get(
     @Param("purpose") purpose: string,
     @Query("language") language: unknown,
+    @Query("audience") audience: unknown,
   ): Schemas["ConsentText"] {
     if (!(PURPOSES as readonly string[]).includes(purpose)) throw new NotFoundError("consent text");
     const reader = new BodyReader();
     if (typeof language !== "string" || !(LANGUAGES as readonly string[]).includes(language)) {
       reader.fail("/query/language", language === undefined ? "required" : "invalid_value");
     }
+    if (audience !== undefined && audience !== "adult" && audience !== "child") {
+      reader.fail("/query/audience", "invalid_value");
+    }
     reader.done();
-    const text = this.consent.text(purpose as ConsentPurpose, language as ConsentLanguage);
+    const text = this.consent.text(
+      purpose as ConsentPurpose,
+      language as ConsentLanguage,
+      audience === "child" ? "child" : "adult",
+    );
     const localized = text.languages[text.language];
     return {
       purpose: text.purpose,
@@ -170,7 +237,10 @@ export class ConsentController {
   async withdraw(
     @Scope() scope: HouseholdScope,
     @Param("profileId") profileId: string,
+    @Body() body: unknown,
   ): Promise<Schemas["ConsentRecord"]> {
-    return consentRecordBody(await this.consent.withdraw(scope, profileIdOf(profileId)));
+    const id = profileIdOf(profileId);
+    const expected = parseHealthDataWithdrawal(body);
+    return consentRecordBody(await this.consent.withdraw(scope, id, expected));
   }
 }

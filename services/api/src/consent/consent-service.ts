@@ -15,6 +15,8 @@ import {
   type ConsentDecision,
   type ConsentRecordRow,
   type Language,
+  type RulesConsentState,
+  type RulesConsentStatus,
 } from "../db/consent.js";
 import {
   ConsentRequiredError,
@@ -27,8 +29,11 @@ import { isUuid } from "../db/ids.js";
 import { lockMembers } from "../db/locks.js";
 import { findReplay, remember, requestHash } from "../idempotency/idempotency.js";
 import {
-  CONSENT_TEXTS,
+  audienceFor,
+  audienceOfHealthVersion,
+  consentTextFor,
   currentConsentVersion,
+  type ConsentAudience,
   type ConsentLanguage,
   type ConsentPurpose,
   type ConsentTextContent,
@@ -40,8 +45,13 @@ import {
  * passes first.
  *
  * - A decision is recorded per member with its date and the consent-text
- *   version the manager was shown; an outdated version is refused (409
- *   `consent_text_outdated`), so a record always names a text that existed.
+ *   version the manager was shown; a version that is not current for the
+ *   member's audience (adult or child) is refused (409 `consent_text_outdated`).
+ * - Every decision and withdrawal names the consent state the manager was
+ *   shown (`expectedConsent`). It is compared under the member lock; if the
+ *   state moved (another phone, or a request replayed after the idempotency
+ *   window), nothing is written and the answer is 409 `consent_changed`
+ *   (security review T-019 M1). Consent writes are online only.
  * - Withdrawal is possible at any time. The database then destroys the
  *   member's data key at once, which deletes the hard rules and redacts the
  *   safety-log details in the live database (T-016). `deletionDueBy` is set
@@ -49,6 +59,11 @@ import {
  *   target); the scheduled clean-up of caches and the backstop job are T-072.
  * - A child profile needs the manager's recorded parent or guardian
  *   confirmation before a health-data consent or any rule (SET-10).
+ * - QUESTIONS #62 (owner, 2026-11-12): a consent counts for new health data
+ *   only if it was given on the text for the member's current audience. After
+ *   an adult-child change the stored rules stay and are still read for Cek
+ *   Aman (never treated as "no rules"), but new health data waits for a new
+ *   decision on the matching text (`renewalRequired`).
  * - Every lookup is inside the caller's household; another household's
  *   profile answers 404 like a missing one (NFR-09).
  */
@@ -56,10 +71,24 @@ import {
 export const consentTextOutdated = () =>
   new ApiError("consent_text_outdated", 409, "The consent text version is not the current version");
 
+export const consentChanged = () =>
+  new ApiError(
+    "consent_changed",
+    409,
+    "The member's consent changed since the manager was shown it",
+  );
+
+/** Contract `ExpectedConsentState`. */
+export interface ExpectedConsent {
+  readonly status: RulesConsentStatus;
+  readonly consentRecordId: string | null;
+}
+
 export interface HealthDataDecisionInput {
   readonly decision: ConsentDecision;
   readonly textVersion: string;
   readonly language: Language;
+  readonly expectedConsent: ExpectedConsent;
 }
 
 export interface GuardianConfirmationInput {
@@ -77,6 +106,21 @@ export interface ConsentServiceDeps {
 }
 
 const RECORD_HEALTH_DATA = "record_health_data_consent";
+
+/**
+ * QUESTIONS #62: a given consent on the other audience's text (or on a text
+ * version no audience owns) no longer allows new health data. The rules it
+ * covers stay readable for Cek Aman.
+ */
+export function renewalRequired(state: RulesConsentState, isChild: boolean): boolean {
+  return (
+    state.status === "given" && audienceOfHealthVersion(state.textVersion) !== audienceFor(isChild)
+  );
+}
+
+function matchesExpected(state: RulesConsentState, expected: ExpectedConsent): boolean {
+  return state.status === expected.status && state.consentRecordId === expected.consentRecordId;
+}
 
 /**
  * SET-10: checks a guardian confirmation input and records it for a child
@@ -104,13 +148,13 @@ export async function recordGuardian(
 }
 
 /**
- * ACC-08, SET-10 gate for every health-data write (hard rules). Throws
- * `ConsentRequiredError` (409 `consent_required`) unless the member's latest
- * health-data consent is given and not withdrawn, and
- * `GuardianConfirmationRequiredError` (409) for a child without a recorded
- * guardian confirmation. Run it before any key service work so the client
- * gets a clear 4xx; the data layer and the database check again under the
- * member lock.
+ * ACC-08, SET-10, QUESTIONS #62 gate for every health-data write (hard
+ * rules). Throws `GuardianConfirmationRequiredError` (409) for a child
+ * without a recorded guardian confirmation, and `ConsentRequiredError` (409
+ * `consent_required`) unless the member's latest health-data consent is
+ * given, not withdrawn, and on the text for the member's current audience.
+ * Makes no key service call, so it can run before key work for a clear 4xx
+ * and again under the member lock.
  */
 export async function assertHealthDataWritable(
   db: SqlExecutor,
@@ -121,13 +165,13 @@ export async function assertHealthDataWritable(
   if (child && (await guardianConfirmation(db, householdId, profileId)) === null) {
     throw new GuardianConfirmationRequiredError();
   }
-  const latest = (await withDbErrors(() => latestHealthConsents(db, householdId, [profileId]))).get(
-    profileId,
+  const state = consentStateOf(
+    (await withDbErrors(() => latestHealthConsents(db, householdId, [profileId]))).get(profileId),
   );
-  if (consentStateOf(latest).status !== "given") throw new ConsentRequiredError();
+  if (state.status !== "given" || renewalRequired(state, child)) throw new ConsentRequiredError();
 }
 
-async function isChildProfile(
+export async function isChildProfile(
   db: SqlExecutor,
   householdId: string,
   profileId: string,
@@ -142,6 +186,16 @@ async function isChildProfile(
   const row = rows[0];
   if (row === undefined) throw new NotFoundError("profile");
   return row.is_child;
+}
+
+async function currentState(
+  tx: SqlExecutor,
+  householdId: string,
+  profileId: string,
+): Promise<RulesConsentState> {
+  return consentStateOf(
+    (await withDbErrors(() => latestHealthConsents(tx, householdId, [profileId]))).get(profileId),
+  );
 }
 
 export class ConsentService {
@@ -159,15 +213,13 @@ export class ConsentService {
     this.#clock = deps.clock ?? systemClock;
   }
 
-  /** The current consent text for a purpose, in one language. */
+  /** The current consent text for a purpose (and, for health data, an audience), in one language. */
   text(
     purpose: ConsentPurpose,
     language: ConsentLanguage,
-  ): ConsentTextContent & {
-    readonly language: ConsentLanguage;
-  } {
-    const content = CONSENT_TEXTS[purpose];
-    return { ...content, language };
+    audience: ConsentAudience,
+  ): ConsentTextContent & { readonly language: ConsentLanguage } {
+    return { ...consentTextFor(purpose, audience), language };
   }
 
   /** SET-03: every consent record of a member, newest first. */
@@ -177,9 +229,9 @@ export class ConsentService {
   }
 
   /**
-   * ACC-08, SET-03: records an explicit decision, given or declined. A
-   * decline (or a decision recorded while rules exist that declines) deletes
-   * the member's data key and so their rules (database trigger).
+   * ACC-08, SET-03: records an explicit decision, given or declined, if the
+   * member's consent is still in the state the manager was shown. A decline
+   * deletes the member's data key and so their rules (database trigger).
    */
   async recordHealthData(
     scope: HouseholdScope,
@@ -187,7 +239,6 @@ export class ConsentService {
     input: HealthDataDecisionInput,
     idempotencyKey: string | null,
   ): Promise<ConsentRecordRow> {
-    if (input.textVersion !== currentConsentVersion("health_data")) throw consentTextOutdated();
     const now = this.#clock.now();
     const request =
       idempotencyKey === null
@@ -201,6 +252,8 @@ export class ConsentService {
               input.decision,
               input.textVersion,
               input.language,
+              input.expectedConsent.status,
+              input.expectedConsent.consentRecordId,
             ]),
             keptSince: new Date(
               now.getTime() - this.#config.retention.idempotencyKeyHours * 3600_000,
@@ -220,10 +273,21 @@ export class ConsentService {
             return record;
           }
         }
+        // M1: a replay after the idempotency window, or a decision made on a
+        // stale screen, finds the state moved and records nothing.
         if (
-          (await isChildProfile(tx, scope.householdId, profileId)) &&
-          (await guardianConfirmation(tx, scope.householdId, profileId)) === null
+          !matchesExpected(
+            await currentState(tx, scope.householdId, profileId),
+            input.expectedConsent,
+          )
         ) {
+          throw consentChanged();
+        }
+        const child = await isChildProfile(tx, scope.householdId, profileId);
+        if (input.textVersion !== currentConsentVersion("health_data", audienceFor(child))) {
+          throw consentTextOutdated();
+        }
+        if (child && (await guardianConfirmation(tx, scope.householdId, profileId)) === null) {
           throw new GuardianConfirmationRequiredError();
         }
         const record = await recordHealthConsent(tx, {
@@ -241,14 +305,27 @@ export class ConsentService {
     );
   }
 
-  /** SET-03, SET-04: withdraws the member's current health-data consent. */
-  async withdraw(scope: HouseholdScope, profileId: string): Promise<ConsentRecordRow> {
+  /** SET-03, SET-04: withdraws the member's current health-data consent, if it is still the one the manager saw. */
+  async withdraw(
+    scope: HouseholdScope,
+    profileId: string,
+    expected: ExpectedConsent,
+  ): Promise<ConsentRecordRow> {
     if (!isUuid(profileId)) throw new NotFoundError("profile");
-    return withdrawHealthConsent(this.#db, {
-      householdId: scope.householdId,
-      profileId,
-      withdrawnAt: this.#clock.now(),
-      deletionWindowDays: this.#targets.dataManagement.healthConsentWithdrawalDeletionDays.value,
-    });
+    return withDbErrors(() =>
+      this.#db.transaction(async (tx) => {
+        await lockMembers(tx, scope.householdId, [profileId]);
+        if (!matchesExpected(await currentState(tx, scope.householdId, profileId), expected)) {
+          throw consentChanged();
+        }
+        return withdrawHealthConsent(tx, {
+          householdId: scope.householdId,
+          profileId,
+          withdrawnAt: this.#clock.now(),
+          deletionWindowDays:
+            this.#targets.dataManagement.healthConsentWithdrawalDeletionDays.value,
+        });
+      }),
+    );
   }
 }
