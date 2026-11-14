@@ -24,6 +24,7 @@ import '../features/auth/startup_screen.dart';
 import '../features/auth/welcome_screen.dart';
 import '../features/dapur_saya/dapur_saya_screen.dart';
 import '../features/keluarga_saya/keluarga_saya_screen.dart';
+import '../features/keluarga_saya/member_detail_screen.dart';
 import '../features/masak_apa_hari_ini/home_screen.dart';
 import '../features/rencana_mingguan/plan_screen.dart';
 import '../features/resep/recipes_screen.dart';
@@ -117,6 +118,7 @@ GoRouter buildRouter(
                 GoRoute(
                   path: section.path,
                   builder: (context, state) => _rootScreen(section),
+                  routes: _sectionRoutes(section),
                 ),
               ],
             ),
@@ -131,6 +133,19 @@ GoRouter buildRouter(
     ],
   );
 }
+
+/// Pages inside a section, above its root and below the navigation.
+/// Route paths carry profile IDs only, never names or rules.
+List<RouteBase> _sectionRoutes(AppSection section) => switch (section) {
+  AppSection.family => [
+    GoRoute(
+      path: 'member/:profileId',
+      builder: (context, state) =>
+          MemberDetailScreen(profileId: state.pathParameters['profileId']!),
+    ),
+  ],
+  _ => const [],
+};
 
 Widget _rootScreen(AppSection section) => switch (section) {
   AppSection.home => const HomeScreen(),

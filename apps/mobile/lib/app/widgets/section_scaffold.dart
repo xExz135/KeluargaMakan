@@ -23,6 +23,7 @@ class SectionScaffold extends StatelessWidget {
     required this.body,
     this.isTabRoot = true,
     this.titleStyle,
+    this.floatingActionButton,
   });
 
   final String title;
@@ -34,6 +35,9 @@ class SectionScaffold extends StatelessWidget {
 
   /// Defaults to the app bar theme (headlineSmall, "screen titles").
   final TextStyle? titleStyle;
+
+  /// For example "Tambah anggota" on medium and expanded windows.
+  final Widget? floatingActionButton;
 
   // AppBar layout constants: leading slot and icon button widths, and the
   // NavigationToolbar title spacing on each side.
@@ -92,6 +96,7 @@ class SectionScaffold extends StatelessWidget {
             ],
           ),
           body: SafeArea(top: false, bottom: false, child: body),
+          floatingActionButton: floatingActionButton,
         );
       },
     );
