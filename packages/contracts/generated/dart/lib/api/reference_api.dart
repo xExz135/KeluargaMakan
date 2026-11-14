@@ -18,10 +18,15 @@ class ReferenceApi {
 
   /// Get the whole reference ingredient catalog
   ///
-  /// Every ingredient of the verified reference dataset with its names, local and regional names, kitchen category and brands, for the copy the phone keeps for offline search (KIT-04). `referenceVersion` changes whenever the data changes. When the dataset is not loaded or fails verification the answer is 503 `reference_data_unavailable`, never an empty catalog. No safety data (components, allergens, halal) is included: only Cek Aman uses those.
+  /// Every ingredient of the verified reference dataset with its names, local and regional names, kitchen category and brands, for the copy the phone keeps for offline search (KIT-04). `referenceVersion` changes whenever the data changes. When the dataset is not loaded or fails verification the answer is 503 `reference_data_unavailable`, never an empty catalog. No safety data (components, allergens, halal) is included: only Cek Aman uses those. The `ETag` identifies the dataset; a phone that sends it back in `If-None-Match` gets 304 with no body while its copy is current, so refreshing the copy is cheap.
   ///
   /// Note: This method returns the HTTP [Response].
-  Future<Response> listReferenceIngredientsWithHttpInfo({ Future<void>? abortTrigger, }) async {
+  ///
+  /// Parameters:
+  ///
+  /// * [String] ifNoneMatch:
+  ///   The `ETag` of the catalog the phone already has.
+  Future<Response> listReferenceIngredientsWithHttpInfo({ String? ifNoneMatch, Future<void>? abortTrigger, }) async {
     // ignore: prefer_const_declarations
     final path = r'/v1/reference/ingredients';
 
@@ -31,6 +36,10 @@ class ReferenceApi {
     final queryParams = <QueryParam>[];
     final headerParams = <String, String>{};
     final formParams = <String, String>{};
+
+    if (ifNoneMatch != null) {
+      headerParams[r'If-None-Match'] = parameterToString(ifNoneMatch);
+    }
 
     const contentTypes = <String>[];
 
@@ -49,9 +58,14 @@ class ReferenceApi {
 
   /// Get the whole reference ingredient catalog
   ///
-  /// Every ingredient of the verified reference dataset with its names, local and regional names, kitchen category and brands, for the copy the phone keeps for offline search (KIT-04). `referenceVersion` changes whenever the data changes. When the dataset is not loaded or fails verification the answer is 503 `reference_data_unavailable`, never an empty catalog. No safety data (components, allergens, halal) is included: only Cek Aman uses those.
-  Future<ReferenceIngredientCatalog?> listReferenceIngredients({ Future<void>? abortTrigger, }) async {
-    final response = await listReferenceIngredientsWithHttpInfo(abortTrigger: abortTrigger,);
+  /// Every ingredient of the verified reference dataset with its names, local and regional names, kitchen category and brands, for the copy the phone keeps for offline search (KIT-04). `referenceVersion` changes whenever the data changes. When the dataset is not loaded or fails verification the answer is 503 `reference_data_unavailable`, never an empty catalog. No safety data (components, allergens, halal) is included: only Cek Aman uses those. The `ETag` identifies the dataset; a phone that sends it back in `If-None-Match` gets 304 with no body while its copy is current, so refreshing the copy is cheap.
+  ///
+  /// Parameters:
+  ///
+  /// * [String] ifNoneMatch:
+  ///   The `ETag` of the catalog the phone already has.
+  Future<ReferenceIngredientCatalog?> listReferenceIngredients({ String? ifNoneMatch, Future<void>? abortTrigger, }) async {
+    final response = await listReferenceIngredientsWithHttpInfo(ifNoneMatch: ifNoneMatch, abortTrigger: abortTrigger,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }
