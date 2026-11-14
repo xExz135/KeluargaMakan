@@ -91,6 +91,8 @@ final householdRepositoryProvider = Provider<HouseholdRepository>(
     caller: ref.watch(apiCallerProvider),
     client: ref.watch(apiClientProvider),
     cache: ref.watch(localCacheProvider),
-    onTimeZone: ref.read(knownHouseholdTimeZoneProvider.notifier).set,
+    // Read at call time: the notifier is rebuilt on an account change.
+    onTimeZone: (zone) =>
+        ref.read(knownHouseholdTimeZoneProvider.notifier).set(zone),
   ),
 );

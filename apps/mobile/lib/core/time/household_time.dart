@@ -8,6 +8,8 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
+import '../api/api_client.dart' show currentAccountIdProvider;
+
 enum HouseholdTimeZone {
   /// Waktu Indonesia Barat, UTC+7.
   wib(Duration(hours: 7)),
@@ -47,9 +49,14 @@ enum HouseholdTimeZone {
 
 /// The zone of the loaded household, or null before a household is known.
 /// Set by the household repository.
+/// Reset when the signed-in account changes, so another account's dates are
+/// never shown in the previous household's zone (security review T-028 I6).
 final class KnownHouseholdTimeZone extends Notifier<HouseholdTimeZone?> {
   @override
-  HouseholdTimeZone? build() => null;
+  HouseholdTimeZone? build() {
+    ref.watch(currentAccountIdProvider);
+    return null;
+  }
 
   void set(HouseholdTimeZone? zone) => state = zone;
 }
