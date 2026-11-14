@@ -9,9 +9,10 @@ import type { NewHardRule } from "../db/hard-rules.js";
 import { isReferenceId } from "../db/ids.js";
 import type { AvatarInput } from "../households/household-service.js";
 import { parseAvatar } from "../http/requests.js";
+import { cleanUserText, codePointLength } from "../http/text.js";
 import { BodyReader } from "../http/validation.js";
 
-/** Request body parsers for the profile, preference and hard-rule schemas of contract 0.1.1. */
+/** Request body parsers for the profile, preference and hard-rule schemas of contract 0.1.2. */
 
 const PORTIONS: readonly PortionSize[] = ["small", "normal", "large"];
 const SPICE = ["not_spicy", "medium", "spicy"] as const;
@@ -28,17 +29,6 @@ const RULE_TYPES = [
 const FOOD_REF_KINDS = ["ingredient", "dish"] as const;
 const MAX_FOOD_REFS = 100;
 const PROFILE_NAME = { minLength: 1, maxLength: 30 } as const;
-
-/** C0/C1 control characters and bidirectional marks or overrides: never part of a name or rule text. */
-function hasUnsafeText(text: string): boolean {
-  for (const char of text) {
-    const code = char.codePointAt(0) ?? 0;
-    if (code <= 0x1f || (code >= 0x7f && code <= 0x9f)) return true;
-    if (code === 0x200e || code === 0x200f) return true;
-    if ((code >= 0x202a && code <= 0x202e) || (code >= 0x2066 && code <= 0x2069)) return true;
-  }
-  return false;
-}
 
 export type SpiceLevel = (typeof SPICE)[number];
 export type LessOf = (typeof LESS_OF)[number];
@@ -84,11 +74,12 @@ function profileName(
 ): string | undefined {
   const name = reader.string(record, "name", "", { required, ...PROFILE_NAME });
   if (typeof name !== "string") return undefined;
-  if (name.trim() === "" || hasUnsafeText(name)) {
+  const clean = cleanUserText(name);
+  if (clean === null || codePointLength(clean) > PROFILE_NAME.maxLength) {
     reader.fail("/name", "invalid_format");
     return undefined;
   }
-  return name;
+  return clean;
 }
 
 function enumList<T extends string>(
@@ -261,12 +252,13 @@ function ruleText(
     maxLength: FREE_TEXT_MAX,
   });
   if (typeof text !== "string") return undefined;
-  const trimmed = text.trim();
-  if (trimmed === "" || hasUnsafeText(trimmed) || trimmed.length > FREE_TEXT_MAX) {
+  const clean = cleanUserText(text);
+  // The stored body limits UTF-16 length too (hard-rule codec).
+  if (clean === null || clean.length > FREE_TEXT_MAX) {
     reader.fail("/freeText", "invalid_format");
     return undefined;
   }
-  return trimmed;
+  return clean;
 }
 
 /**
