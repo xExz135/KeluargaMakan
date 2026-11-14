@@ -6,12 +6,18 @@
       "key": "settingsSafeModeTitle",
       "rule": "state-word-outside-cek-aman",
       "terms": ["safe"],
+      "values": {
+        "en": "Safe mode"
+      },
       "reason": "TEST FIXTURE: Android term for a device mode, not a food verdict"
     },
     {
       "key": "safetyPanelStillSaved",
       "rule": "override-in-safety-string",
       "terms": ["anyway"],
+      "values": {
+        "en": "Results stay saved and are kept anyway"
+      },
       "locales": ["en"],
       "reason": "TEST FIXTURE: describes storage, not an override control"
     },
@@ -19,18 +25,27 @@
       "key": "planShareBody",
       "rule": "override-in-safety-string",
       "terms": ["ignore"],
+      "values": {
+        "en": "This plan is not safe for Kakak, ignore it"
+      },
       "reason": "TEST FIXTURE: must never apply, the string carries Not safe"
     },
     {
       "key": "planShareBody",
       "rule": "state-word-outside-cek-aman",
       "terms": ["safe"],
+      "values": {
+        "en": "This plan is not safe for Kakak, ignore it"
+      },
       "reason": "TEST FIXTURE: names a Cek Aman result outside the safety surfaces"
     },
     {
       "key": "removedKey",
       "rule": "state-word-outside-cek-aman",
       "terms": ["aman"],
+      "values": {
+        "id": "Kunci yang sudah dihapus"
+      },
       "reason": "TEST FIXTURE: stale entry, the key does not exist"
     }
   ]

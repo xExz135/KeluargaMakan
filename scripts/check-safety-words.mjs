@@ -153,7 +153,12 @@ export function validateWordList(list) {
 
 // ---------- allowlist ----------
 
-/** @returns {{ key: string, rule: string, terms: string[], locales?: string[], reason: string }[]} */
+/**
+ * Each entry pins the exact ARB text it was reviewed for, per locale
+ * (`values`, security review T-028 L2): an edited string no longer matches
+ * its entry and fails the check until the entry is reviewed again.
+ * @returns {{ key: string, rule: string, terms: string[], values: Record<string, string>, locales?: string[], reason: string }[]}
+ */
 export function validateAllowlist(allowlist) {
   const errors = [];
   if (!allowlist || typeof allowlist !== "object" || Array.isArray(allowlist)) {
@@ -171,7 +176,7 @@ export function validateAllowlist(allowlist) {
       return;
     }
     const extra = Object.keys(e).filter(
-      (k) => !["key", "rule", "terms", "locales", "reason"].includes(k),
+      (k) => !["key", "rule", "terms", "values", "locales", "reason"].includes(k),
     );
     if (extra.length) errors.push(`${at} has unexpected fields: ${extra.join(", ")}`);
     if (typeof e.key !== "string" || !/^[a-z][A-Za-z0-9]*$/.test(e.key)) {
@@ -183,8 +188,27 @@ export function validateAllowlist(allowlist) {
       );
     }
     if (!isStringArray(e.terms)) errors.push(`${at}.terms must list the allowed words`);
-    if (e.locales !== undefined && !isStringArray(e.locales)) {
-      errors.push(`${at}.locales must be a non-empty list of locales when present`);
+    const values = e.values;
+    const valueLocales =
+      values && typeof values === "object" && !Array.isArray(values) ? Object.keys(values) : [];
+    if (
+      valueLocales.length === 0 ||
+      !valueLocales.every((l) => /^[a-z]{2,3}([_-][A-Za-z0-9]+)?$/.test(l)) ||
+      !Object.values(values).every((v) => typeof v === "string" && v.trim() !== "")
+    ) {
+      errors.push(
+        `${at}.values must pin the exact reviewed ARB text per locale, for example { "id": "…" }`,
+      );
+    }
+    if (e.locales !== undefined) {
+      if (!isStringArray(e.locales)) {
+        errors.push(`${at}.locales must be a non-empty list of locales when present`);
+      } else if (
+        e.locales.length !== valueLocales.length ||
+        !e.locales.every((l) => valueLocales.includes(l))
+      ) {
+        errors.push(`${at}.locales must name the same locales as values`);
+      }
     }
     if (typeof e.reason !== "string" || e.reason.trim().length < MIN_REASON_LENGTH) {
       errors.push(`${at}.reason is required (at least ${MIN_REASON_LENGTH} characters)`);
@@ -573,10 +597,17 @@ export function checkFiles(files, list, allowlistEntries = []) {
             e.key === key &&
             e.rule === finding.rule &&
             e.terms.some((t) => normalize(t) === normalize(finding.term)) &&
-            (!e.locales || e.locales.includes(locale)),
+            Object.hasOwn(e.values, locale),
         );
         if (entryIndex === -1) {
           violations.push(violation);
+        } else if (allowlistEntries[entryIndex].values[locale] !== value) {
+          // The text changed since the entry was reviewed.
+          used.add(entryIndex);
+          violations.push({
+            ...violation,
+            detail: `allowlist entries[${entryIndex}] was reviewed for different text: the string changed, so review it again and update the entry's values`,
+          });
         } else if (finding.protected) {
           used.add(entryIndex);
           violations.push({
