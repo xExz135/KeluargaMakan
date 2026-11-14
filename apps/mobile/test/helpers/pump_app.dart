@@ -6,6 +6,7 @@ import 'package:keluargamakan/app/app.dart';
 import 'package:keluargamakan/app/shell/bottom_navigation.dart';
 import 'package:keluargamakan/core/config/app_config.dart';
 import 'package:keluargamakan/core/storage/key_value_store.dart';
+import 'package:keluargamakan/features/auth/app_entry.dart';
 
 /// Window sizes used across tests (design-system.md 6).
 abstract final class TestWindows {
@@ -30,21 +31,15 @@ Future<void> loadAppFonts() async {
   _fontsLoaded = true;
 }
 
-/// Pumps the whole app with a simulated device.
-Future<InMemoryKeyValueStore> pumpApp(
+/// Applies a simulated device: languages, text scale, brightness, size.
+void simulateDevice(
   WidgetTester tester, {
   Locale deviceLocale = const Locale('id', 'ID'),
   double textScale = 1.0,
   Size size = TestWindows.phone,
   Brightness platformBrightness = Brightness.light,
-  Map<String, Object?> config = const {},
-  InMemoryKeyValueStore? store,
   double devicePixelRatio = 1.0,
-
-  /// The language the user picked on this phone (ACC-09). Without it the
-  /// app is in Bahasa Indonesia whatever [deviceLocale] is.
-  Locale? appLocale,
-}) async {
+}) {
   final dispatcher = tester.platformDispatcher;
   dispatcher.localesTestValue = [deviceLocale];
   dispatcher.localeTestValue = deviceLocale;
@@ -54,6 +49,34 @@ Future<InMemoryKeyValueStore> pumpApp(
   tester.view.physicalSize = size * devicePixelRatio;
   addTearDown(dispatcher.clearAllTestValues);
   addTearDown(tester.view.reset);
+}
+
+/// Pumps the whole app with a simulated device. [entry] is where the app
+/// starts; the default is the shell of a signed-in household (without a
+/// session or an API, so nothing is requested).
+Future<InMemoryKeyValueStore> pumpApp(
+  WidgetTester tester, {
+  Locale deviceLocale = const Locale('id', 'ID'),
+  double textScale = 1.0,
+  Size size = TestWindows.phone,
+  Brightness platformBrightness = Brightness.light,
+  Map<String, Object?> config = const {},
+  InMemoryKeyValueStore? store,
+  double devicePixelRatio = 1.0,
+  AppEntry entry = const EntryReady(),
+
+  /// The language the user picked on this phone (ACC-09). Without it the
+  /// app is in Bahasa Indonesia whatever [deviceLocale] is.
+  Locale? appLocale,
+}) async {
+  simulateDevice(
+    tester,
+    deviceLocale: deviceLocale,
+    textScale: textScale,
+    size: size,
+    platformBrightness: platformBrightness,
+    devicePixelRatio: devicePixelRatio,
+  );
 
   final usedStore = store ?? InMemoryKeyValueStore();
   if (appLocale != null) {
@@ -62,6 +85,7 @@ Future<InMemoryKeyValueStore> pumpApp(
   await tester.pumpWidget(
     ProviderScope(
       overrides: [
+        initialAppEntryProvider.overrideWithValue(entry),
         keyValueStoreProvider.overrideWithValue(usedStore),
         appConfigProvider.overrideWithValue(
           AppConfig([

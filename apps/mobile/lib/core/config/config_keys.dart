@@ -106,6 +106,16 @@ abstract final class ConfigKeys {
     min: 1000,
   );
 
+  /// Shows "Lanjut dengan Google" on the sign-in screen (ACC-02). Off until
+  /// Google sign-in exists on the server (T-018) and in the app; while off,
+  /// phone and email are the sign-in methods (INT-13).
+  static const googleSignInEnabled = ConfigKey<bool>(
+    'auth.googleSignInEnabled',
+    false,
+    requirementIds: ['ACC-02', 'INT-13'],
+    status: ConfigStatus.decided,
+  );
+
   static const List<ConfigKey<Object>> all = [
     minTouchTargetDp,
     cookMinTouchTargetDp,
@@ -118,6 +128,7 @@ abstract final class ConfigKeys {
     defaultServings,
     planTabEnabled,
     apiRequestTimeoutMs,
+    googleSignInEnabled,
   ];
 }
 
