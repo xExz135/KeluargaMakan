@@ -625,6 +625,17 @@ describe("NFR-14 allowlist", () => {
     );
   });
 
+  it("NFR-14 an entry pins its reviewed text: an edited string fails until reviewed again", () => {
+    const edited = '{ "@@locale": "en", "settingsSafeModeTitle": "Safe mode keeps everyone safe" }';
+    const r = checkFiles({ "x_en.arb": edited }, list, entries);
+    assert.deepEqual(
+      r.violations.map((v) => `${v.key} ${v.rule} ${v.term}`),
+      ["settingsSafeModeTitle state-word-outside-cek-aman safe"],
+    );
+    assert.match(r.violations[0].detail, /reviewed for different text/);
+    assert.deepEqual(r.allowed, []);
+  });
+
   it("NFR-14 entries need an allowlistable rule, words and a reason", () => {
     const check = (entry) => () =>
       validateAllowlist({ schema: "keluargamakan.safety-words-allowlist/1", entries: [entry] });
@@ -632,6 +643,7 @@ describe("NFR-14 allowlist", () => {
       key: "settingsSafeModeTitle",
       rule: "state-word-outside-cek-aman",
       terms: ["safe"],
+      values: { en: "Safe mode" },
       reason: "Android device mode name, not a verdict",
     };
     assert.doesNotThrow(check(ok));
@@ -642,6 +654,12 @@ describe("NFR-14 allowlist", () => {
     assert.throws(check({ ...ok, terms: [] }), /terms must list/);
     assert.throws(check({ ...ok, key: "settings.safeMode.title" }), /ARB key/);
     assert.throws(check({ ...ok, everything: true }), /unexpected fields/);
+    assert.throws(check({ ...ok, values: undefined }), /values must pin/);
+    assert.throws(check({ ...ok, values: {} }), /values must pin/);
+    assert.throws(check({ ...ok, values: { en: "" } }), /values must pin/);
+    assert.throws(check({ ...ok, values: ["Safe mode"] }), /values must pin/);
+    assert.throws(check({ ...ok, locales: ["id"] }), /same locales as values/);
+    assert.doesNotThrow(check({ ...ok, locales: ["en"] }));
     assert.throws(() => validateAllowlist({ entries: [] }), /schema must be/);
   });
 

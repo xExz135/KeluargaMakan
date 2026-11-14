@@ -1,11 +1,14 @@
 {
-  "$comment": "NFR-14 safety word check allowlist. Each entry exempts one ARB key from one rule for the listed words only, and needs a reason a reviewer can check. Only the rules in ALLOWLISTABLE_RULES (scripts/check-safety-words.mjs) can be allowlisted, and never an override word on a string that carries Tidak aman / Not safe or Cek label / Check the label. An entry that no longer matches a finding fails the check, so remove it when the string changes. Changes need qa-engineer and ux-designer review.",
+  "$comment": "NFR-14 safety word check allowlist. Each entry exempts one ARB key from one rule for the listed words only, and needs a reason a reviewer can check. Only the rules in ALLOWLISTABLE_RULES (scripts/check-safety-words.mjs) can be allowlisted, and never an override word on a string that carries Tidak aman / Not safe or Cek label / Check the label. Each entry pins the exact reviewed text per locale in `values`: if the string changes, the check fails until the entry is reviewed again and its values updated. An entry that no longer matches a finding fails the check, so remove it when the string no longer needs it. Changes need qa-engineer and ux-designer review.",
   "schema": "keluargamakan.safety-words-allowlist/1",
   "entries": [
     {
       "key": "rulesFreeTextUnmappedAll",
       "rule": "state-word-outside-cek-aman",
       "terms": ["cek"],
+      "values": {
+        "id": "Kami belum mengenali \"{text}\". Sampai tim kami mencocokkannya, semua resep untuk {name} diberi tanda Cek label, supaya tidak ada yang terlewat."
+      },
       "locales": ["id"],
       "reason": "Copy deck 24.2 (final): explains the Cek Aman state an unmapped free-text rule gives every recipe for the member (PRF-08, SAF-09). It names the real state shown in the badges, not a verdict of its own; mobile-engineer T-028, for qa-engineer and ux-designer review."
     },
@@ -13,6 +16,9 @@
       "key": "rulesFreeTextUnmappedAll",
       "rule": "state-word-outside-cek-aman",
       "terms": ["check the label"],
+      "values": {
+        "en": "We don't recognize \"{text}\" yet. Until our team matches it, every recipe for {name} is marked Check the label, so nothing is missed."
+      },
       "locales": ["en"],
       "reason": "Copy deck 24.2 (final): explains the Cek Aman state an unmapped free-text rule gives every recipe for the member (PRF-08, SAF-09). It names the real state shown in the badges, not a verdict of its own; mobile-engineer T-028, for qa-engineer and ux-designer review."
     },
@@ -20,6 +26,9 @@
       "key": "rulesFreeTextPendingAll",
       "rule": "state-word-outside-cek-aman",
       "terms": ["cek"],
+      "values": {
+        "id": "Menunggu dicocokkan tim kami. Sementara itu, semua resep untuk {name} diberi tanda Cek label."
+      },
       "locales": ["id"],
       "reason": "Copy deck 24.2 (final): explains the Cek Aman state an unmapped free-text rule gives every recipe for the member (PRF-08, SAF-09). It names the real state shown in the badges, not a verdict of its own; mobile-engineer T-028, for qa-engineer and ux-designer review."
     },
@@ -27,6 +36,9 @@
       "key": "rulesFreeTextPendingAll",
       "rule": "state-word-outside-cek-aman",
       "terms": ["check the label"],
+      "values": {
+        "en": "Waiting for our team to match it. Meanwhile, every recipe for {name} is marked Check the label."
+      },
       "locales": ["en"],
       "reason": "Copy deck 24.2 (final): explains the Cek Aman state an unmapped free-text rule gives every recipe for the member (PRF-08, SAF-09). It names the real state shown in the badges, not a verdict of its own; mobile-engineer T-028, for qa-engineer and ux-designer review."
     },
@@ -34,6 +46,9 @@
       "key": "rulesFreeTextWhyBody",
       "rule": "state-word-outside-cek-aman",
       "terms": ["cek"],
+      "values": {
+        "id": "Cek Aman hanya bisa memeriksa bahan yang dikenalnya. Daripada menebak, semua resep untuk {name} diberi tanda Cek label sampai aturan ini dicocokkan dengan bahan."
+      },
       "locales": ["id"],
       "reason": "Copy deck 24.2 (final): explains the Cek Aman state an unmapped free-text rule gives every recipe for the member (PRF-08, SAF-09). It names the real state shown in the badges, not a verdict of its own; mobile-engineer T-028, for qa-engineer and ux-designer review."
     },
@@ -41,6 +56,9 @@
       "key": "rulesFreeTextWhyBody",
       "rule": "state-word-outside-cek-aman",
       "terms": ["check the label"],
+      "values": {
+        "en": "Cek Aman can only check ingredients it knows. Rather than guess, every recipe for {name} is marked Check the label until this rule is matched to ingredients."
+      },
       "locales": ["en"],
       "reason": "Copy deck 24.2 (final): explains the Cek Aman state an unmapped free-text rule gives every recipe for the member (PRF-08, SAF-09). It names the real state shown in the badges, not a verdict of its own; mobile-engineer T-028, for qa-engineer and ux-designer review."
     },
@@ -48,6 +66,9 @@
       "key": "familyRulesStepLaterNote",
       "rule": "state-word-outside-cek-aman",
       "terms": ["aman"],
+      "values": {
+        "id": "Sampai diisi, {name} tidak diberi tanda Aman."
+      },
       "locales": ["id"],
       "reason": "Copy deck 24.3 (final): tells the manager that a member whose rules are not filled in never gets the Aman badge (ACC-08, F2r). It names the badge the member will not get, never calls anyone safe; mobile-engineer T-028, for qa-engineer and ux-designer review."
     },
@@ -55,6 +76,9 @@
       "key": "familyRulesStepLaterNote",
       "rule": "state-word-outside-cek-aman",
       "terms": ["safe"],
+      "values": {
+        "en": "Until this is filled in, {name} won't get a Safe badge."
+      },
       "locales": ["en"],
       "reason": "Copy deck 24.3 (final): tells the manager that a member whose rules are not filled in never gets the Aman badge (ACC-08, F2r). It names the badge the member will not get, never calls anyone safe; mobile-engineer T-028, for qa-engineer and ux-designer review."
     }
