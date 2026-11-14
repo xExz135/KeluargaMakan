@@ -27,6 +27,8 @@ import 'package:keluargamakan/features/auth/google_id_token.dart';
 import 'api_fixtures.dart' show profileJson;
 import 'pump_app.dart';
 
+part 'fake_server_family.dart';
+
 /// The fixture code every challenge accepts unless [FakeServer.code] says
 /// otherwise.
 const fixtureCode = '123456';
@@ -69,6 +71,19 @@ final class FakeServer {
   /// Every request received, in order.
   final List<http.Request> requests = [];
 
+  /// Profile, profile list and hard-rule reads answer 503
+  /// `rules_unavailable` (QUESTIONS #39).
+  bool rulesUnavailable = false;
+
+  /// The standard allergen list answers 500.
+  bool allergensFail = false;
+
+  /// `ProfileList.maxProfiles` (PRF-02).
+  int maxProfiles = 12;
+
+  /// Answers kept per Idempotency-Key, replayed for the same key.
+  final Map<String, Object?> _replays = {};
+
   final Map<String, String> _accountByDestination = {};
   final Map<String, String> _destinationByAccount = {};
   final Map<String, String> _householdNameByAccount = {};
@@ -105,17 +120,6 @@ final class FakeServer {
         if (!_householdNameByAccount.containsKey(account)) {
           return problem('household_required', 409);
         }
-        return json({
-          'items':
-              profilesByAccount[account] ??
-              [
-                profileJson(
-                  id: 'p-$account',
-                  name: _householdNameByAccount[account]!,
-                ),
-              ],
-          'maxProfiles': 12,
-        });
       case ('POST', '/v1/auth/code/request'):
         return _requestCode(request);
       case ('POST', '/v1/auth/code/verify'):
@@ -149,6 +153,8 @@ final class FakeServer {
         _householdNameByAccount[account] = manager['name']! as String;
         return json(_householdJson(account), 201);
     }
+    final family = _handleFamily(this, request, _account(request));
+    if (family != null) return family;
     return problem('not_found', 404);
   }
 
