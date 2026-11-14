@@ -151,7 +151,13 @@ final class KitchenController extends Notifier<KitchenState> {
     }
   }
 
-  bool _current(int generation) => ref.mounted && generation == _generation;
+  /// Still the same load and the same signed-in account. The session is
+  /// asked directly: the account change reaches this provider only on its
+  /// next rebuild.
+  bool _current(int generation) =>
+      ref.mounted &&
+      generation == _generation &&
+      ref.read(sessionManagerProvider).current?.accountId == _account;
 
   void _replace(KitchenList list) {
     _list = list;
@@ -229,9 +235,12 @@ final class KitchenController extends Notifier<KitchenState> {
             _order.remove(itemId);
             changed = true;
           }
-          ref
-              .read(kitchenNoticesProvider.notifier)
-              .post(KitchenNotice(have, failure));
+          // An ended session has its own dialog (T-027).
+          if (!failure.isSignedOut) {
+            ref
+                .read(kitchenNoticesProvider.notifier)
+                .post(KitchenNotice(have, failure));
+          }
       }
       if (result is Err) break;
     }
