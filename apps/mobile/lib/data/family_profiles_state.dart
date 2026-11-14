@@ -67,20 +67,49 @@ final class FamilyProfilesController extends Notifier<FamilyProfilesState> {
   Future<void>? _loading;
   int _generation = 0;
 
-  /// Loads the profiles. A reload asked for while one is running joins it,
-  /// so an older answer can never overwrite a newer state.
-  Future<void> reload() =>
-      _loading ??= _load().whenComplete(() => _loading = null);
+  /// Loads the profiles, showing [FamilyLoading] meanwhile. A reload asked
+  /// for while one is running joins it, so an older answer can never
+  /// overwrite a newer state.
+  Future<void> reload() => _start(quiet: false);
 
-  Future<void> _load() async {
+  /// Reads the profiles again after a write, keeping the current state on
+  /// screen until the answer comes (T-028). The read always starts after
+  /// the call: a load already running may have been answered before the
+  /// write, so it is awaited first and not joined.
+  Future<void> refresh() async {
+    final running = _loading;
+    if (running != null) await running;
+    if (!ref.mounted) return;
+    await _start(quiet: true);
+  }
+
+  Future<void> _start({required bool quiet}) {
+    final running = _loading;
+    if (running != null) return running;
+    late final Future<void> load;
+    load = _load(quiet: quiet).whenComplete(() {
+      if (identical(_loading, load)) _loading = null;
+    });
+    return _loading = load;
+  }
+
+  Future<void> _load({required bool quiet}) async {
     if (ref.read(currentAccountIdProvider) == null) return;
     final generation = _generation;
-    state = const FamilyLoading();
+    if (!quiet || state is! FamilyLoaded) state = const FamilyLoading();
     final result = await ref.read(profilesRepositoryProvider).listProfiles();
     if (!ref.mounted || generation != _generation) return;
     state = familyStateFrom(result);
   }
 }
+
+/// The member with [profileId] in a loaded family, or null.
+FamilyMember? memberIn(FamilyProfilesState state, String profileId) =>
+    switch (state) {
+      FamilyLoaded(:final profiles) =>
+        profiles.members.where((m) => m.id == profileId).firstOrNull,
+      _ => null,
+    };
 
 final familyProfilesProvider =
     NotifierProvider<FamilyProfilesController, FamilyProfilesState>(
