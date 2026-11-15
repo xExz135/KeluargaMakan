@@ -114,10 +114,13 @@ final class SetsController extends Notifier<SetsState> {
     String name,
     List<String> itemIds,
   ) async {
+    final account = _account;
+    if (account == null) return const Err(NetworkFailure());
     final generation = _generation;
     final requestId = '$name|${itemIds.join(',')}';
     final key = _createKeys[requestId] ??= randomUuidV4();
     final result = await _repo.createSet(
+      accountId: account,
       name: name,
       itemIds: itemIds,
       idempotencyKey: key,
@@ -156,8 +159,15 @@ final class SetsController extends Notifier<SetsState> {
     String name,
     List<String> itemIds,
   ) async {
+    final account = _account;
+    if (account == null) return const Err(NetworkFailure());
     final generation = _generation;
-    final result = await _repo.replaceSet(setId, name: name, itemIds: itemIds);
+    final result = await _repo.replaceSet(
+      setId,
+      accountId: account,
+      name: name,
+      itemIds: itemIds,
+    );
     if (!_current(generation)) return result;
     final sets = _sets;
     switch (result) {
@@ -187,8 +197,10 @@ final class SetsController extends Notifier<SetsState> {
 
   /// Deletes [setId]; its items stay in the kitchen. Online only.
   Future<ApiResult<void>> delete(String setId) async {
+    final account = _account;
+    if (account == null) return const Err(NetworkFailure());
     final generation = _generation;
-    final result = await _repo.deleteSet(setId);
+    final result = await _repo.deleteSet(setId, accountId: account);
     if (!_current(generation)) return result;
     final gone = switch (result) {
       Ok() => true,

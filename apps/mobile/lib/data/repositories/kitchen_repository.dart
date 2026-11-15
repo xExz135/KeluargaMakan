@@ -138,37 +138,55 @@ final class KitchenRepository {
     required int epoch,
   }) => _cache.saveSets(sets, accountId: accountId, epoch: epoch);
 
+  // Set writes are sent only with [accountId]'s session, like the sync
+  // (security review T-034 M1): a set name never reaches another
+  // household's endpoint.
+
   Future<ApiResult<IngredientSetInfo>> createSet({
+    required String accountId,
     required String name,
     required List<String> itemIds,
     required String idempotencyKey,
-  }) => _caller.call(
-    'createIngredientSet',
-    () => _kitchen.createIngredientSetWithHttpInfo(
-      api.IngredientSetInput(name: name, itemIds: itemIds.toSet()),
-      idempotencyKey: idempotencyKey,
+  }) => runAsAccount(
+    accountId,
+    () => _caller.call(
+      'createIngredientSet',
+      () => _kitchen.createIngredientSetWithHttpInfo(
+        api.IngredientSetInput(name: name, itemIds: itemIds.toSet()),
+        idempotencyKey: idempotencyKey,
+      ),
+      decodeIngredientSet,
     ),
-    decodeIngredientSet,
   );
 
   /// Replaces the set's name and items; sending it again is safe.
   Future<ApiResult<IngredientSetInfo>> replaceSet(
     String setId, {
+    required String accountId,
     required String name,
     required List<String> itemIds,
-  }) => _caller.call(
-    'replaceIngredientSet',
-    () => _kitchen.replaceIngredientSetWithHttpInfo(
-      setId,
-      api.IngredientSetInput(name: name, itemIds: itemIds.toSet()),
+  }) => runAsAccount(
+    accountId,
+    () => _caller.call(
+      'replaceIngredientSet',
+      () => _kitchen.replaceIngredientSetWithHttpInfo(
+        setId,
+        api.IngredientSetInput(name: name, itemIds: itemIds.toSet()),
+      ),
+      decodeIngredientSet,
     ),
-    decodeIngredientSet,
   );
 
   /// The items stay in the kitchen.
-  Future<ApiResult<void>> deleteSet(String setId) => _caller.callNoContent(
-    'deleteIngredientSet',
-    () => _kitchen.deleteIngredientSetWithHttpInfo(setId),
+  Future<ApiResult<void>> deleteSet(
+    String setId, {
+    required String accountId,
+  }) => runAsAccount(
+    accountId,
+    () => _caller.callNoContent(
+      'deleteIngredientSet',
+      () => _kitchen.deleteIngredientSetWithHttpInfo(setId),
+    ),
   );
 
   // ------------------------------------------------------------ Catalog
