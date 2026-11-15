@@ -101,3 +101,16 @@ def test_targets_are_configuration() -> None:
     assert s.confidence.tweak == 0.7
     with pytest.raises(ConfigError):
         settings(TWEAK_MIN_CONFIDENCE="1.5")
+
+
+@pytest.mark.parametrize("value", [" local", "local ", "LOCAL", "Local", "test\n", " test", "prod"])
+def test_nfr10_ai_env_is_matched_exactly(value: str) -> None:
+    # Security review 2026-11-15 I2: a whitespace or case variant never counts
+    # as local or test (which would allow the mock provider); it stops startup.
+    with pytest.raises(ConfigError, match="AI_ENV must be exactly one of"):
+        settings(AI_ENV=value)
+
+
+def test_nfr10_ai_env_is_required() -> None:
+    with pytest.raises(ConfigError, match="AI_ENV is required"):
+        settings(AI_ENV="")

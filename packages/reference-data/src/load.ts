@@ -61,7 +61,9 @@ function refuseFixturePath(paths: readonly string[], environment: AppEnvironment
 export function readReferenceDataConfig(
   env: Readonly<Record<string, string | undefined>>,
 ): ReferenceDataConfig {
-  const named = setting(env, "APP_ENV");
+  // Exact match, never trimmed or case-folded (security review 2026-11-15
+  // I2): " local" or "LOCAL" is unknown and counts as production.
+  const named = Object.hasOwn(env, "APP_ENV") ? env["APP_ENV"] : undefined;
   const environment = APP_ENVIRONMENTS.find((candidate) => candidate === named) ?? "production";
   const allowFixture = FIXTURE_ENVIRONMENTS.includes(environment);
   const path = setting(env, "REFERENCE_DATA_PATH");
