@@ -6,6 +6,8 @@
 // TEST FIXTURE: not real safety or nutrition data. Names and contacts are
 // invented.
 
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -369,8 +371,7 @@ void main() {
     expect(rows.map((r) => r.ingredientId), ['fx_kit_tempe']);
   });
 
-  testWidgets('KIT-16 a request the server refuses whole (400) is split, so '
-      'only the change it cannot read is taken back', (tester) async {
+  Future<(KitchenPhone, String, String)> twoQueued(WidgetTester tester) async {
     late String tempe;
     late String tahu;
     final phone = await openKitchen(
@@ -388,20 +389,100 @@ void main() {
     goOffline(server);
     await tapKeyed(tester, 'kitchen.item.$tempe');
     await tapKeyed(tester, 'kitchen.item.$tahu');
-    // A stand-in for a change the schema refuses: anything with two
-    // changes, and the tempe change alone.
-    server.intercept = (r) {
-      if (r.url.path != syncPath) return null;
-      final body = r.body;
-      final many = RegExp('changeId').allMatches(body).length > 1;
-      return many || body.contains('fx_kit_tempe')
-          ? FakeServer.problem('validation_failed', 400)
-          : null;
-    };
+    return (phone, tempe, tahu);
+  }
+
+  http.Response badRequest(List<String> pointers) => FakeServer.problem(
+    'validation_failed',
+    400,
+    extra: {
+      'errors': [
+        for (final p in pointers) {'pointer': p, 'code': 'invalid_value'},
+      ],
+    },
+  );
+
+  testWidgets('KIT-16 L4 a whole-request 400 that names a change takes back '
+      'only that change; the rest applies', (tester) async {
+    final (phone, tempe, tahu) = await twoQueued(tester);
+    // The tempe change is the first in the request.
+    server.intercept = (r) =>
+        r.url.path == syncPath && r.body.contains('fx_kit_tempe')
+        ? badRequest(['/changes/0/ingredient/ingredientId'])
+        : null;
     phone.phone.sync.connectivity.goOnline();
     await tester.pumpAndSettle();
     expect(toggleLabel(tester, tempe), 'Tempe, ada. Ketuk untuk tandai habis.');
     expect(toggleLabel(tester, tahu), 'Tahu, habis. Ketuk untuk tandai ada.');
+    expect(syncCaption(tester), 'Tersimpan');
+    expect(
+      find.text(
+        'Tempe: perubahan ini tidak bisa disimpan, jadi dikembalikan seperti '
+        'semula.',
+      ),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('KIT-16 L4 a 400 on the changes as a whole is split, change by '
+      'change, and nothing is dropped without a change being named', (
+    tester,
+  ) async {
+    final (phone, tempe, tahu) = await twoQueued(tester);
+    server.intercept = (r) {
+      if (r.url.path != syncPath) return null;
+      final many = RegExp('changeId').allMatches(r.body).length > 1;
+      return many ? badRequest(['/changes']) : null;
+    };
+    phone.phone.sync.connectivity.goOnline();
+    await tester.pumpAndSettle();
+    expect(toggleLabel(tester, tempe), 'Tempe, habis. Ketuk untuk tandai ada.');
+    expect(toggleLabel(tester, tahu), 'Tahu, habis. Ketuk untuk tandai ada.');
+    expect(syncCaption(tester), 'Tersimpan');
+  });
+
+  testWidgets('KIT-16 L4 a 400 on the cursor resends once without it (a full '
+      'resync) and keeps every change', (tester) async {
+    final (phone, tempe, tahu) = await twoQueued(tester);
+    server.intercept = (r) {
+      if (r.url.path != syncPath) return null;
+      final cursor = (jsonDecode(r.body) as Map<String, Object?>)['cursor'];
+      return cursor == null ? null : badRequest(['/cursor']);
+    };
+    final before = server.kitchen.syncBodies.length;
+    phone.phone.sync.connectivity.goOnline();
+    await tester.pumpAndSettle();
+    expect(toggleLabel(tester, tempe), 'Tempe, habis. Ketuk untuk tandai ada.');
+    expect(toggleLabel(tester, tahu), 'Tahu, habis. Ketuk untuk tandai ada.');
+    expect(syncCaption(tester), 'Tersimpan');
+    final accepted = server.kitchen.syncBodies.skip(before).toList();
+    expect(accepted.first['cursor'], isNull);
+    expect(accepted.first['changes'], hasLength(2));
+    expect(server.kitchenOf(phone.account).map((i) => i['state']).toSet(), {
+      'out',
+    });
+  });
+
+  testWidgets('KIT-16 L4 any other 400 keeps the whole queue and backs off', (
+    tester,
+  ) async {
+    final (phone, tempe, tahu) = await twoQueued(tester);
+    var broken = true;
+    server.intercept = (r) =>
+        broken && r.url.path == syncPath ? badRequest(const []) : null;
+    phone.phone.sync.connectivity.goOnline();
+    await tester.pumpAndSettle();
+    expect(toggleLabel(tester, tempe), contains('Tempe, habis.'));
+    expect(toggleLabel(tester, tahu), contains('Tahu, habis.'));
+    expect(syncCaption(tester), 'Belum terkirim · 2 perubahan');
+    expect(find.byKey(const Key('kitchen.sync.failed')), findsOneWidget);
+    expect(find.textContaining('tidak bisa disimpan'), findsNothing);
+    expect(phone.phone.sync.timers.pending, hasLength(1));
+
+    broken = false;
+    server.intercept = null;
+    phone.phone.sync.timers.fireAll();
+    await tester.pumpAndSettle();
     expect(syncCaption(tester), 'Tersimpan');
   });
 

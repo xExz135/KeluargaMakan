@@ -103,7 +103,8 @@ final class KitchenRepository {
         () => _kitchen.syncKitchenWithHttpInfo(
           api.KitchenSyncRequest(cursor: cursor, changes: changes),
         ),
-        (json) => decodeSyncAnswer(json, sent: sent),
+        (json) =>
+            decodeSyncAnswer(json, sent: sent, cursorSent: cursor != null),
       ),
     );
   }
