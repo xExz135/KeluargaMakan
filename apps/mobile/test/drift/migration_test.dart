@@ -102,12 +102,19 @@ void main() {
     await v3.close();
   });
 
-  test('NFR-05 a downgrade from an unknown newer schema starts '
-      'again', () async {
+  test('NFR-05 L5 a downgrade from an unknown newer schema starts again and '
+      'drops tables only the newer build knows', () async {
     final dir = await _tempDir();
     final path = '${dir.path}/downgrade.sqlite';
     final newer = _FutureVersion(NativeDatabase(File(path)), 7);
     await _seed(newer);
+    // A table only the newer build knows, holding a name.
+    await newer.customStatement(
+      'CREATE TABLE kitchen_outbox (id TEXT PRIMARY KEY, custom_name TEXT)',
+    );
+    await newer.customStatement(
+      "INSERT INTO kitchen_outbox VALUES ('c-1', 'Sambal Nenek')",
+    );
     await newer.close();
 
     final current = AppDatabase(NativeDatabase(File(path)));
@@ -117,6 +124,13 @@ void main() {
         .customSelect('PRAGMA user_version')
         .getSingle();
     expect(version.read<int>('user_version'), current.schemaVersion);
+    final tables = await current
+        .customSelect("SELECT name FROM sqlite_master WHERE type = 'table'")
+        .get();
+    expect(
+      tables.map((t) => t.read<String>('name')),
+      isNot(contains('kitchen_outbox')),
+    );
     await current.close();
   });
 

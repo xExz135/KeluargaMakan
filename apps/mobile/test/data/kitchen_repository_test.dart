@@ -129,6 +129,20 @@ void main() {
       expect(catalog.items.first.category, isNull);
     });
 
+    test('L1 a repeated kitchen item ID fails the list', () {
+      expect(
+        () => decodeKitchenList(_list([_item(), _item(state: 'out')])),
+        throwsFormatException,
+      );
+    });
+
+    test('L1 a repeated catalog ingredient ID fails the catalog', () {
+      final json = _catalogJson();
+      final items = json['items']! as List;
+      json['items'] = [...items, items.first];
+      expect(() => decodeCatalog(json, etag: null), throwsFormatException);
+    });
+
     test('KIT-04 only a well-formed ETag is kept', () {
       expect(acceptableEtag('"abc123"'), '"abc123"');
       expect(acceptableEtag('W/"abc"'), 'W/"abc"');
@@ -185,6 +199,54 @@ void main() {
         'fx_kit_tempe',
       ]);
       expect(second.source, isA<FromNetwork>());
+    });
+
+    http.Response catalogOk({String? etag}) => http.Response(
+      jsonEncode(_catalogJson()),
+      200,
+      headers: {'content-type': 'application/json', 'etag': ?etag},
+    );
+
+    test('L2 a 304 when no If-None-Match was sent is not trusted: one full '
+        'download follows', () async {
+      // A first download without an ETag: the copy has none to send.
+      respond = (_) => catalogOk();
+      final r = await repo();
+      valueOf(await r.refreshCatalog());
+      requests.clear();
+      respond = (req) => requests.length == 1
+          ? http.Response('', 304)
+          : catalogOk(etag: '"fx-2"');
+      final result = valueOf(await r.refreshCatalog());
+      expect(requests, hasLength(2));
+      expect(requests[0].headers['if-none-match'], isNull);
+      expect(requests[1].headers['if-none-match'], isNull);
+      expect(result.etag, '"fx-2"');
+    });
+
+    test(
+      'L2 a 304 naming another tag than the one sent is not trusted',
+      () async {
+        respond = (_) => catalogOk(etag: '"fx-1"');
+        final r = await repo();
+        await r.refreshCatalog();
+        requests.clear();
+        respond = (req) => req.headers['if-none-match'] != null
+            ? http.Response('', 304, headers: {'etag': '"other"'})
+            : catalogOk(etag: '"fx-3"');
+        final result = valueOf(await r.refreshCatalog());
+        expect(requests.first.headers['if-none-match'], '"fx-1"');
+        expect(requests.last.headers['if-none-match'], isNull);
+        expect(result.etag, '"fx-3"');
+      },
+    );
+
+    test('L2 a 304 to the full download fails closed', () async {
+      respond = (_) => catalogOk(etag: '"fx-1"');
+      final r = await repo();
+      await r.refreshCatalog();
+      respond = (_) => http.Response('', 304, headers: {'etag': '"other"'});
+      expect(failureOf(await r.refreshCatalog()), isA<DecodeFailure>());
     });
 
     test('KIT-04 a 304 without a copy fails closed', () async {
