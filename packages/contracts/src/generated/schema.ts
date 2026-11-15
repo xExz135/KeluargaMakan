@@ -458,7 +458,7 @@ export interface paths {
         head?: never;
         /**
          * Change an ingredient's state or details
-         * @description One tap toggles available and out (KIT-02). Only the fields present are changed. The change is stamped with the server time and wins over any earlier change to the same ingredient (KIT-16); sending the same change again leaves the same result. `quantity` and `brand` (KIT-09) are served from T-032; a server without them answers 400 `validation_failed` for those fields.
+         * @description One tap toggles available and out (KIT-02). Only the fields present are changed. The change is stamped with the server time and wins over any earlier change to the same ingredient (KIT-16); sending the same change again leaves the same result. `quantity` and `brand` are optional and may be null to clear them (KIT-09). A `brandId` must be one of the ingredient's catalog `brands` in the verified reference data (400 otherwise; 503 `reference_data_unavailable` without the data); only reference ingredients take one. A typed `customName` brand is kept as text and never counts as a recorded brand, so Cek Aman keeps "Check the label" for brand-varying ingredients (SAF-07).
          */
         patch: operations["updateKitchenItem"];
         trace?: never;
@@ -545,7 +545,7 @@ export interface paths {
         put?: never;
         /**
          * Send queued kitchen changes and fetch changes from other phones
-         * @description KIT-16 offline sync. The phone sends the changes it queued while offline, oldest first, and the cursor of its last sync. Each change names its ingredient (a reference ID or a custom name), so an item added offline needs no server ID. The server places each change on its own clock at the time it was made (now minus `ageMs`, so a phone with a wrong clock still orders correctly) and keeps, per ingredient, the latest change: an older change than the stored one is `superseded` and the stored item is returned. Every change has a `changeId`; sending it again returns its first result without applying it twice, so replaying the queue is safe. The response carries every item changed or removed since the cursor (all items when `cursor` is null or too old, with `full: true`) and a new cursor. A rejected change (for example an unknown ingredient or the item limit) never stops the rest.
+         * @description KIT-16 offline sync. The phone sends the changes it queued while offline, oldest first, and the cursor of its last sync. Each change names its ingredient (a reference ID or a custom name), so an item added offline needs no server ID. The server places each change on its own clock at the time it was made (now minus `ageMs`, so a phone with a wrong clock still orders correctly) and keeps, per ingredient, the latest change: an older change than the stored one is `superseded` and the stored item is returned. Every change has a `changeId`; sending it again returns its first result without applying it twice, so replaying the queue is safe. Change IDs belong to the household and are kept for a configured period; the same ID with a different change is `rejected` with `idempotency_key_reused`. A change is never dated in the future, and one older than the configured limit is dated at that limit. A removal is kept too: a change older than the removal is `superseded`, so an old queued change cannot bring an item back. The response carries every item changed or removed since the cursor and a new cursor. When `cursor` is null, not issued by this server for this household, or older than the kept removals, the response has all items and `full: true`; it never carries another household's data. A rejected change (for example an unknown ingredient, a name or brand that cannot be stored, or the item limit) never stops the rest. A request without the schema's shape is refused whole with 400.
          */
         post: operations["syncKitchen"];
         delete?: never;
@@ -1140,7 +1140,7 @@ export interface components {
             brand: components["schemas"]["KitchenBrand"] | null;
             /** @description Created with the household as a default staple (KIT-07, ACC-05). */
             isDefaultStaple: boolean;
-            /** @description KIT-06: 1 is the most used item in its category. Null until use is recorded; clients then fall back to their own order. */
+            /** @description KIT-06: 1 is the most used item in its category. A use is a change of state (it ran out, or came back after being out), and older uses count less (configured half-life). Null when the item has no recent use; clients then fall back to their own order. */
             usageRank: number | null;
             /** Format: date-time */
             changedAt: string;
