@@ -21,6 +21,8 @@
     "check:safety-words": "node scripts/check-safety-words.mjs",
     "validate:reference": "node scripts/validate-reference.mjs",
     "build:reference": "node scripts/build-reference.mjs",
+    "dev:local": "node scripts/dev-local.mjs",
+    "dev:app": "node scripts/dev-app.mjs",
     "check:contracts": "pnpm --filter @keluargamakan/contracts run check",
     "audit:deps": "pnpm audit --audit-level=high"
   },

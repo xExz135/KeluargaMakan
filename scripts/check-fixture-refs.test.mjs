@@ -36,6 +36,14 @@ describe("fixture guard (docs workflow section 5)", () => {
     assert.equal(isExempt("services/api/.env.example"), false);
   });
 
+  it("NFR-10 exempts only the local test server script, not other scripts or the API", () => {
+    assert.equal(isExempt("scripts/dev-local.mjs"), true);
+    assert.equal(isExempt("scripts/dev-app.mjs"), false);
+    assert.equal(isExempt("scripts/build-reference.mjs"), false);
+    assert.equal(isExempt("services/api/src/local/main-local.ts"), false);
+    assert.equal(isExempt("services/api/src/local/local-database.ts"), false);
+  });
+
   it("reports file and line", () => {
     const [v] = findViolations(["infra/envs/production/main.tf"], read);
     assert.deepEqual(v, {
