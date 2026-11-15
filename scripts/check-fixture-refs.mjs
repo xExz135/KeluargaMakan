@@ -25,6 +25,9 @@ const EXEMPT_DIR_SEGMENTS = [
 ];
 const EXEMPT_FILES = new Set([
   "docker-compose.yml",
+  // Local test server (pnpm dev:local): builds the TEST FIXTURE kitchen
+  // catalog for APP_ENV=local, which the API refuses anywhere else.
+  "scripts/dev-local.mjs",
   "scripts/check-fixture-refs.mjs",
   "scripts/check-fixture-refs.test.mjs",
 ]);

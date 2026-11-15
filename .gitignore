@@ -18,6 +18,10 @@ coverage/
 **/.env.*
 !**/.env.example
 
+# Local test server (pnpm dev:local): embedded database, local-only keys,
+# built TEST FIXTURE catalog
+.local-dev/
+
 # Python
 __pycache__/
 *.py[cod]
