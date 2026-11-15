@@ -107,6 +107,17 @@ describe("NFR-10 local test server settings", () => {
       /absolute/,
     );
   });
+
+  it.each(["127.0.0.1", "::1", "localhost"])("listens on loopback HOST %j", (HOST) => {
+    expect(localServerSettings({ ...localEnv, HOST })).toEqual({ dataDir });
+  });
+
+  it.each(["0.0.0.0", "::", "", " 127.0.0.1", "192.168.1.10", "LOCALHOST", "example.com"])(
+    "NFR-10 refuses HOST %j (security review L3: loopback only)",
+    (HOST) => {
+      expect(() => localServerSettings({ ...localEnv, HOST })).toThrow(/loopback only/);
+    },
+  );
 });
 
 describe("NFR-10 the other local shortcuts stay refused outside development", () => {
