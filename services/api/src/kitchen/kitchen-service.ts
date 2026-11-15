@@ -246,9 +246,12 @@ export class KitchenService {
         if (replay !== null) {
           const stored = await readItem(tx, scope.householdId, replay.resourceId);
           if (stored === null) throw idempotencyKeyReused();
+          // Re-check N1: an item removed and added again since (its ID is
+          // reused) was not created by this request, so the replay says so.
+          const recreated = stored.created_at.getTime() > replay.recordedAt.getTime();
           return {
             item: await this.#viewOne(tx, scope, stored),
-            created: replay.operation === ADD_CREATED,
+            created: replay.operation === ADD_CREATED && !recreated,
           };
         }
       }
@@ -412,7 +415,11 @@ export class KitchenService {
       // Removals evicted at the cap move both limits up (security review T-032 L4).
       const floor = await readSyncFloor(tx, scope.householdId);
       const notBefore = floor !== null && floor.evictedAt > keptSince ? floor.evictedAt : keptSince;
-      const after = decodeCursor(this.#hashKey, input.cursor, scope.householdId, notBefore);
+      const decoded = decodeCursor(this.#hashKey, input.cursor, scope.householdId, notBefore);
+      // Re-check N3: by position, so a cursor from the same millisecond as
+      // an eviction cannot skip the evicted removal.
+      const after =
+        decoded !== null && floor !== null && decoded < floor.evictedSeq ? null : decoded;
       const results: SyncResultView[] = [];
       for (const change of input.changes) {
         results.push(await this.#syncChange(tx, scope, change, keptSince, floor, now));
