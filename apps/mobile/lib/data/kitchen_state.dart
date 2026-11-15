@@ -15,12 +15,14 @@
 // security review T-027 M1). An answer for the previous account is dropped
 // and never written to the phone's copy.
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:keluargamakan_api/api.dart' as api;
 
 import '../core/api/api_client.dart';
 import '../core/api/api_problem.dart';
 import '../core/api/api_result.dart';
+import 'ingredient_search.dart' show foldIngredientName;
 import 'models/kitchen.dart';
 import 'models/sourced.dart';
 import 'repositories/auth_repository.dart' show randomUuidV4;
@@ -85,6 +87,7 @@ final class KitchenController extends Notifier<KitchenState> {
     final account = ref.watch(currentAccountIdProvider);
     // Nothing from the previous account survives (T-027 M1).
     _account = account;
+    _epoch = ref.read(sessionManagerProvider).epoch;
     _loading = null;
     _generation++;
     _order = [];
@@ -98,6 +101,9 @@ final class KitchenController extends Notifier<KitchenState> {
   }
 
   String? _account;
+
+  /// The session epoch this state belongs to (LocalCache, T-033 review).
+  int _epoch = 0;
   Future<void>? _loading;
   int _generation = 0;
 
@@ -139,7 +145,15 @@ final class KitchenController extends Notifier<KitchenState> {
     if (_account == null) return;
     final generation = _generation;
     if (!quiet || state is! KitchenLoaded) state = const KitchenLoading();
-    final result = await _repo.listItems();
+    ApiResult<KitchenList> result;
+    try {
+      result = await _repo.listItems();
+    } on Object catch (e) {
+      // Never left on the skeleton (security review T-033 M1). Only the
+      // type is logged.
+      debugPrint('Kitchen load failed (${e.runtimeType})');
+      result = const Err(DecodeFailure('listKitchenItems'));
+    }
     if (!_current(generation)) return;
     switch (result) {
       case Ok(:final value):
@@ -154,15 +168,21 @@ final class KitchenController extends Notifier<KitchenState> {
   /// Still the same load and the same signed-in account. The session is
   /// asked directly: the account change reaches this provider only on its
   /// next rebuild.
-  bool _current(int generation) =>
-      ref.mounted &&
-      generation == _generation &&
-      ref.read(sessionManagerProvider).current?.accountId == _account;
+  bool _current(int generation) {
+    if (!ref.mounted || generation != _generation) return false;
+    final session = ref.read(sessionManagerProvider);
+    return !session.isEnding &&
+        session.epoch == _epoch &&
+        session.current?.accountId == _account;
+  }
 
   void _replace(KitchenList list) {
     _list = list;
     _order = [for (final i in list.items) i.id];
     _confirmed = {for (final i in list.items) i.id: i};
+    // An ingredient the server now shows needs no retried add: a later add
+    // of it is a new action with a new key (security review T-033 L4).
+    list.items.forEach(_forgetAddKeys);
     // Items gone from the server lose their pending wishes.
     _wanted.removeWhere((id, _) => !_confirmed.containsKey(id));
   }
@@ -197,7 +217,7 @@ final class KitchenController extends Notifier<KitchenState> {
     if (list == null || account == null || list.source is! FromNetwork) {
       return;
     }
-    await _repo.saveCopy(list, accountId: account);
+    await _repo.saveCopy(list, accountId: account, epoch: _epoch);
   }
 
   /// KIT-02: one tap switches [itemId] between available and out, on
@@ -227,6 +247,12 @@ final class KitchenController extends Notifier<KitchenState> {
         case Ok(:final value):
           _confirmed[itemId] = value;
           changed = true;
+          if (value.state != wanted) {
+            // The server kept another state (a newer state this app reads
+            // as out, or a server rule). Its answer wins; nothing is sent
+            // again until the next tap (security review T-033 L3).
+            _wanted.remove(itemId);
+          }
         case Err(:final failure):
           _wanted.remove(itemId);
           if (failure.problemCode == ApiErrorCode.notFound) {
@@ -242,7 +268,7 @@ final class KitchenController extends Notifier<KitchenState> {
                 .post(KitchenNotice(have, failure));
           }
       }
-      if (result is Err) break;
+      if (result is Err || _wanted[itemId] == null) break;
     }
     _sending.remove(itemId);
     if (_wanted[itemId] == _confirmed[itemId]?.state) _wanted.remove(itemId);
@@ -271,11 +297,8 @@ final class KitchenController extends Notifier<KitchenState> {
     KitchenItemState state = KitchenItemState.available,
   }) async {
     final generation = _generation;
-    final fingerprint = switch (ingredient) {
-      ReferenceIngredient(:final ingredientId) => 'r:$ingredientId',
-      CustomIngredient(:final name) => 'c:$name',
-    };
-    final requestId = '$fingerprint|${category?.toJson()}|${state.wire}';
+    final requestId =
+        '${_fingerprint(ingredient)}|${category?.toJson()}|${state.wire}';
     final key = _addKeys[requestId] ??= randomUuidV4();
     final result = await _repo.addItem(
       ingredient,
@@ -300,6 +323,18 @@ final class KitchenController extends Notifier<KitchenState> {
     return result;
   }
 
+  static String _fingerprint(IngredientKey ingredient) => switch (ingredient) {
+    ReferenceIngredient(:final ingredientId) => 'r:$ingredientId',
+    CustomIngredient(:final name) => 'c:${foldIngredientName(name)}',
+  };
+
+  /// Drops kept Idempotency-Keys of [item]'s ingredient: once it is in the
+  /// list or removed, the add they belonged to is settled.
+  void _forgetAddKeys(KitchenEntry item) {
+    final prefix = '${_fingerprint(item.key)}|';
+    _addKeys.removeWhere((requestId, _) => requestId.startsWith(prefix));
+  }
+
   /// Removes [itemId] (KIT-01). Default staples can be removed too
   /// (KIT-07).
   Future<ApiResult<void>> remove(String itemId) async {
@@ -312,6 +347,7 @@ final class KitchenController extends Notifier<KitchenState> {
       Err(:final failure) => failure.problemCode == ApiErrorCode.notFound,
     };
     if (gone) {
+      if (_confirmed[itemId] case final removed?) _forgetAddKeys(removed);
       _confirmed.remove(itemId);
       _order.remove(itemId);
       _wanted.remove(itemId);

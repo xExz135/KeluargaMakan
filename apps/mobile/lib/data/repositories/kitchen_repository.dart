@@ -43,6 +43,7 @@ final class KitchenRepository {
   /// this phone is returned (for the same account only).
   Future<ApiResult<KitchenList>> listItems() async {
     final account = _currentAccountId();
+    final epoch = _cache.epoch;
     final result = await _caller.call(
       'listKitchenItems',
       () => _kitchen.listKitchenItemsWithHttpInfo(),
@@ -50,7 +51,7 @@ final class KitchenRepository {
     );
     switch (result) {
       case Ok(:final value) when account != null:
-        await _cache.saveKitchen(value, accountId: account);
+        await _cache.saveKitchen(value, accountId: account, epoch: epoch);
       case Err(failure: NetworkFailure()):
         final cached = await _cache.kitchen();
         if (cached != null) return Ok(cached);
@@ -60,10 +61,17 @@ final class KitchenRepository {
     return result;
   }
 
+  /// The session epoch now, for [saveCopy] (LocalCache).
+  int get sessionEpoch => _cache.epoch;
+
   /// Keeps [list] as the phone's copy for [accountId] (after a confirmed
-  /// change). Does nothing once another account is signed in.
-  Future<void> saveCopy(KitchenList list, {required String accountId}) =>
-      _cache.saveKitchen(list, accountId: accountId);
+  /// change). Does nothing once that session is ending or over, or another
+  /// account is signed in. Best effort.
+  Future<void> saveCopy(
+    KitchenList list, {
+    required String accountId,
+    required int epoch,
+  }) => _cache.saveKitchen(list, accountId: accountId, epoch: epoch);
 
   /// Adds a reference ingredient (KIT-04) or a custom one (KIT-05). A custom
   /// one needs [category]; a reference one needs it only when the catalog
@@ -126,32 +134,54 @@ final class KitchenRepository {
   /// `If-None-Match` (304). Without an answer the phone's copy is returned
   /// as [FromCache]. A 503 `reference_data_unavailable` is a failure even
   /// when a copy exists: the server cannot vouch for it now.
+  ///
+  /// A 304 counts only as the answer to the tag that was sent: when nothing
+  /// was sent, or the 304 names another tag, the catalog is downloaded once
+  /// in full instead (security review T-033 L2).
   Future<ApiResult<IngredientCatalog>> refreshCatalog() async {
     final cached = await _cache.catalog();
-    final etag = acceptableEtag(cached?.etag);
-    final result = await _caller.callConditional(
-      'listReferenceIngredients',
-      () => _reference.listReferenceIngredientsWithHttpInfo(ifNoneMatch: etag),
-      (json, etag) => decodeCatalog(json, etag: acceptableEtag(etag)),
-    );
+    final sent = cached == null ? null : acceptableEtag(cached.etag);
+    final result = await _download(sent);
     switch (result) {
       case Ok(value: Modified(:final value)):
         await _cache.saveCatalog(value);
         return Ok(value);
-      case Ok(value: NotModified()):
-        if (cached == null) {
-          // A 304 without a copy to confirm: the server's answer does not
-          // fit the request. Fail closed rather than show nothing.
-          return const Err(DecodeFailure('listReferenceIngredients'));
+      case Ok(value: NotModified(:final etag)):
+        final confirmed =
+            cached != null && sent != null && (etag == null || etag == sent);
+        if (confirmed) {
+          await _cache.touchCatalog();
+          return Ok(cached.withSource(const FromNetwork()));
         }
-        await _cache.touchCatalog();
-        return Ok(cached.withSource(const FromNetwork()));
+        // Not an answer to what was asked: one full download.
+        final full = await _download(null);
+        switch (full) {
+          case Ok(value: Modified(:final value)):
+            await _cache.saveCatalog(value);
+            return Ok(value);
+          case Ok(value: NotModified()):
+            return const Err(DecodeFailure('listReferenceIngredients'));
+          case Err(failure: NetworkFailure()) when cached != null:
+            return Ok(cached);
+          case Err(:final failure):
+            return Err(failure);
+        }
       case Err(failure: NetworkFailure()) when cached != null:
         return Ok(cached);
       case Err(:final failure):
         return Err(failure);
     }
   }
+
+  Future<ApiResult<Conditional<IngredientCatalog>>> _download(
+    String? ifNoneMatch,
+  ) => _caller.callConditional(
+    'listReferenceIngredients',
+    () => _reference.listReferenceIngredientsWithHttpInfo(
+      ifNoneMatch: ifNoneMatch,
+    ),
+    (json, etag) => decodeCatalog(json, etag: acceptableEtag(etag)),
+  );
 
   /// KIT-04: searches the reference ingredients by name or local name. The
   /// query travels only in the request body.
