@@ -539,6 +539,9 @@ final class LocalCache {
                 timeline: change.stamp.timeline,
                 elapsedMs: change.stamp.elapsedMs,
                 wallMs: change.stamp.wallMs,
+                // Carried over from the changes it replaces, in the same
+                // transaction (security review T-034 R1).
+                sendAttempts: Value(change.sendAttempts),
               ),
             );
         written = true;

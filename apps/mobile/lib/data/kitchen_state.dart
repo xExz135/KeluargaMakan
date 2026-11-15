@@ -717,7 +717,7 @@ final class KitchenController extends Notifier<KitchenState> {
     final epoch = _epoch;
     // The time of the edit is read now, before anything waits.
     final stamp = ref.read(deviceClockProvider).read();
-    final draft = QueuedChange(
+    final candidate = QueuedChange(
       seq: ++_seq,
       changeId: randomUuidV4(),
       ingredient: ingredient,
@@ -729,7 +729,15 @@ final class KitchenController extends Notifier<KitchenState> {
         wallMs: DateTime.now().millisecondsSinceEpoch,
       ),
     );
-    final replaced = changesReplacedBy(draft, _queue, inFlight: _inFlight);
+    final replaced = changesReplacedBy(candidate, _queue, inFlight: _inFlight);
+    // A replaced change that was sent may have reached the server: the new
+    // change keeps that knowledge (security review T-034 R1), so a later
+    // removal is still sent.
+    final draft = candidate.withSendAttempts(
+      _queue
+          .where((c) => replaced.contains(c.changeId))
+          .fold(0, (most, c) => max(most, c.sendAttempts)),
+    );
     if (_queue.length - replaced.length + 1 > _maxQueued) {
       if (notify) {
         ref
@@ -765,6 +773,7 @@ final class KitchenController extends Notifier<KitchenState> {
         op: draft.op,
         patch: draft.patch,
         stamp: reading,
+        sendAttempts: draft.sendAttempts,
       );
       final index = _queue.indexWhere((c) => c.changeId == draft.changeId);
       if (index < 0) {

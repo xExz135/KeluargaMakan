@@ -690,4 +690,47 @@ void main() {
       isEmpty,
     );
   });
+
+  testWidgets('KIT-16 KIT-01 R1 an add the server may have, then remove, '
+      'Undo and remove again: the removal is still sent', (tester) async {
+    final phone = await openKitchen(tester, server);
+    server.kitchen.loseNextSyncAnswer = true;
+    final kitchen = phone.container.read(kitchenProvider.notifier);
+    kitchen.add(
+      const CustomIngredient('Kerupuk udang'),
+      category: api.KitchenCategory.leftovers,
+    );
+    await tester.pumpAndSettle();
+    // Created on the server; the answer was lost, and a retry waits.
+    expect(server.kitchenOf(phone.account), hasLength(1));
+    expect(phone.phone.sync.timers.pending, hasLength(1));
+    KitchenEntry shown() => (phone.container.read(
+      kitchenProvider,
+    ) as KitchenLoaded).list.items.single;
+
+    final removed = kitchen.remove(shown().id)!;
+    await tester.pumpAndSettle();
+    kitchen.restore(removed);
+    await tester.pumpAndSettle();
+    // The Undo replaced the removal, and still counts as maybe sent.
+    final rows = await phone.phone.db
+        .select(phone.phone.db.kitchenOutbox)
+        .get();
+    expect(rows.single.sendAttempts, greaterThan(0));
+    kitchen.remove(shown().id);
+    await tester.pumpAndSettle();
+    expect(
+      await phone.phone.db.select(phone.phone.db.kitchenOutbox).get(),
+      hasLength(1),
+      reason: 'the removal is queued, not dropped as local-only',
+    );
+
+    phone.phone.sync.timers.fireAll();
+    await tester.pumpAndSettle();
+    expect(withoutIdAndAge(sentChanges(server).last)['operation'], 'remove');
+    expect(server.kitchenOf(phone.account), isEmpty);
+    await kitchen.refresh();
+    await tester.pumpAndSettle();
+    expect(find.text('Kerupuk udang'), findsNothing);
+  });
 }

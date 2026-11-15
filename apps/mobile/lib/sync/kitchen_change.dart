@@ -223,6 +223,17 @@ final class QueuedChange {
   /// How often this change was sent. 0: it cannot have reached the server.
   final int sendAttempts;
 
+  /// The same change counted as sent [attempts] times.
+  QueuedChange withSendAttempts(int attempts) => QueuedChange(
+    seq: seq,
+    changeId: changeId,
+    ingredient: ingredient,
+    op: op,
+    patch: patch,
+    stamp: stamp,
+    sendAttempts: attempts,
+  );
+
   /// The same change after one more send.
   QueuedChange sentOnceMore() => QueuedChange(
     seq: seq,
