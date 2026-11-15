@@ -30,10 +30,7 @@ class KitchenChange {
 
   final KitchenChangeOperation operation;
 
-  /// Milliseconds from the edit to sending this request, measured on the phone. The server dates the change at its own time minus this age (KIT-16), so the phone's clock setting does not matter. Changes older than the server's limit are superseded by any later change.
-  ///
-  /// Minimum value: 0
-  /// Maximum value: 2592000000
+  /// Milliseconds from the edit to sending this request, measured on the phone. The server dates the change at its own time minus this age (KIT-16), so the phone's clock setting does not matter, and never later. A negative age, or one older than the server's limit (at most 30 days, 2592000000), makes only this change `rejected` (`validation_failed`); the rest of the sync still applies.
   final int ageMs;
 
   ///

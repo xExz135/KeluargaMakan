@@ -636,7 +636,13 @@ describe("Dapur Saya kitchen (T-030, contract 0.2)", () => {
     const description = operation("syncKitchen").operation.description ?? "";
     expect(description).toMatch(/belong to the household/);
     expect(description).toContain("`idempotency_key_reused`");
-    expect(description).toMatch(/never dated\s+in the future/);
+    expect(description).toMatch(/minus its `ageMs`, never later/);
+    expect(description).toMatch(/older\s+than the removals the server still keeps is `superseded`/);
+    expect(description).toMatch(/not remembered: send it again later\s+with the same `changeId`/);
+    // T-032 L3: an age out of range rejects one change, not the whole sync.
+    const ageMs = Object.keys(schema("KitchenChange").properties?.["ageMs"] ?? {});
+    expect(ageMs).not.toContain("maximum");
+    expect(ageMs).not.toContain("minimum");
     expect(description).toMatch(/cannot bring an item back/);
     expect(description).toMatch(/never carries another household's data/);
   });
