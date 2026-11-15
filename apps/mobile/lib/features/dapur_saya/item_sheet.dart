@@ -107,7 +107,9 @@ class _KitchenItemSheetState extends ConsumerState<KitchenItemSheet> {
     final brand = await pickKitchenBrand(
       context,
       ingredientName: kitchenItemName(context, item, catalog: catalog),
-      // Only the verified brands of this ingredient (KIT-09, SAF-07).
+      // Only this ingredient's brands from the reference catalog (KIT-09).
+      // Listed is not verified: Cek Aman decides with the brand's data
+      // (SAF-07, QUESTIONS #78).
       brands: ingredient?.brands ?? const [],
       allowListed: !item.isCustom && ingredient != null,
     );

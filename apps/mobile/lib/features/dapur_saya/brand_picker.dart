@@ -1,8 +1,12 @@
 // K4 brand search (screens.md K4; KIT-09, SAF-07).
 //
-// - The list offers only the ingredient's brands from the verified
-//   reference data (the catalog's `brands`, from the API or the phone's
-//   copy of it). Nothing else is ever offered as a listed brand.
+// - The list offers only the ingredient's brands from the reference data
+//   (the catalog's `brands`, from the API or the phone's copy of it).
+//   Nothing else is ever offered as a listed brand. Being listed is not
+//   being checked: the catalog lists every brand variant, and Cek Aman uses
+//   a brand only when its variant's data is verified, otherwise it keeps
+//   "Cek label" (security review T-034 L5, QUESTIONS #78). The contract does
+//   not say which variants are verified, so this page cannot mark them.
 // - A brand that is not in the list can be typed. It is stored as text,
 //   never as a listed brand, and the page says that Cek Aman then marks the
 //   ingredient Cek label (`kitchen.brand.unknownNote`). A typed text that

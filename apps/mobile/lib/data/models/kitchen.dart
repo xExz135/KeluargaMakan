@@ -82,7 +82,9 @@ sealed class KitchenBrand {
   final String name;
 }
 
-/// One of the ingredient's brands in the verified reference data.
+/// One of the ingredient's brands listed in the reference catalog. Cek
+/// Aman uses it only when the brand variant's data is verified (SAF-07,
+/// QUESTIONS #78); the app never assumes it is.
 final class ReferenceBrand extends KitchenBrand {
   const ReferenceBrand(this.brandId, super.name);
 
@@ -342,8 +344,8 @@ final class CatalogEntry {
   /// result.
   final bool brandVaries;
 
-  /// The ingredient's brands in the verified reference data, the only ones
-  /// the brand picker offers.
+  /// The ingredient's brands in the reference catalog, the only ones the
+  /// brand picker offers. Listed is not verified (QUESTIONS #78).
   final List<CatalogBrand> brands;
 
   @override
