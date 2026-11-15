@@ -150,6 +150,14 @@ describe("SAF-13 DAT-06 reference data configuration", () => {
         REFERENCE_DATA_SHA256: pin,
       }).expectedSha256,
     ).toBe(pin);
+    // A setting present but undefined is the same as a missing one.
+    expect(
+      readReferenceDataConfig({
+        APP_ENV: "local",
+        REFERENCE_DATA_PATH: realPath,
+        REFERENCE_DATA_SHA256: undefined,
+      }).expectedSha256,
+    ).toBeNull();
   });
 
   it("DAT-06 the path is required", () => {
