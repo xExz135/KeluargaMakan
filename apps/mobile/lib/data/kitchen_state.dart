@@ -236,6 +236,9 @@ bool _isTemporary(String code) => switch (code) {
   _ => ApiErrorCode.fromWire(code) == ApiErrorCode.internalError,
 };
 
+/// A field error under one change of the request: `/changes/<index>…`.
+final _changePointer = RegExp(r'^/changes/(\d+)(?:/|$)');
+
 /// What a sync pass ended with.
 enum _Pass { done, more, failed, stopped }
 
@@ -262,6 +265,7 @@ final class KitchenController extends Notifier<KitchenState> {
     _persist = Future.value();
     _failures = 0;
     _isolate = 0;
+    _cursorDropped = false;
     _problem = null;
     _retryTimer?.cancel();
     _retryTimer = null;
@@ -318,6 +322,10 @@ final class KitchenController extends Notifier<KitchenState> {
   /// After a whole request was refused (400), this many passes send one
   /// change each, to find the one that cannot be stored.
   int _isolate = 0;
+
+  /// The cursor was dropped after a 400 that named it; reset by the next
+  /// answered sync, so it is dropped at most once in a row.
+  bool _cursorDropped = false;
   KitchenSyncProblem? _problem;
   Timer? _retryTimer;
 
@@ -799,6 +807,7 @@ final class KitchenController extends Notifier<KitchenState> {
         }
         _problem = null;
         _failures = 0;
+        _cursorDropped = false;
         _emit();
         final more = _queue.any((c) => !batch.contains(c));
         return (more ? _Pass.more : _Pass.done, null);
@@ -815,17 +824,45 @@ final class KitchenController extends Notifier<KitchenState> {
     }
     if (failure is ProblemFailure &&
         failure.code == ApiErrorCode.validationFailed &&
-        failure.problem.status == 400 &&
-        batch.isNotEmpty) {
-      if (batch.length > 1) {
-        // One change the server cannot read refuses the whole request:
-        // send them one by one to find it.
-        _isolate = batch.length;
-      } else {
-        _reject(batch.single, ApiErrorCode.validationFailed.wire);
+        failure.problem.status == 400) {
+      // A whole request refused (security review T-034 L4): only a field
+      // error that names a change takes a change back. Anything else keeps
+      // the queue.
+      final pointers = [for (final e in failure.problem.fieldErrors) e.pointer];
+      final named = <int>{};
+      var changes = false;
+      for (final pointer in pointers) {
+        final match = _changePointer.firstMatch(pointer);
+        if (match != null) {
+          final index = int.parse(match.group(1)!);
+          if (index < batch.length) named.add(index);
+        } else if (pointer == '/changes') {
+          changes = true;
+        }
       }
-      _emit();
-      return (_Pass.more, failure);
+      if (named.isNotEmpty) {
+        for (final index in named) {
+          _reject(batch[index], ApiErrorCode.validationFailed.wire);
+        }
+        _emit();
+        return (_Pass.more, failure);
+      }
+      if (changes && batch.length > 1) {
+        // The request's changes as a whole: send them one by one.
+        _isolate = batch.length;
+        _emit();
+        return (_Pass.more, failure);
+      }
+      final cursor = pointers.any(
+        (p) => p == '/cursor' || p.startsWith('/cursor/'),
+      );
+      if (cursor && _cursor != null && !_cursorDropped) {
+        // The stored cursor is refused: once without it (a full resync).
+        _cursor = null;
+        _cursorDropped = true;
+        return (_Pass.more, failure);
+      }
+      // Otherwise: keep every change and back off, below.
     }
     _problem = failure is NetworkFailure
         ? KitchenSyncProblem.offline

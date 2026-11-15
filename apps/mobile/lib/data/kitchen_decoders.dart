@@ -234,12 +234,19 @@ IngredientSets decodeIngredientSets(Object? json) {
 
 /// Contract `KitchenSyncResponse`. [sent] are the change IDs in the order
 /// they were sent: the answer must have one result per change in the same
-/// order, or it is not trusted at all.
-KitchenSyncAnswer decodeSyncAnswer(Object? json, {required List<String> sent}) {
+/// order, or it is not trusted at all. A sync sent without a cursor must
+/// get the whole kitchen ([cursorSent] false requires `full: true`), so a
+/// partial answer is never merged into a copy it does not belong to.
+KitchenSyncAnswer decodeSyncAnswer(
+  Object? json, {
+  required List<String> sent,
+  bool cursorSent = true,
+}) {
   final raw = _object(json, 'sync answer');
   final cursor = _string(raw['cursor'], 'sync cursor');
   if (cursor.length > 512) _bad('sync cursor');
   final full = _bool(raw['full'], 'sync full');
+  if (!cursorSent && !full) _bad('partial answer without a cursor');
   final items = [
     for (final item in _list(raw['items'], 'sync items'))
       decodeKitchenItem(item),

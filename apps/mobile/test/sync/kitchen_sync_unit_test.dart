@@ -388,6 +388,21 @@ void main() {
       );
     });
 
+    test('KIT-16 a sync sent without a cursor must get the whole kitchen', () {
+      expect(
+        () => decodeSyncAnswer(answer(), sent: const [], cursorSent: false),
+        throwsFormatException,
+      );
+      expect(
+        decodeSyncAnswer(
+          {...answer(), 'full': true},
+          sent: const [],
+          cursorSent: false,
+        ).full,
+        isTrue,
+      );
+    });
+
     test('KIT-16 an outcome this app does not know fails the whole answer '
         'closed', () {
       expect(
