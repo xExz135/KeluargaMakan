@@ -39,6 +39,7 @@ String kitchenNoticeText(
   KitchenLimitReached(:final maxItems) => l10n.kitchenLimitReached(maxItems),
   KitchenOverwritten(:final ingredient, :final item) =>
     l10n.kitchenSyncOverwritten(nameOf(ingredient, item)),
+  KitchenQueueFull(:final maxChanges) => l10n.kitchenQueueFull(maxChanges),
   KitchenChangesExpired(:final count, :final maxAgeHours) =>
     l10n.kitchenChangesExpired(count, (maxAgeHours / 24).ceil()),
 };

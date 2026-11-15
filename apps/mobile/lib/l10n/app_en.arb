@@ -355,5 +355,7 @@
   "kitchenBrandChange": "Change brand",
   "kitchenBrandClear": "Remove brand",
   "kitchenBrandUseTyped": "Use \"{brand}\"",
-  "kitchenBrandListMissing": "There's no brand list for this ingredient on this phone. You can type the brand."
+  "kitchenBrandListMissing": "There's no brand list for this ingredient on this phone. You can type the brand.",
+  "kitchenQueueFull": "{max, plural, =1{1 change is} other{{max} changes are}} waiting to be sent, the limit on this phone. This change wasn't saved. Connect to the internet so the others can be sent first.",
+  "settingsSignOutPendingKitchen": "{count, plural, =1{1 Dapur Saya change hasn't} other{{count} Dapur Saya changes haven't}} been sent yet. If you sign out now, {count, plural, =1{it is} other{they are}} deleted from this phone and not saved in your account."
 }

@@ -159,6 +159,8 @@ class _KitchenSearchSheetState extends ConsumerState<KitchenSearchSheet> {
         break;
       case KitchenAddAtLimit(:final maxItems):
         _snack(l10n.kitchenLimitReached(maxItems));
+      case KitchenAddQueueFull(:final maxChanges):
+        _snack(l10n.kitchenQueueFull(maxChanges));
       case KitchenAddUnavailable():
         _snack(l10n.errorGenericBody);
     }

@@ -21,6 +21,16 @@
 // A change older than the server accepts (kitchen.sync.maxChangeAgeHours)
 // is dropped with a message instead of being sent forever.
 //
+// Limits and minimization (security review T-034 L6):
+// - Removing an item that only this phone ever had, whose changes were
+//   never sent, drops those changes here and sends nothing (not even its
+//   name). Once a change was sent, with or without an answer, the removal
+//   is sent too, because the server may have the item.
+// - The queue holds at most kitchen.sync.maxQueuedChanges changes. At the
+//   limit, an edit that would add to it is refused, not shown as made, and
+//   explained (KitchenQueueFull); edits that collapse into a queued change
+//   still work. Queued edits are never dropped to make room.
+//
 // The screen shows the server's last confirmed items with the queued
 // changes applied on top, in order. Nothing here is a safety result: a
 // custom item or a typed brand only carries what Cek Aman turns into "Cek
@@ -171,6 +181,17 @@ final class KitchenOverwritten extends KitchenNotice {
   String toString() => 'KitchenOverwritten()';
 }
 
+/// The queue on this phone is full: the edit was not made (nothing queued
+/// was dropped). Shown until the changes can be sent.
+final class KitchenQueueFull extends KitchenNotice {
+  const KitchenQueueFull(this.maxChanges);
+
+  final int maxChanges;
+
+  @override
+  String toString() => 'KitchenQueueFull($maxChanges)';
+}
+
 /// Changes older than the server accepts were dropped, not sent.
 final class KitchenChangesExpired extends KitchenNotice {
   const KitchenChangesExpired(this.count, {required this.maxAgeHours});
@@ -221,6 +242,14 @@ final class KitchenAddAtLimit extends KitchenAddResult {
 /// Nothing to add to: the kitchen is not loaded.
 final class KitchenAddUnavailable extends KitchenAddResult {
   const KitchenAddUnavailable();
+}
+
+/// Too many changes wait on this phone; nothing was queued
+/// ([KitchenQueueFull]).
+final class KitchenAddQueueFull extends KitchenAddResult {
+  const KitchenAddQueueFull(this.maxChanges);
+
+  final int maxChanges;
 }
 
 /// Rejection codes that can pass later (contract: "not remembered, send it
@@ -592,11 +621,13 @@ final class KitchenController extends Notifier<KitchenState> {
     if (existing == null && current.list.items.length >= list.maxItems) {
       return KitchenAddAtLimit(list.maxItems);
     }
-    _enqueue(
+    final queued = _enqueue(
       ingredient,
       KitchenChangeOp.upsert,
       KitchenPatch(category: existing == null ? category : null, state: state),
+      notify: false,
     );
+    if (!queued) return KitchenAddQueueFull(_maxQueued);
     final added = _shownByKey(key);
     return added == null ? const KitchenAddUnavailable() : KitchenAdded(added);
   }
@@ -606,7 +637,24 @@ final class KitchenController extends Notifier<KitchenState> {
   KitchenEntry? remove(String itemId) {
     final item = _shownById(itemId);
     if (item == null) return null;
-    _enqueue(item.key, KitchenChangeOp.remove, const KitchenPatch());
+    final key = item.ingredientKey;
+    final queued = [
+      for (final c in _queue)
+        if (c.key == key) c,
+    ];
+    final mayBeOnServer =
+        _confirmedByKey(key) != null ||
+        queued.any((c) => c.sendAttempts > 0 || _inFlight.contains(c.changeId));
+    if (!mayBeOnServer) {
+      // Only ever on this phone, never sent (security review T-034 L6): its
+      // changes are dropped here and nothing, not even its name, is sent.
+      _unqueue({for (final c in queued) c.changeId});
+      _emit();
+      return item;
+    }
+    if (!_enqueue(item.key, KitchenChangeOp.remove, const KitchenPatch())) {
+      return null;
+    }
     return item;
   }
 
@@ -622,13 +670,14 @@ final class KitchenController extends Notifier<KitchenState> {
     for (final id in itemIds) {
       final item = _shownById(id);
       if (item == null || item.isAvailable) continue;
-      changed[id] = item.state;
-      _enqueue(
+      final queued = _enqueue(
         item.key,
         KitchenChangeOp.upsert,
         const KitchenPatch(state: KitchenItemState.available),
         sync: false,
       );
+      if (!queued) break;
+      changed[id] = item.state;
     }
     if (changed.isNotEmpty) _scheduleSync();
     return changed;
@@ -649,14 +698,22 @@ final class KitchenController extends Notifier<KitchenState> {
     _scheduleSync();
   }
 
-  void _enqueue(
+  /// Most changes kept on this phone (kitchen.sync.maxQueuedChanges).
+  int get _maxQueued => _config.get(ConfigKeys.kitchenSyncMaxQueuedChanges);
+
+  /// Queues a change and shows it. False when it was refused because the
+  /// queue is full ([KitchenQueueFull], posted unless [notify] is false):
+  /// queued edits are never dropped to make room, and the refused edit is
+  /// not shown as made.
+  bool _enqueue(
     IngredientKey ingredient,
     KitchenChangeOp op,
     KitchenPatch patch, {
     bool sync = true,
+    bool notify = true,
   }) {
     final account = _account;
-    if (account == null || _list == null) return;
+    if (account == null || _list == null) return false;
     final epoch = _epoch;
     // The time of the edit is read now, before anything waits.
     final stamp = ref.read(deviceClockProvider).read();
@@ -673,6 +730,14 @@ final class KitchenController extends Notifier<KitchenState> {
       ),
     );
     final replaced = changesReplacedBy(draft, _queue, inFlight: _inFlight);
+    if (_queue.length - replaced.length + 1 > _maxQueued) {
+      if (notify) {
+        ref
+            .read(kitchenNoticesProvider.notifier)
+            .post(KitchenQueueFull(_maxQueued));
+      }
+      return false;
+    }
     _queue = [
       for (final c in _queue)
         if (!replaced.contains(c.changeId)) c,
@@ -716,6 +781,7 @@ final class KitchenController extends Notifier<KitchenState> {
       );
     });
     if (sync) _scheduleSync();
+    return true;
   }
 
   void _scheduleSync() {
@@ -780,8 +846,19 @@ final class KitchenController extends Notifier<KitchenState> {
     // for the next pass instead of being sent or expired with the phone's
     // uptime as its age (security review T-034 L1). Stamps arrive in queue
     // order, so unstamped changes are always at the end.
-    final batch = _queue.takeWhile((c) => c.isStamped).take(size).toList();
+    final batch = [
+      for (final c in _queue.takeWhile((c) => c.isStamped).take(size))
+        c.sentOnceMore(),
+    ];
     _inFlight = {for (final c in batch) c.changeId};
+    _queue = [
+      for (final c in _queue)
+        batch.firstWhere((b) => b.changeId == c.changeId, orElse: () => c),
+    ];
+    // Recorded before the request leaves, so a change whose answer is lost
+    // is never taken for one the server cannot have (L6).
+    await _cache.markKitchenChangesSent(_inFlight);
+    if (!_current(generation)) return (_Pass.stopped, null);
     _emit();
     final result = await _repo.sync(
       accountId: account,
@@ -809,7 +886,8 @@ final class KitchenController extends Notifier<KitchenState> {
         _failures = 0;
         _cursorDropped = false;
         _emit();
-        final more = _queue.any((c) => !batch.contains(c));
+        final sent = {for (final c in batch) c.changeId};
+        final more = _queue.any((c) => !sent.contains(c.changeId));
         return (more ? _Pass.more : _Pass.done, null);
       case Err(:final failure):
         return _failed(failure, batch);

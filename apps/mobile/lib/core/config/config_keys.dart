@@ -207,6 +207,18 @@ abstract final class ConfigKeys {
     min: 1,
   );
 
+  /// Most kitchen changes kept on the phone while they cannot be sent
+  /// (security review T-034 L6; four times the default server item limit).
+  /// At the limit a new edit that would add to the queue is refused with a
+  /// message; queued edits are never dropped to make room.
+  static const kitchenSyncMaxQueuedChanges = ConfigKey<int>(
+    'kitchen.sync.maxQueuedChanges',
+    1200,
+    requirementIds: ['KIT-16'],
+    status: ConfigStatus.decided,
+    min: 50,
+  );
+
   static const List<ConfigKey<Object>> all = [
     minTouchTargetDp,
     cookMinTouchTargetDp,
@@ -229,6 +241,7 @@ abstract final class ConfigKeys {
     syncRetryJitterPercent,
     kitchenSyncMaxChangeAgeHours,
     kitchenSyncBatchSize,
+    kitchenSyncMaxQueuedChanges,
   ];
 }
 

@@ -711,5 +711,9 @@
   "kitchenBrandUseTyped": "Pakai \"{brand}\"",
   "@kitchenBrandUseTyped": { "description": "NOT IN COPY DECK (T-034): proposed by mobile-engineer; ux-designer to review", "placeholders": { "brand": { "type": "String" } } },
   "kitchenBrandListMissing": "Daftar merek untuk bahan ini belum ada di HP. Anda bisa mengetik mereknya.",
-  "@kitchenBrandListMissing": { "description": "NOT IN COPY DECK (T-034): proposed by mobile-engineer; ux-designer to review" }
+  "@kitchenBrandListMissing": { "description": "NOT IN COPY DECK (T-034): proposed by mobile-engineer; ux-designer to review" },
+  "kitchenQueueFull": "Ada {max} perubahan yang belum terkirim, batasnya di HP ini. Perubahan ini belum disimpan. Sambungkan internet supaya yang lain terkirim dulu.",
+  "@kitchenQueueFull": { "description": "NOT IN COPY DECK (T-034): proposed by mobile-engineer; ux-designer to review (security review T-034 L6)", "placeholders": { "max": { "type": "int" } } },
+  "settingsSignOutPendingKitchen": "{count} perubahan Dapur Saya belum terkirim. Jika Anda keluar sekarang, perubahan itu dihapus dari HP ini dan tidak tersimpan di akun.",
+  "@settingsSignOutPendingKitchen": { "description": "NOT IN COPY DECK (T-034): proposed by mobile-engineer; ux-designer to review (security review T-034 L7, QUESTIONS #75)", "placeholders": { "count": { "type": "int" } } }
 }

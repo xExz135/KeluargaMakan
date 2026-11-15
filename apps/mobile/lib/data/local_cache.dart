@@ -486,6 +486,7 @@ final class LocalCache {
         elapsedMs: row.elapsedMs,
         wallMs: row.wallMs,
       ),
+      sendAttempts: row.sendAttempts,
     );
   }
 
@@ -544,6 +545,22 @@ final class LocalCache {
       }),
     );
     return written;
+  }
+
+  /// Records that [changeIds] are about to be sent once more (written
+  /// before the request goes out). Best effort.
+  Future<void> markKitchenChangesSent(Iterable<String> changeIds) {
+    final ids = changeIds.toList();
+    if (ids.isEmpty) return Future.value();
+    return _bestEffort(
+      'markKitchenChangesSent',
+      () => _db.customUpdate(
+        'UPDATE kitchen_outbox SET send_attempts = send_attempts + 1 '
+        'WHERE change_id IN (${List.filled(ids.length, '?').join(', ')})',
+        variables: [for (final id in ids) Variable<String>(id)],
+        updates: {_db.kitchenOutbox},
+      ),
+    );
   }
 
   /// Removes answered (or dropped) changes. Removing never exposes data, so

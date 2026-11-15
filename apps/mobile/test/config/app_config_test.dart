@@ -51,6 +51,7 @@ void main() {
         'sync.retryJitterPercent',
         'kitchen.sync.maxChangeAgeHours',
         'kitchen.sync.batchSize',
+        'kitchen.sync.maxQueuedChanges',
       ]);
     });
 

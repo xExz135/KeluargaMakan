@@ -4674,6 +4674,18 @@ class $KitchenOutboxTable extends KitchenOutbox
     type: DriftSqlType.int,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _sendAttemptsMeta = const VerificationMeta(
+    'sendAttempts',
+  );
+  @override
+  late final GeneratedColumn<int> sendAttempts = GeneratedColumn<int>(
+    'send_attempts',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
   @override
   List<GeneratedColumn> get $columns => [
     seq,
@@ -4686,6 +4698,7 @@ class $KitchenOutboxTable extends KitchenOutbox
     timeline,
     elapsedMs,
     wallMs,
+    sendAttempts,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -4776,6 +4789,15 @@ class $KitchenOutboxTable extends KitchenOutbox
     } else if (isInserting) {
       context.missing(_wallMsMeta);
     }
+    if (data.containsKey('send_attempts')) {
+      context.handle(
+        _sendAttemptsMeta,
+        sendAttempts.isAcceptableOrUnknown(
+          data['send_attempts']!,
+          _sendAttemptsMeta,
+        ),
+      );
+    }
     return context;
   }
 
@@ -4825,6 +4847,10 @@ class $KitchenOutboxTable extends KitchenOutbox
         DriftSqlType.int,
         data['${effectivePrefix}wall_ms'],
       )!,
+      sendAttempts: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}send_attempts'],
+      )!,
     );
   }
 
@@ -4860,6 +4886,11 @@ class KitchenOutboxData extends DataClass
   final String timeline;
   final int elapsedMs;
   final int wallMs;
+
+  /// How often the change was sent (v4, security review T-034 L6). A change
+  /// never sent cannot have reached the server, so removing an item that
+  /// only this phone ever had sends nothing.
+  final int sendAttempts;
   const KitchenOutboxData({
     required this.seq,
     required this.accountId,
@@ -4871,6 +4902,7 @@ class KitchenOutboxData extends DataClass
     required this.timeline,
     required this.elapsedMs,
     required this.wallMs,
+    required this.sendAttempts,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -4889,6 +4921,7 @@ class KitchenOutboxData extends DataClass
     map['timeline'] = Variable<String>(timeline);
     map['elapsed_ms'] = Variable<int>(elapsedMs);
     map['wall_ms'] = Variable<int>(wallMs);
+    map['send_attempts'] = Variable<int>(sendAttempts);
     return map;
   }
 
@@ -4908,6 +4941,7 @@ class KitchenOutboxData extends DataClass
       timeline: Value(timeline),
       elapsedMs: Value(elapsedMs),
       wallMs: Value(wallMs),
+      sendAttempts: Value(sendAttempts),
     );
   }
 
@@ -4927,6 +4961,7 @@ class KitchenOutboxData extends DataClass
       timeline: serializer.fromJson<String>(json['timeline']),
       elapsedMs: serializer.fromJson<int>(json['elapsedMs']),
       wallMs: serializer.fromJson<int>(json['wallMs']),
+      sendAttempts: serializer.fromJson<int>(json['sendAttempts']),
     );
   }
   @override
@@ -4943,6 +4978,7 @@ class KitchenOutboxData extends DataClass
       'timeline': serializer.toJson<String>(timeline),
       'elapsedMs': serializer.toJson<int>(elapsedMs),
       'wallMs': serializer.toJson<int>(wallMs),
+      'sendAttempts': serializer.toJson<int>(sendAttempts),
     };
   }
 
@@ -4957,6 +4993,7 @@ class KitchenOutboxData extends DataClass
     String? timeline,
     int? elapsedMs,
     int? wallMs,
+    int? sendAttempts,
   }) => KitchenOutboxData(
     seq: seq ?? this.seq,
     accountId: accountId ?? this.accountId,
@@ -4968,6 +5005,7 @@ class KitchenOutboxData extends DataClass
     timeline: timeline ?? this.timeline,
     elapsedMs: elapsedMs ?? this.elapsedMs,
     wallMs: wallMs ?? this.wallMs,
+    sendAttempts: sendAttempts ?? this.sendAttempts,
   );
   KitchenOutboxData copyWithCompanion(KitchenOutboxCompanion data) {
     return KitchenOutboxData(
@@ -4985,6 +5023,9 @@ class KitchenOutboxData extends DataClass
       timeline: data.timeline.present ? data.timeline.value : this.timeline,
       elapsedMs: data.elapsedMs.present ? data.elapsedMs.value : this.elapsedMs,
       wallMs: data.wallMs.present ? data.wallMs.value : this.wallMs,
+      sendAttempts: data.sendAttempts.present
+          ? data.sendAttempts.value
+          : this.sendAttempts,
     );
   }
 
@@ -5000,7 +5041,8 @@ class KitchenOutboxData extends DataClass
           ..write('patch: $patch, ')
           ..write('timeline: $timeline, ')
           ..write('elapsedMs: $elapsedMs, ')
-          ..write('wallMs: $wallMs')
+          ..write('wallMs: $wallMs, ')
+          ..write('sendAttempts: $sendAttempts')
           ..write(')'))
         .toString();
   }
@@ -5017,6 +5059,7 @@ class KitchenOutboxData extends DataClass
     timeline,
     elapsedMs,
     wallMs,
+    sendAttempts,
   );
   @override
   bool operator ==(Object other) =>
@@ -5031,7 +5074,8 @@ class KitchenOutboxData extends DataClass
           other.patch == this.patch &&
           other.timeline == this.timeline &&
           other.elapsedMs == this.elapsedMs &&
-          other.wallMs == this.wallMs);
+          other.wallMs == this.wallMs &&
+          other.sendAttempts == this.sendAttempts);
 }
 
 class KitchenOutboxCompanion extends UpdateCompanion<KitchenOutboxData> {
@@ -5045,6 +5089,7 @@ class KitchenOutboxCompanion extends UpdateCompanion<KitchenOutboxData> {
   final Value<String> timeline;
   final Value<int> elapsedMs;
   final Value<int> wallMs;
+  final Value<int> sendAttempts;
   const KitchenOutboxCompanion({
     this.seq = const Value.absent(),
     this.accountId = const Value.absent(),
@@ -5056,6 +5101,7 @@ class KitchenOutboxCompanion extends UpdateCompanion<KitchenOutboxData> {
     this.timeline = const Value.absent(),
     this.elapsedMs = const Value.absent(),
     this.wallMs = const Value.absent(),
+    this.sendAttempts = const Value.absent(),
   });
   KitchenOutboxCompanion.insert({
     this.seq = const Value.absent(),
@@ -5068,6 +5114,7 @@ class KitchenOutboxCompanion extends UpdateCompanion<KitchenOutboxData> {
     required String timeline,
     required int elapsedMs,
     required int wallMs,
+    this.sendAttempts = const Value.absent(),
   }) : accountId = Value(accountId),
        changeId = Value(changeId),
        operation = Value(operation),
@@ -5086,6 +5133,7 @@ class KitchenOutboxCompanion extends UpdateCompanion<KitchenOutboxData> {
     Expression<String>? timeline,
     Expression<int>? elapsedMs,
     Expression<int>? wallMs,
+    Expression<int>? sendAttempts,
   }) {
     return RawValuesInsertable({
       if (seq != null) 'seq': seq,
@@ -5098,6 +5146,7 @@ class KitchenOutboxCompanion extends UpdateCompanion<KitchenOutboxData> {
       if (timeline != null) 'timeline': timeline,
       if (elapsedMs != null) 'elapsed_ms': elapsedMs,
       if (wallMs != null) 'wall_ms': wallMs,
+      if (sendAttempts != null) 'send_attempts': sendAttempts,
     });
   }
 
@@ -5112,6 +5161,7 @@ class KitchenOutboxCompanion extends UpdateCompanion<KitchenOutboxData> {
     Value<String>? timeline,
     Value<int>? elapsedMs,
     Value<int>? wallMs,
+    Value<int>? sendAttempts,
   }) {
     return KitchenOutboxCompanion(
       seq: seq ?? this.seq,
@@ -5124,6 +5174,7 @@ class KitchenOutboxCompanion extends UpdateCompanion<KitchenOutboxData> {
       timeline: timeline ?? this.timeline,
       elapsedMs: elapsedMs ?? this.elapsedMs,
       wallMs: wallMs ?? this.wallMs,
+      sendAttempts: sendAttempts ?? this.sendAttempts,
     );
   }
 
@@ -5160,6 +5211,9 @@ class KitchenOutboxCompanion extends UpdateCompanion<KitchenOutboxData> {
     if (wallMs.present) {
       map['wall_ms'] = Variable<int>(wallMs.value);
     }
+    if (sendAttempts.present) {
+      map['send_attempts'] = Variable<int>(sendAttempts.value);
+    }
     return map;
   }
 
@@ -5175,7 +5229,8 @@ class KitchenOutboxCompanion extends UpdateCompanion<KitchenOutboxData> {
           ..write('patch: $patch, ')
           ..write('timeline: $timeline, ')
           ..write('elapsedMs: $elapsedMs, ')
-          ..write('wallMs: $wallMs')
+          ..write('wallMs: $wallMs, ')
+          ..write('sendAttempts: $sendAttempts')
           ..write(')'))
         .toString();
   }
@@ -7743,6 +7798,7 @@ typedef $$KitchenOutboxTableCreateCompanionBuilder =
       required String timeline,
       required int elapsedMs,
       required int wallMs,
+      Value<int> sendAttempts,
     });
 typedef $$KitchenOutboxTableUpdateCompanionBuilder =
     KitchenOutboxCompanion Function({
@@ -7756,6 +7812,7 @@ typedef $$KitchenOutboxTableUpdateCompanionBuilder =
       Value<String> timeline,
       Value<int> elapsedMs,
       Value<int> wallMs,
+      Value<int> sendAttempts,
     });
 
 class $$KitchenOutboxTableFilterComposer
@@ -7814,6 +7871,11 @@ class $$KitchenOutboxTableFilterComposer
 
   ColumnFilters<int> get wallMs => $composableBuilder(
     column: $table.wallMs,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get sendAttempts => $composableBuilder(
+    column: $table.sendAttempts,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -7876,6 +7938,11 @@ class $$KitchenOutboxTableOrderingComposer
     column: $table.wallMs,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<int> get sendAttempts => $composableBuilder(
+    column: $table.sendAttempts,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$KitchenOutboxTableAnnotationComposer
@@ -7920,6 +7987,11 @@ class $$KitchenOutboxTableAnnotationComposer
 
   GeneratedColumn<int> get wallMs =>
       $composableBuilder(column: $table.wallMs, builder: (column) => column);
+
+  GeneratedColumn<int> get sendAttempts => $composableBuilder(
+    column: $table.sendAttempts,
+    builder: (column) => column,
+  );
 }
 
 class $$KitchenOutboxTableTableManager
@@ -7967,6 +8039,7 @@ class $$KitchenOutboxTableTableManager
                 Value<String> timeline = const Value.absent(),
                 Value<int> elapsedMs = const Value.absent(),
                 Value<int> wallMs = const Value.absent(),
+                Value<int> sendAttempts = const Value.absent(),
               }) => KitchenOutboxCompanion(
                 seq: seq,
                 accountId: accountId,
@@ -7978,6 +8051,7 @@ class $$KitchenOutboxTableTableManager
                 timeline: timeline,
                 elapsedMs: elapsedMs,
                 wallMs: wallMs,
+                sendAttempts: sendAttempts,
               ),
           createCompanionCallback:
               ({
@@ -7991,6 +8065,7 @@ class $$KitchenOutboxTableTableManager
                 required String timeline,
                 required int elapsedMs,
                 required int wallMs,
+                Value<int> sendAttempts = const Value.absent(),
               }) => KitchenOutboxCompanion.insert(
                 seq: seq,
                 accountId: accountId,
@@ -8002,6 +8077,7 @@ class $$KitchenOutboxTableTableManager
                 timeline: timeline,
                 elapsedMs: elapsedMs,
                 wallMs: wallMs,
+                sendAttempts: sendAttempts,
               ),
           withReferenceMapper: (p0) => p0
               .map(
