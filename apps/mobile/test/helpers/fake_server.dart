@@ -26,6 +26,7 @@ import 'package:keluargamakan/features/auth/google_id_token.dart';
 
 import 'api_fixtures.dart' show profileJson;
 import 'pump_app.dart';
+import 'sync_fakes.dart';
 
 part 'fake_server_family.dart';
 part 'fake_server_kitchen.dart';
@@ -323,6 +324,11 @@ final class TestPhone {
   final TokenStore tokens;
   final AppDatabase db;
 
+  /// The kitchen sync's clock, retry timers, connectivity and resume
+  /// (helpers/sync_fakes.dart), kept across restarts of this phone.
+  SyncFakes? _sync;
+  SyncFakes get sync => _sync ?? (throw StateError('pump the phone first'));
+
   static AppDatabase _memoryDb() {
     driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
     return AppDatabase(NativeDatabase.memory());
@@ -352,6 +358,8 @@ Future<ProviderContainer> pumpPhone(
   );
   DateTime fakeNow() => tester.binding.clock.now();
   server.now ??= fakeNow;
+  final sync = phone._sync ??= SyncFakes(fakeNow);
+  sync.clock.now = fakeNow;
   final container = ProviderContainer(
     overrides: [
       apiEnvironmentProvider.overrideWithValue(
@@ -365,6 +373,7 @@ Future<ProviderContainer> pumpPhone(
         AppConfig([MapConfigSource(config), const LocalDefaultsConfigSource()]),
       ),
       clockProvider.overrideWithValue(fakeNow),
+      ...sync.overrides,
       if (google != null) googleIdTokenSourceProvider.overrideWithValue(google),
     ],
   );

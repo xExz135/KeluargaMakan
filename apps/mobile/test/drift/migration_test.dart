@@ -62,26 +62,71 @@ void main() {
 
   setUpAll(() => verifier = SchemaVerifier(GeneratedHelper()));
 
-  test('NFR-05 a new database matches the v2 schema dump', () async {
-    final connection = await verifier.startAt(2);
+  test('NFR-05 a new database matches the v3 schema dump', () async {
+    final connection = await verifier.startAt(3);
     final db = AppDatabase(connection);
-    await verifier.migrateAndValidate(db, 2);
+    await verifier.migrateAndValidate(db, 3);
     await db.close();
   });
 
-  test('NFR-05 KIT-01 a v1 database upgrades to v2 with the kitchen and '
-      'catalog tables and keeps settings', () async {
+  test('NFR-05 KIT-01 a v1 database upgrades to v3 with the kitchen, '
+      'catalog, set and outbox tables and keeps settings', () async {
     final v1 = await verifier.schemaAt(1);
     v1.rawDatabase.execute(
       "INSERT INTO settings (key, value) VALUES ('settings.locale', 'en')",
     );
     final db = AppDatabase(v1.newConnection());
-    await verifier.migrateAndValidate(db, 2);
+    await verifier.migrateAndValidate(db, 3);
     final settings = await db.select(db.settings).get();
     expect(settings.single.value, 'en');
     expect(await db.select(db.cachedKitchenItems).get(), isEmpty);
     expect(await db.select(db.cachedCatalogIngredients).get(), isEmpty);
+    expect(await db.select(db.kitchenOutbox).get(), isEmpty);
     await db.close();
+  });
+
+  test('NFR-05 KIT-16 a v2 database upgrades to v3: the outbox is added, the '
+      'caches start again and settings stay', () async {
+    final v2 = await verifier.schemaAt(2);
+    v2.rawDatabase.execute(
+      "INSERT INTO settings (key, value) VALUES ('settings.locale', 'en')",
+    );
+    final db = AppDatabase(v2.newConnection());
+    await verifier.migrateAndValidate(db, 3);
+    expect((await db.select(db.settings).get()).single.value, 'en');
+    expect(await db.select(db.kitchenOutbox).get(), isEmpty);
+    await db.close();
+  });
+
+  test('NFR-05 KIT-16 a schema upgrade keeps the kitchen outbox (data only '
+      'this phone has) while caches start again', () async {
+    final dir = await _tempDir();
+    final path = '${dir.path}/outbox.sqlite';
+    final v3 = AppDatabase(NativeDatabase(File(path)));
+    await _seed(v3);
+    await v3
+        .into(v3.kitchenOutbox)
+        .insert(
+          KitchenOutboxCompanion.insert(
+            accountId: 'acc-1',
+            changeId: '6f1a2b3c-4d5e-4f60-8a7b-000000000001',
+            ingredientId: const Value('fx_kit_tempe'),
+            operation: 'upsert',
+            patch: '{"state":"out"}',
+            timeline: 'boot:1',
+            elapsedMs: 1000,
+            wallMs: 1763190000000,
+          ),
+        );
+    await v3.close();
+
+    final v4 = _FutureVersion(NativeDatabase(File(path)), 4);
+    expect(await v4.select(v4.cachedHouseholds).get(), isEmpty);
+    expect(
+      (await v4.select(v4.kitchenOutbox).get()).single.ingredientId,
+      'fx_kit_tempe',
+    );
+    await v4.close();
   });
 
   test('NFR-05 a schema upgrade rebuilds cache tables and keeps '
@@ -92,14 +137,14 @@ void main() {
     await _seed(v1);
     await v1.close();
 
-    final v3 = _FutureVersion(NativeDatabase(File(path)), 3);
-    expect(await v3.select(v3.cachedHouseholds).get(), isEmpty);
-    expect(await v3.select(v3.cachedAllergens).get(), isEmpty);
-    expect(await v3.select(v3.cachedCatalogs).get(), isEmpty);
-    final settings = await v3.select(v3.settings).get();
+    final v4 = _FutureVersion(NativeDatabase(File(path)), 4);
+    expect(await v4.select(v4.cachedHouseholds).get(), isEmpty);
+    expect(await v4.select(v4.cachedAllergens).get(), isEmpty);
+    expect(await v4.select(v4.cachedCatalogs).get(), isEmpty);
+    final settings = await v4.select(v4.settings).get();
     expect(settings.single.key, 'settings.locale');
     expect(settings.single.value, 'en');
-    await v3.close();
+    await v4.close();
   });
 
   test('NFR-05 L5 a downgrade from an unknown newer schema starts again and '
@@ -110,11 +155,25 @@ void main() {
     await _seed(newer);
     // A table only the newer build knows, holding a name.
     await newer.customStatement(
-      'CREATE TABLE kitchen_outbox (id TEXT PRIMARY KEY, custom_name TEXT)',
+      'CREATE TABLE kitchen_future (id TEXT PRIMARY KEY, custom_name TEXT)',
     );
     await newer.customStatement(
-      "INSERT INTO kitchen_outbox VALUES ('c-1', 'Sambal Nenek')",
+      "INSERT INTO kitchen_future VALUES ('c-1', 'Sambal Nenek')",
     );
+    await newer
+        .into(newer.kitchenOutbox)
+        .insert(
+          KitchenOutboxCompanion.insert(
+            accountId: 'acc-1',
+            changeId: '6f1a2b3c-4d5e-4f60-8a7b-000000000002',
+            customName: const Value('Sambal Nenek'),
+            operation: 'upsert',
+            patch: '{}',
+            timeline: 'boot:1',
+            elapsedMs: 0,
+            wallMs: 0,
+          ),
+        );
     await newer.close();
 
     final current = AppDatabase(NativeDatabase(File(path)));
@@ -129,13 +188,15 @@ void main() {
         .get();
     expect(
       tables.map((t) => t.read<String>('name')),
-      isNot(contains('kitchen_outbox')),
+      isNot(contains('kitchen_future')),
     );
+    expect(await current.select(current.kitchenOutbox).get(), isEmpty);
     await current.close();
   });
 
-  test('ACC-13 KIT-01 clearing user data removes the household, profiles and '
-      'kitchen but keeps settings and public reference data', () async {
+  test('ACC-13 KIT-01 KIT-16 clearing user data removes the household, '
+      'profiles, kitchen, sets and queued changes but keeps settings and '
+      'public reference data', () async {
     final db = AppDatabase(NativeDatabase.memory());
     await _seed(db);
     await db
@@ -188,8 +249,36 @@ void main() {
           ),
         );
 
+    await db
+        .into(db.kitchenOutbox)
+        .insert(
+          KitchenOutboxCompanion.insert(
+            accountId: 'acc-1',
+            changeId: '6f1a2b3c-4d5e-4f60-8a7b-000000000003',
+            customName: const Value('Sambal buatan Ibu'),
+            operation: 'upsert',
+            patch: '{"state":"out"}',
+            timeline: 'boot:1',
+            elapsedMs: 0,
+            wallMs: 0,
+          ),
+        );
+    await db
+        .into(db.cachedIngredientSets)
+        .insert(
+          CachedIngredientSetsCompanion.insert(
+            id: 's-1',
+            position: 0,
+            name: 'Belanja Ibu',
+            itemIds: '["k-1"]',
+            updatedAt: DateTime.utc(2026, 11, 1),
+          ),
+        );
+
     await db.clearUserData();
 
+    expect(await db.select(db.kitchenOutbox).get(), isEmpty);
+    expect(await db.select(db.cachedIngredientSets).get(), isEmpty);
     expect(await db.select(db.cachedProfiles).get(), isEmpty);
     expect(await db.select(db.cachedHouseholds).get(), isEmpty);
     expect(await db.select(db.cachedKitchens).get(), isEmpty);

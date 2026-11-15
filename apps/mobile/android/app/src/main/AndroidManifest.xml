@@ -1,6 +1,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- The app calls the KeluargaMakan API (release builds too). -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- KIT-16: send queued kitchen changes when the connection returns
+         (MainActivity.kt). A normal permission; reads no personal data. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <application
         android:label="KeluargaMakan"
         android:name="${applicationName}"

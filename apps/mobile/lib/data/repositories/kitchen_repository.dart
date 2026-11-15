@@ -9,14 +9,17 @@
 //   logged: ApiCaller logs the operation name only.
 // - `reference_data_unavailable` (503) is returned as a failure, never as
 //   an empty catalog or "no results".
-//
-// No offline queue yet (T-034, QUESTIONS #68): writes need the API.
+// - The sync (KIT-16): the queued changes and the cursor in, the outcome
+//   of each change and what changed since out. The request is bound to the
+//   account the changes belong to ([runAsAccount]). Ingredient sets
+//   (KIT-08) are written online only.
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:keluargamakan_api/api.dart' as api;
 
 import '../../core/api/api_client.dart';
 import '../../core/api/api_result.dart';
+import '../../core/api/auth_http_client.dart' show runAsAccount;
 import '../kitchen_decoders.dart';
 import '../local_cache.dart';
 import '../models/kitchen.dart';
@@ -64,14 +67,46 @@ final class KitchenRepository {
   /// The session epoch now, for [saveCopy] (LocalCache).
   int get sessionEpoch => _cache.epoch;
 
-  /// Keeps [list] as the phone's copy for [accountId] (after a confirmed
-  /// change). Does nothing once that session is ending or over, or another
-  /// account is signed in. Best effort.
+  /// Keeps [list] as the phone's copy for [accountId], with the cursor of
+  /// the sync that gave it. Does nothing once that session is ending or
+  /// over, or another account is signed in. Best effort.
   Future<void> saveCopy(
     KitchenList list, {
     required String accountId,
     required int epoch,
-  }) => _cache.saveKitchen(list, accountId: accountId, epoch: epoch);
+    String? cursor,
+  }) => _cache.saveKitchen(
+    list,
+    accountId: accountId,
+    epoch: epoch,
+    cursor: cursor,
+  );
+
+  /// The phone's copy and its sync cursor, for the signed-in account.
+  Future<({KitchenList list, String? cursor})?> cachedKitchen() =>
+      _cache.kitchenWithCursor();
+
+  /// KIT-16: sends [changes] (oldest first) with the [cursor] of the last
+  /// sync and returns the outcome of each and what changed since. Sent only
+  /// with [accountId]'s session; another account's session makes it a
+  /// [NetworkFailure] without anything being sent.
+  Future<ApiResult<KitchenSyncAnswer>> sync({
+    required String accountId,
+    required String? cursor,
+    required List<api.KitchenChange> changes,
+  }) {
+    final sent = [for (final c in changes) c.changeId];
+    return runAsAccount(
+      accountId,
+      () => _caller.call(
+        'syncKitchen',
+        () => _kitchen.syncKitchenWithHttpInfo(
+          api.KitchenSyncRequest(cursor: cursor, changes: changes),
+        ),
+        (json) => decodeSyncAnswer(json, sent: sent),
+      ),
+    );
+  }
 
   /// Adds a reference ingredient (KIT-04) or a custom one (KIT-05). A custom
   /// one needs [category]; a reference one needs it only when the catalog
@@ -123,6 +158,69 @@ final class KitchenRepository {
   Future<ApiResult<void>> removeItem(String itemId) => _caller.callNoContent(
     'removeKitchenItem',
     () => _kitchen.removeKitchenItemWithHttpInfo(itemId),
+  );
+
+  // ------------------------------------------------------------ Sets
+
+  /// KIT-08: the household's sets. Without an answer, the phone's copy.
+  Future<ApiResult<IngredientSets>> listSets() async {
+    final account = _currentAccountId();
+    final epoch = _cache.epoch;
+    final result = await _caller.call(
+      'listIngredientSets',
+      () => _kitchen.listIngredientSetsWithHttpInfo(),
+      decodeIngredientSets,
+    );
+    switch (result) {
+      case Ok(:final value) when account != null:
+        await _cache.saveSets(value, accountId: account, epoch: epoch);
+      case Err(failure: NetworkFailure()):
+        final cached = await _cache.sets();
+        if (cached != null) return Ok(cached);
+      case _:
+        break;
+    }
+    return result;
+  }
+
+  /// Keeps [sets] as the phone's copy (after a confirmed change).
+  Future<void> saveSets(
+    IngredientSets sets, {
+    required String accountId,
+    required int epoch,
+  }) => _cache.saveSets(sets, accountId: accountId, epoch: epoch);
+
+  Future<ApiResult<IngredientSetInfo>> createSet({
+    required String name,
+    required List<String> itemIds,
+    required String idempotencyKey,
+  }) => _caller.call(
+    'createIngredientSet',
+    () => _kitchen.createIngredientSetWithHttpInfo(
+      api.IngredientSetInput(name: name, itemIds: itemIds.toSet()),
+      idempotencyKey: idempotencyKey,
+    ),
+    decodeIngredientSet,
+  );
+
+  /// Replaces the set's name and items; sending it again is safe.
+  Future<ApiResult<IngredientSetInfo>> replaceSet(
+    String setId, {
+    required String name,
+    required List<String> itemIds,
+  }) => _caller.call(
+    'replaceIngredientSet',
+    () => _kitchen.replaceIngredientSetWithHttpInfo(
+      setId,
+      api.IngredientSetInput(name: name, itemIds: itemIds.toSet()),
+    ),
+    decodeIngredientSet,
+  );
+
+  /// The items stay in the kitchen.
+  Future<ApiResult<void>> deleteSet(String setId) => _caller.callNoContent(
+    'deleteIngredientSet',
+    () => _kitchen.deleteIngredientSetWithHttpInfo(setId),
   );
 
   // ------------------------------------------------------------ Catalog

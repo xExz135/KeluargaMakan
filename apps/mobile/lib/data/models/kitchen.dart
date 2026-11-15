@@ -11,6 +11,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:keluargamakan_api/api.dart' as api;
 
+import '../ingredient_search.dart' show foldIngredientName;
 import 'sourced.dart';
 
 /// KIT-03 categories in display order (contract `KitchenCategory`).
@@ -46,6 +47,71 @@ enum KitchenItemState {
   };
 
   KitchenItemState get flipped => this == available ? out : available;
+}
+
+/// KIT-09 optional amount (contract `KitchenQuantity`).
+enum KitchenAmount {
+  little('a_little'),
+  some('some'),
+  plenty('plenty');
+
+  const KitchenAmount(this.wire);
+
+  final String wire;
+
+  /// Null for a value this app version does not know: the amount is then
+  /// not shown (it says nothing about safety).
+  static KitchenAmount? fromWire(Object? value) =>
+      values.where((a) => a.wire == value).firstOrNull;
+
+  api.KitchenQuantity toApi() => switch (this) {
+    little => api.KitchenQuantity.aLittle,
+    some => api.KitchenQuantity.some,
+    plenty => api.KitchenQuantity.plenty,
+  };
+}
+
+/// The brand recorded for an item (KIT-09, SAF-07; contract `KitchenBrand`).
+/// Never a safety result: only Cek Aman reads it, and a typed brand always
+/// leaves "Cek label" in place for brand-varying components.
+@immutable
+sealed class KitchenBrand {
+  const KitchenBrand(this.name);
+
+  /// The reference brand's name, or the text as typed.
+  final String name;
+}
+
+/// One of the ingredient's brands in the verified reference data.
+final class ReferenceBrand extends KitchenBrand {
+  const ReferenceBrand(this.brandId, super.name);
+
+  final String brandId;
+
+  @override
+  bool operator ==(Object other) =>
+      other is ReferenceBrand && other.brandId == brandId;
+
+  @override
+  int get hashCode => brandId.hashCode;
+
+  @override
+  String toString() => 'ReferenceBrand($brandId)';
+}
+
+/// A brand typed by the user, not in the list. Cek Aman keeps "Cek label"
+/// for brand-varying components (SAF-07).
+final class TypedBrand extends KitchenBrand {
+  const TypedBrand(super.name);
+
+  @override
+  bool operator ==(Object other) => other is TypedBrand && other.name == name;
+
+  @override
+  int get hashCode => name.hashCode;
+
+  @override
+  String toString() => 'TypedBrand(...)';
 }
 
 /// Text in both app languages (contract `LocalizedText`).
@@ -93,6 +159,15 @@ final class ReferenceIngredient extends IngredientKey {
   String toString() => 'ReferenceIngredient($ingredientId)';
 }
 
+/// The key the latest change wins on (KIT-16): `r:<id>` for a reference
+/// ingredient, `c:<folded name>` for a custom one. The server folds custom
+/// names a little more (NFKC); a name it folds together that this phone
+/// does not is only queued twice, which the server orders correctly.
+String ingredientKeyOf(IngredientKey key) => switch (key) {
+  ReferenceIngredient(:final ingredientId) => 'r:$ingredientId',
+  CustomIngredient(:final name) => 'c:${foldIngredientName(name)}',
+};
+
 final class CustomIngredient extends IngredientKey {
   const CustomIngredient(this.name);
 
@@ -110,8 +185,7 @@ final class CustomIngredient extends IngredientKey {
   String toString() => 'CustomIngredient(…)';
 }
 
-/// One saved kitchen item (contract `KitchenItem`). Quantity and brand
-/// (KIT-09) arrive with T-034.
+/// One saved kitchen item (contract `KitchenItem`).
 @immutable
 final class KitchenEntry {
   const KitchenEntry({
@@ -125,7 +199,14 @@ final class KitchenEntry {
     required this.usageRank,
     required this.changedAt,
     required this.createdAt,
+    this.quantity,
+    this.brand,
   });
+
+  /// Prefix of [id] for an item added on this phone that the server has not
+  /// confirmed yet (KIT-16). Such an item has no server ID, so it cannot be
+  /// put in a set yet.
+  static const localIdPrefix = 'local:';
 
   final String id;
 
@@ -146,6 +227,15 @@ final class KitchenEntry {
   final DateTime changedAt;
   final DateTime createdAt;
 
+  /// KIT-09 optional amount.
+  final KitchenAmount? quantity;
+
+  /// KIT-09 optional brand (SAF-07).
+  final KitchenBrand? brand;
+
+  /// Added on this phone and not on the server yet ([localIdPrefix]).
+  bool get isLocalOnly => id.startsWith(localIdPrefix);
+
   /// KIT-05: Cek Aman does not know it, so it gives "Cek label" (SAF-09).
   bool get isCustom => ingredientId == null;
 
@@ -156,17 +246,32 @@ final class KitchenEntry {
     null => CustomIngredient(customName ?? ''),
   };
 
-  KitchenEntry withState(KitchenItemState next) => KitchenEntry(
+  /// The key the latest change wins on ([ingredientKeyOf]).
+  String get ingredientKey => ingredientKeyOf(key);
+
+  KitchenEntry withState(KitchenItemState next) => copyWith(state: next);
+
+  /// A copy with the given fields. [quantity] and [brand] are functions so
+  /// that null can be set.
+  KitchenEntry copyWith({
+    api.KitchenCategory? category,
+    KitchenItemState? state,
+    KitchenAmount? Function()? quantity,
+    KitchenBrand? Function()? brand,
+    DateTime? changedAt,
+  }) => KitchenEntry(
     id: id,
     ingredientId: ingredientId,
     displayName: displayName,
     customName: customName,
-    category: category,
-    state: next,
+    category: category ?? this.category,
+    state: state ?? this.state,
     isDefaultStaple: isDefaultStaple,
     usageRank: usageRank,
-    changedAt: changedAt,
+    changedAt: changedAt ?? this.changedAt,
     createdAt: createdAt,
+    quantity: quantity == null ? this.quantity : quantity(),
+    brand: brand == null ? this.brand : brand(),
   );
 
   @override
@@ -220,6 +325,7 @@ final class CatalogEntry {
     required this.localNames,
     required this.category,
     required this.brandVaries,
+    this.brands = const [],
   });
 
   final String ingredientId;
@@ -232,11 +338,29 @@ final class CatalogEntry {
   /// know the code): the app asks for one when it is added.
   final api.KitchenCategory? category;
 
-  /// SAF-07 hint for recording a brand (T-034). Not a safety result.
+  /// SAF-07 hint for offering to record a brand (KIT-09). Not a safety
+  /// result.
   final bool brandVaries;
+
+  /// The ingredient's brands in the verified reference data, the only ones
+  /// the brand picker offers.
+  final List<CatalogBrand> brands;
 
   @override
   String toString() => 'CatalogEntry($ingredientId)';
+}
+
+/// A reference brand of an ingredient (contract `CatalogBrand`). Not a
+/// safety result.
+@immutable
+final class CatalogBrand {
+  const CatalogBrand({required this.brandId, required this.name});
+
+  final String brandId;
+  final String name;
+
+  @override
+  String toString() => 'CatalogBrand($brandId)';
 }
 
 /// The whole reference catalog as kept on the phone (KIT-04).
@@ -283,4 +407,111 @@ final class IngredientHit {
 
   @override
   String toString() => 'IngredientHit(${ingredient.ingredientId})';
+}
+
+/// KIT-08 ingredient set (contract `IngredientSet`). Its name is the user's
+/// own text and is never printed.
+@immutable
+final class IngredientSetInfo {
+  const IngredientSetInfo({
+    required this.id,
+    required this.name,
+    required this.itemIds,
+    required this.updatedAt,
+  });
+
+  final String id;
+  final String name;
+
+  /// Server item IDs.
+  final List<String> itemIds;
+  final DateTime updatedAt;
+
+  @override
+  String toString() => 'IngredientSetInfo($id, ${itemIds.length} items)';
+}
+
+/// The household's sets (contract `IngredientSetList`).
+@immutable
+final class IngredientSets {
+  const IngredientSets({
+    required this.items,
+    required this.maxSets,
+    required this.source,
+  });
+
+  final List<IngredientSetInfo> items;
+  final int maxSets;
+  final DataSource source;
+
+  bool get atLimit => items.length >= maxSets;
+
+  IngredientSetInfo? byId(String id) =>
+      items.where((s) => s.id == id).firstOrNull;
+
+  IngredientSets copyWith({
+    List<IngredientSetInfo>? items,
+    DataSource? source,
+  }) => IngredientSets(
+    items: items ?? this.items,
+    maxSets: maxSets,
+    source: source ?? this.source,
+  );
+
+  @override
+  String toString() => 'IngredientSets(${items.length})';
+}
+
+/// Contract `KitchenChangeOutcome`.
+enum KitchenSyncOutcome { applied, superseded, rejected }
+
+/// The server's answer to one queued change (contract
+/// `KitchenChangeResult`).
+@immutable
+final class KitchenChangeAnswer {
+  const KitchenChangeAnswer({
+    required this.changeId,
+    required this.outcome,
+    required this.itemId,
+    required this.errorCode,
+  });
+
+  final String changeId;
+  final KitchenSyncOutcome outcome;
+  final String? itemId;
+
+  /// The wire code of a rejection; null otherwise.
+  final String? errorCode;
+
+  @override
+  String toString() => 'KitchenChangeAnswer(${outcome.name}, $errorCode)';
+}
+
+/// The answer to a kitchen sync (contract `KitchenSyncResponse`).
+@immutable
+final class KitchenSyncAnswer {
+  const KitchenSyncAnswer({
+    required this.cursor,
+    required this.full,
+    required this.items,
+    required this.removedItemIds,
+    required this.results,
+    required this.maxItems,
+    required this.referenceVersion,
+  });
+
+  final String cursor;
+
+  /// [items] is the whole kitchen.
+  final bool full;
+  final List<KitchenEntry> items;
+  final List<String> removedItemIds;
+  final List<KitchenChangeAnswer> results;
+  final int maxItems;
+  final String? referenceVersion;
+
+  @override
+  String toString() =>
+      'KitchenSyncAnswer(full: $full, ${items.length} items, '
+      '${results.length} results)';
 }

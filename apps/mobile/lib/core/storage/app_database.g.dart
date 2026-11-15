@@ -1840,12 +1840,24 @@ class $CachedKitchensTable extends CachedKitchens
     type: DriftSqlType.dateTime,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _syncCursorMeta = const VerificationMeta(
+    'syncCursor',
+  );
+  @override
+  late final GeneratedColumn<String> syncCursor = GeneratedColumn<String>(
+    'sync_cursor',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
     maxItems,
     referenceVersion,
     cachedAt,
+    syncCursor,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -1887,6 +1899,12 @@ class $CachedKitchensTable extends CachedKitchens
     } else if (isInserting) {
       context.missing(_cachedAtMeta);
     }
+    if (data.containsKey('sync_cursor')) {
+      context.handle(
+        _syncCursorMeta,
+        syncCursor.isAcceptableOrUnknown(data['sync_cursor']!, _syncCursorMeta),
+      );
+    }
     return context;
   }
 
@@ -1912,6 +1930,10 @@ class $CachedKitchensTable extends CachedKitchens
         DriftSqlType.dateTime,
         data['${effectivePrefix}cached_at'],
       )!,
+      syncCursor: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}sync_cursor'],
+      ),
     );
   }
 
@@ -1926,11 +1948,16 @@ class CachedKitchen extends DataClass implements Insertable<CachedKitchen> {
   final int maxItems;
   final String? referenceVersion;
   final DateTime cachedAt;
+
+  /// The cursor of the sync that gave this copy (KIT-16). Kept with the copy
+  /// it belongs to: without the copy, the next sync starts in full.
+  final String? syncCursor;
   const CachedKitchen({
     required this.id,
     required this.maxItems,
     this.referenceVersion,
     required this.cachedAt,
+    this.syncCursor,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -1941,6 +1968,9 @@ class CachedKitchen extends DataClass implements Insertable<CachedKitchen> {
       map['reference_version'] = Variable<String>(referenceVersion);
     }
     map['cached_at'] = Variable<DateTime>(cachedAt);
+    if (!nullToAbsent || syncCursor != null) {
+      map['sync_cursor'] = Variable<String>(syncCursor);
+    }
     return map;
   }
 
@@ -1952,6 +1982,9 @@ class CachedKitchen extends DataClass implements Insertable<CachedKitchen> {
           ? const Value.absent()
           : Value(referenceVersion),
       cachedAt: Value(cachedAt),
+      syncCursor: syncCursor == null && nullToAbsent
+          ? const Value.absent()
+          : Value(syncCursor),
     );
   }
 
@@ -1965,6 +1998,7 @@ class CachedKitchen extends DataClass implements Insertable<CachedKitchen> {
       maxItems: serializer.fromJson<int>(json['maxItems']),
       referenceVersion: serializer.fromJson<String?>(json['referenceVersion']),
       cachedAt: serializer.fromJson<DateTime>(json['cachedAt']),
+      syncCursor: serializer.fromJson<String?>(json['syncCursor']),
     );
   }
   @override
@@ -1975,6 +2009,7 @@ class CachedKitchen extends DataClass implements Insertable<CachedKitchen> {
       'maxItems': serializer.toJson<int>(maxItems),
       'referenceVersion': serializer.toJson<String?>(referenceVersion),
       'cachedAt': serializer.toJson<DateTime>(cachedAt),
+      'syncCursor': serializer.toJson<String?>(syncCursor),
     };
   }
 
@@ -1983,6 +2018,7 @@ class CachedKitchen extends DataClass implements Insertable<CachedKitchen> {
     int? maxItems,
     Value<String?> referenceVersion = const Value.absent(),
     DateTime? cachedAt,
+    Value<String?> syncCursor = const Value.absent(),
   }) => CachedKitchen(
     id: id ?? this.id,
     maxItems: maxItems ?? this.maxItems,
@@ -1990,6 +2026,7 @@ class CachedKitchen extends DataClass implements Insertable<CachedKitchen> {
         ? referenceVersion.value
         : this.referenceVersion,
     cachedAt: cachedAt ?? this.cachedAt,
+    syncCursor: syncCursor.present ? syncCursor.value : this.syncCursor,
   );
   CachedKitchen copyWithCompanion(CachedKitchensCompanion data) {
     return CachedKitchen(
@@ -1999,6 +2036,9 @@ class CachedKitchen extends DataClass implements Insertable<CachedKitchen> {
           ? data.referenceVersion.value
           : this.referenceVersion,
       cachedAt: data.cachedAt.present ? data.cachedAt.value : this.cachedAt,
+      syncCursor: data.syncCursor.present
+          ? data.syncCursor.value
+          : this.syncCursor,
     );
   }
 
@@ -2008,13 +2048,15 @@ class CachedKitchen extends DataClass implements Insertable<CachedKitchen> {
           ..write('id: $id, ')
           ..write('maxItems: $maxItems, ')
           ..write('referenceVersion: $referenceVersion, ')
-          ..write('cachedAt: $cachedAt')
+          ..write('cachedAt: $cachedAt, ')
+          ..write('syncCursor: $syncCursor')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => Object.hash(id, maxItems, referenceVersion, cachedAt);
+  int get hashCode =>
+      Object.hash(id, maxItems, referenceVersion, cachedAt, syncCursor);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -2022,7 +2064,8 @@ class CachedKitchen extends DataClass implements Insertable<CachedKitchen> {
           other.id == this.id &&
           other.maxItems == this.maxItems &&
           other.referenceVersion == this.referenceVersion &&
-          other.cachedAt == this.cachedAt);
+          other.cachedAt == this.cachedAt &&
+          other.syncCursor == this.syncCursor);
 }
 
 class CachedKitchensCompanion extends UpdateCompanion<CachedKitchen> {
@@ -2030,17 +2073,20 @@ class CachedKitchensCompanion extends UpdateCompanion<CachedKitchen> {
   final Value<int> maxItems;
   final Value<String?> referenceVersion;
   final Value<DateTime> cachedAt;
+  final Value<String?> syncCursor;
   const CachedKitchensCompanion({
     this.id = const Value.absent(),
     this.maxItems = const Value.absent(),
     this.referenceVersion = const Value.absent(),
     this.cachedAt = const Value.absent(),
+    this.syncCursor = const Value.absent(),
   });
   CachedKitchensCompanion.insert({
     this.id = const Value.absent(),
     required int maxItems,
     this.referenceVersion = const Value.absent(),
     required DateTime cachedAt,
+    this.syncCursor = const Value.absent(),
   }) : maxItems = Value(maxItems),
        cachedAt = Value(cachedAt);
   static Insertable<CachedKitchen> custom({
@@ -2048,12 +2094,14 @@ class CachedKitchensCompanion extends UpdateCompanion<CachedKitchen> {
     Expression<int>? maxItems,
     Expression<String>? referenceVersion,
     Expression<DateTime>? cachedAt,
+    Expression<String>? syncCursor,
   }) {
     return RawValuesInsertable({
       if (id != null) 'id': id,
       if (maxItems != null) 'max_items': maxItems,
       if (referenceVersion != null) 'reference_version': referenceVersion,
       if (cachedAt != null) 'cached_at': cachedAt,
+      if (syncCursor != null) 'sync_cursor': syncCursor,
     });
   }
 
@@ -2062,12 +2110,14 @@ class CachedKitchensCompanion extends UpdateCompanion<CachedKitchen> {
     Value<int>? maxItems,
     Value<String?>? referenceVersion,
     Value<DateTime>? cachedAt,
+    Value<String?>? syncCursor,
   }) {
     return CachedKitchensCompanion(
       id: id ?? this.id,
       maxItems: maxItems ?? this.maxItems,
       referenceVersion: referenceVersion ?? this.referenceVersion,
       cachedAt: cachedAt ?? this.cachedAt,
+      syncCursor: syncCursor ?? this.syncCursor,
     );
   }
 
@@ -2086,6 +2136,9 @@ class CachedKitchensCompanion extends UpdateCompanion<CachedKitchen> {
     if (cachedAt.present) {
       map['cached_at'] = Variable<DateTime>(cachedAt.value);
     }
+    if (syncCursor.present) {
+      map['sync_cursor'] = Variable<String>(syncCursor.value);
+    }
     return map;
   }
 
@@ -2095,7 +2148,8 @@ class CachedKitchensCompanion extends UpdateCompanion<CachedKitchen> {
           ..write('id: $id, ')
           ..write('maxItems: $maxItems, ')
           ..write('referenceVersion: $referenceVersion, ')
-          ..write('cachedAt: $cachedAt')
+          ..write('cachedAt: $cachedAt, ')
+          ..write('syncCursor: $syncCursor')
           ..write(')'))
         .toString();
   }
@@ -2252,6 +2306,39 @@ class $CachedKitchenItemsTable extends CachedKitchenItems
     type: DriftSqlType.dateTime,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _quantityMeta = const VerificationMeta(
+    'quantity',
+  );
+  @override
+  late final GeneratedColumn<String> quantity = GeneratedColumn<String>(
+    'quantity',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _brandIdMeta = const VerificationMeta(
+    'brandId',
+  );
+  @override
+  late final GeneratedColumn<String> brandId = GeneratedColumn<String>(
+    'brand_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _brandNameMeta = const VerificationMeta(
+    'brandName',
+  );
+  @override
+  late final GeneratedColumn<String> brandName = GeneratedColumn<String>(
+    'brand_name',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -2267,6 +2354,9 @@ class $CachedKitchenItemsTable extends CachedKitchenItems
     usageRank,
     changedAt,
     createdAt,
+    quantity,
+    brandId,
+    brandName,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -2383,6 +2473,24 @@ class $CachedKitchenItemsTable extends CachedKitchenItems
     } else if (isInserting) {
       context.missing(_createdAtMeta);
     }
+    if (data.containsKey('quantity')) {
+      context.handle(
+        _quantityMeta,
+        quantity.isAcceptableOrUnknown(data['quantity']!, _quantityMeta),
+      );
+    }
+    if (data.containsKey('brand_id')) {
+      context.handle(
+        _brandIdMeta,
+        brandId.isAcceptableOrUnknown(data['brand_id']!, _brandIdMeta),
+      );
+    }
+    if (data.containsKey('brand_name')) {
+      context.handle(
+        _brandNameMeta,
+        brandName.isAcceptableOrUnknown(data['brand_name']!, _brandNameMeta),
+      );
+    }
     return context;
   }
 
@@ -2444,6 +2552,18 @@ class $CachedKitchenItemsTable extends CachedKitchenItems
         DriftSqlType.dateTime,
         data['${effectivePrefix}created_at'],
       )!,
+      quantity: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}quantity'],
+      ),
+      brandId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}brand_id'],
+      ),
+      brandName: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}brand_name'],
+      ),
     );
   }
 
@@ -2474,6 +2594,15 @@ class CachedKitchenItem extends DataClass
   final int? usageRank;
   final DateTime changedAt;
   final DateTime createdAt;
+
+  /// Contract `KitchenQuantity` wire value, or null (KIT-09).
+  final String? quantity;
+
+  /// Reference brand ID; null for a typed brand or no brand (KIT-09).
+  final String? brandId;
+
+  /// The brand's name or the typed text; null when no brand is recorded.
+  final String? brandName;
   const CachedKitchenItem({
     required this.id,
     required this.position,
@@ -2488,6 +2617,9 @@ class CachedKitchenItem extends DataClass
     this.usageRank,
     required this.changedAt,
     required this.createdAt,
+    this.quantity,
+    this.brandId,
+    this.brandName,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -2515,6 +2647,15 @@ class CachedKitchenItem extends DataClass
     }
     map['changed_at'] = Variable<DateTime>(changedAt);
     map['created_at'] = Variable<DateTime>(createdAt);
+    if (!nullToAbsent || quantity != null) {
+      map['quantity'] = Variable<String>(quantity);
+    }
+    if (!nullToAbsent || brandId != null) {
+      map['brand_id'] = Variable<String>(brandId);
+    }
+    if (!nullToAbsent || brandName != null) {
+      map['brand_name'] = Variable<String>(brandName);
+    }
     return map;
   }
 
@@ -2543,6 +2684,15 @@ class CachedKitchenItem extends DataClass
           : Value(usageRank),
       changedAt: Value(changedAt),
       createdAt: Value(createdAt),
+      quantity: quantity == null && nullToAbsent
+          ? const Value.absent()
+          : Value(quantity),
+      brandId: brandId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(brandId),
+      brandName: brandName == null && nullToAbsent
+          ? const Value.absent()
+          : Value(brandName),
     );
   }
 
@@ -2565,6 +2715,9 @@ class CachedKitchenItem extends DataClass
       usageRank: serializer.fromJson<int?>(json['usageRank']),
       changedAt: serializer.fromJson<DateTime>(json['changedAt']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+      quantity: serializer.fromJson<String?>(json['quantity']),
+      brandId: serializer.fromJson<String?>(json['brandId']),
+      brandName: serializer.fromJson<String?>(json['brandName']),
     );
   }
   @override
@@ -2584,6 +2737,9 @@ class CachedKitchenItem extends DataClass
       'usageRank': serializer.toJson<int?>(usageRank),
       'changedAt': serializer.toJson<DateTime>(changedAt),
       'createdAt': serializer.toJson<DateTime>(createdAt),
+      'quantity': serializer.toJson<String?>(quantity),
+      'brandId': serializer.toJson<String?>(brandId),
+      'brandName': serializer.toJson<String?>(brandName),
     };
   }
 
@@ -2601,6 +2757,9 @@ class CachedKitchenItem extends DataClass
     Value<int?> usageRank = const Value.absent(),
     DateTime? changedAt,
     DateTime? createdAt,
+    Value<String?> quantity = const Value.absent(),
+    Value<String?> brandId = const Value.absent(),
+    Value<String?> brandName = const Value.absent(),
   }) => CachedKitchenItem(
     id: id ?? this.id,
     position: position ?? this.position,
@@ -2619,6 +2778,9 @@ class CachedKitchenItem extends DataClass
     usageRank: usageRank.present ? usageRank.value : this.usageRank,
     changedAt: changedAt ?? this.changedAt,
     createdAt: createdAt ?? this.createdAt,
+    quantity: quantity.present ? quantity.value : this.quantity,
+    brandId: brandId.present ? brandId.value : this.brandId,
+    brandName: brandName.present ? brandName.value : this.brandName,
   );
   CachedKitchenItem copyWithCompanion(CachedKitchenItemsCompanion data) {
     return CachedKitchenItem(
@@ -2645,6 +2807,9 @@ class CachedKitchenItem extends DataClass
       usageRank: data.usageRank.present ? data.usageRank.value : this.usageRank,
       changedAt: data.changedAt.present ? data.changedAt.value : this.changedAt,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      quantity: data.quantity.present ? data.quantity.value : this.quantity,
+      brandId: data.brandId.present ? data.brandId.value : this.brandId,
+      brandName: data.brandName.present ? data.brandName.value : this.brandName,
     );
   }
 
@@ -2663,7 +2828,10 @@ class CachedKitchenItem extends DataClass
           ..write('isDefaultStaple: $isDefaultStaple, ')
           ..write('usageRank: $usageRank, ')
           ..write('changedAt: $changedAt, ')
-          ..write('createdAt: $createdAt')
+          ..write('createdAt: $createdAt, ')
+          ..write('quantity: $quantity, ')
+          ..write('brandId: $brandId, ')
+          ..write('brandName: $brandName')
           ..write(')'))
         .toString();
   }
@@ -2683,6 +2851,9 @@ class CachedKitchenItem extends DataClass
     usageRank,
     changedAt,
     createdAt,
+    quantity,
+    brandId,
+    brandName,
   );
   @override
   bool operator ==(Object other) =>
@@ -2700,7 +2871,10 @@ class CachedKitchenItem extends DataClass
           other.isDefaultStaple == this.isDefaultStaple &&
           other.usageRank == this.usageRank &&
           other.changedAt == this.changedAt &&
-          other.createdAt == this.createdAt);
+          other.createdAt == this.createdAt &&
+          other.quantity == this.quantity &&
+          other.brandId == this.brandId &&
+          other.brandName == this.brandName);
 }
 
 class CachedKitchenItemsCompanion extends UpdateCompanion<CachedKitchenItem> {
@@ -2717,6 +2891,9 @@ class CachedKitchenItemsCompanion extends UpdateCompanion<CachedKitchenItem> {
   final Value<int?> usageRank;
   final Value<DateTime> changedAt;
   final Value<DateTime> createdAt;
+  final Value<String?> quantity;
+  final Value<String?> brandId;
+  final Value<String?> brandName;
   final Value<int> rowid;
   const CachedKitchenItemsCompanion({
     this.id = const Value.absent(),
@@ -2732,6 +2909,9 @@ class CachedKitchenItemsCompanion extends UpdateCompanion<CachedKitchenItem> {
     this.usageRank = const Value.absent(),
     this.changedAt = const Value.absent(),
     this.createdAt = const Value.absent(),
+    this.quantity = const Value.absent(),
+    this.brandId = const Value.absent(),
+    this.brandName = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   CachedKitchenItemsCompanion.insert({
@@ -2748,6 +2928,9 @@ class CachedKitchenItemsCompanion extends UpdateCompanion<CachedKitchenItem> {
     this.usageRank = const Value.absent(),
     required DateTime changedAt,
     required DateTime createdAt,
+    this.quantity = const Value.absent(),
+    this.brandId = const Value.absent(),
+    this.brandName = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        position = Value(position),
@@ -2771,6 +2954,9 @@ class CachedKitchenItemsCompanion extends UpdateCompanion<CachedKitchenItem> {
     Expression<int>? usageRank,
     Expression<DateTime>? changedAt,
     Expression<DateTime>? createdAt,
+    Expression<String>? quantity,
+    Expression<String>? brandId,
+    Expression<String>? brandName,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -2787,6 +2973,9 @@ class CachedKitchenItemsCompanion extends UpdateCompanion<CachedKitchenItem> {
       if (usageRank != null) 'usage_rank': usageRank,
       if (changedAt != null) 'changed_at': changedAt,
       if (createdAt != null) 'created_at': createdAt,
+      if (quantity != null) 'quantity': quantity,
+      if (brandId != null) 'brand_id': brandId,
+      if (brandName != null) 'brand_name': brandName,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -2805,6 +2994,9 @@ class CachedKitchenItemsCompanion extends UpdateCompanion<CachedKitchenItem> {
     Value<int?>? usageRank,
     Value<DateTime>? changedAt,
     Value<DateTime>? createdAt,
+    Value<String?>? quantity,
+    Value<String?>? brandId,
+    Value<String?>? brandName,
     Value<int>? rowid,
   }) {
     return CachedKitchenItemsCompanion(
@@ -2821,6 +3013,9 @@ class CachedKitchenItemsCompanion extends UpdateCompanion<CachedKitchenItem> {
       usageRank: usageRank ?? this.usageRank,
       changedAt: changedAt ?? this.changedAt,
       createdAt: createdAt ?? this.createdAt,
+      quantity: quantity ?? this.quantity,
+      brandId: brandId ?? this.brandId,
+      brandName: brandName ?? this.brandName,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -2867,6 +3062,15 @@ class CachedKitchenItemsCompanion extends UpdateCompanion<CachedKitchenItem> {
     if (createdAt.present) {
       map['created_at'] = Variable<DateTime>(createdAt.value);
     }
+    if (quantity.present) {
+      map['quantity'] = Variable<String>(quantity.value);
+    }
+    if (brandId.present) {
+      map['brand_id'] = Variable<String>(brandId.value);
+    }
+    if (brandName.present) {
+      map['brand_name'] = Variable<String>(brandName.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -2889,6 +3093,9 @@ class CachedKitchenItemsCompanion extends UpdateCompanion<CachedKitchenItem> {
           ..write('usageRank: $usageRank, ')
           ..write('changedAt: $changedAt, ')
           ..write('createdAt: $createdAt, ')
+          ..write('quantity: $quantity, ')
+          ..write('brandId: $brandId, ')
+          ..write('brandName: $brandName, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -3275,6 +3482,16 @@ class $CachedCatalogIngredientsTable extends CachedCatalogIngredients
       'CHECK ("brand_varies" IN (0, 1))',
     ),
   );
+  static const VerificationMeta _brandsMeta = const VerificationMeta('brands');
+  @override
+  late final GeneratedColumn<String> brands = GeneratedColumn<String>(
+    'brands',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('[]'),
+  );
   @override
   List<GeneratedColumn> get $columns => [
     ingredientId,
@@ -3284,6 +3501,7 @@ class $CachedCatalogIngredientsTable extends CachedCatalogIngredients
     localNames,
     category,
     brandVaries,
+    brands,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -3357,6 +3575,12 @@ class $CachedCatalogIngredientsTable extends CachedCatalogIngredients
     } else if (isInserting) {
       context.missing(_brandVariesMeta);
     }
+    if (data.containsKey('brands')) {
+      context.handle(
+        _brandsMeta,
+        brands.isAcceptableOrUnknown(data['brands']!, _brandsMeta),
+      );
+    }
     return context;
   }
 
@@ -3397,6 +3621,10 @@ class $CachedCatalogIngredientsTable extends CachedCatalogIngredients
         DriftSqlType.bool,
         data['${effectivePrefix}brand_varies'],
       )!,
+      brands: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}brands'],
+      )!,
     );
   }
 
@@ -3419,6 +3647,9 @@ class CachedCatalogIngredient extends DataClass
   /// Contract `KitchenCategory` wire value, or null.
   final String? category;
   final bool brandVaries;
+
+  /// JSON array of `{brandId, name}` (contract `CatalogBrand`).
+  final String brands;
   const CachedCatalogIngredient({
     required this.ingredientId,
     required this.position,
@@ -3427,6 +3658,7 @@ class CachedCatalogIngredient extends DataClass
     required this.localNames,
     this.category,
     required this.brandVaries,
+    required this.brands,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -3440,6 +3672,7 @@ class CachedCatalogIngredient extends DataClass
       map['category'] = Variable<String>(category);
     }
     map['brand_varies'] = Variable<bool>(brandVaries);
+    map['brands'] = Variable<String>(brands);
     return map;
   }
 
@@ -3454,6 +3687,7 @@ class CachedCatalogIngredient extends DataClass
           ? const Value.absent()
           : Value(category),
       brandVaries: Value(brandVaries),
+      brands: Value(brands),
     );
   }
 
@@ -3470,6 +3704,7 @@ class CachedCatalogIngredient extends DataClass
       localNames: serializer.fromJson<String>(json['localNames']),
       category: serializer.fromJson<String?>(json['category']),
       brandVaries: serializer.fromJson<bool>(json['brandVaries']),
+      brands: serializer.fromJson<String>(json['brands']),
     );
   }
   @override
@@ -3483,6 +3718,7 @@ class CachedCatalogIngredient extends DataClass
       'localNames': serializer.toJson<String>(localNames),
       'category': serializer.toJson<String?>(category),
       'brandVaries': serializer.toJson<bool>(brandVaries),
+      'brands': serializer.toJson<String>(brands),
     };
   }
 
@@ -3494,6 +3730,7 @@ class CachedCatalogIngredient extends DataClass
     String? localNames,
     Value<String?> category = const Value.absent(),
     bool? brandVaries,
+    String? brands,
   }) => CachedCatalogIngredient(
     ingredientId: ingredientId ?? this.ingredientId,
     position: position ?? this.position,
@@ -3502,6 +3739,7 @@ class CachedCatalogIngredient extends DataClass
     localNames: localNames ?? this.localNames,
     category: category.present ? category.value : this.category,
     brandVaries: brandVaries ?? this.brandVaries,
+    brands: brands ?? this.brands,
   );
   CachedCatalogIngredient copyWithCompanion(
     CachedCatalogIngredientsCompanion data,
@@ -3520,6 +3758,7 @@ class CachedCatalogIngredient extends DataClass
       brandVaries: data.brandVaries.present
           ? data.brandVaries.value
           : this.brandVaries,
+      brands: data.brands.present ? data.brands.value : this.brands,
     );
   }
 
@@ -3532,7 +3771,8 @@ class CachedCatalogIngredient extends DataClass
           ..write('nameEn: $nameEn, ')
           ..write('localNames: $localNames, ')
           ..write('category: $category, ')
-          ..write('brandVaries: $brandVaries')
+          ..write('brandVaries: $brandVaries, ')
+          ..write('brands: $brands')
           ..write(')'))
         .toString();
   }
@@ -3546,6 +3786,7 @@ class CachedCatalogIngredient extends DataClass
     localNames,
     category,
     brandVaries,
+    brands,
   );
   @override
   bool operator ==(Object other) =>
@@ -3557,7 +3798,8 @@ class CachedCatalogIngredient extends DataClass
           other.nameEn == this.nameEn &&
           other.localNames == this.localNames &&
           other.category == this.category &&
-          other.brandVaries == this.brandVaries);
+          other.brandVaries == this.brandVaries &&
+          other.brands == this.brands);
 }
 
 class CachedCatalogIngredientsCompanion
@@ -3569,6 +3811,7 @@ class CachedCatalogIngredientsCompanion
   final Value<String> localNames;
   final Value<String?> category;
   final Value<bool> brandVaries;
+  final Value<String> brands;
   final Value<int> rowid;
   const CachedCatalogIngredientsCompanion({
     this.ingredientId = const Value.absent(),
@@ -3578,6 +3821,7 @@ class CachedCatalogIngredientsCompanion
     this.localNames = const Value.absent(),
     this.category = const Value.absent(),
     this.brandVaries = const Value.absent(),
+    this.brands = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   CachedCatalogIngredientsCompanion.insert({
@@ -3588,6 +3832,7 @@ class CachedCatalogIngredientsCompanion
     required String localNames,
     this.category = const Value.absent(),
     required bool brandVaries,
+    this.brands = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : ingredientId = Value(ingredientId),
        position = Value(position),
@@ -3603,6 +3848,7 @@ class CachedCatalogIngredientsCompanion
     Expression<String>? localNames,
     Expression<String>? category,
     Expression<bool>? brandVaries,
+    Expression<String>? brands,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -3613,6 +3859,7 @@ class CachedCatalogIngredientsCompanion
       if (localNames != null) 'local_names': localNames,
       if (category != null) 'category': category,
       if (brandVaries != null) 'brand_varies': brandVaries,
+      if (brands != null) 'brands': brands,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -3625,6 +3872,7 @@ class CachedCatalogIngredientsCompanion
     Value<String>? localNames,
     Value<String?>? category,
     Value<bool>? brandVaries,
+    Value<String>? brands,
     Value<int>? rowid,
   }) {
     return CachedCatalogIngredientsCompanion(
@@ -3635,6 +3883,7 @@ class CachedCatalogIngredientsCompanion
       localNames: localNames ?? this.localNames,
       category: category ?? this.category,
       brandVaries: brandVaries ?? this.brandVaries,
+      brands: brands ?? this.brands,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -3663,6 +3912,9 @@ class CachedCatalogIngredientsCompanion
     if (brandVaries.present) {
       map['brand_varies'] = Variable<bool>(brandVaries.value);
     }
+    if (brands.present) {
+      map['brands'] = Variable<String>(brands.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -3679,7 +3931,1251 @@ class CachedCatalogIngredientsCompanion
           ..write('localNames: $localNames, ')
           ..write('category: $category, ')
           ..write('brandVaries: $brandVaries, ')
+          ..write('brands: $brands, ')
           ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $CachedIngredientSetsTable extends CachedIngredientSets
+    with TableInfo<$CachedIngredientSetsTable, CachedIngredientSet> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $CachedIngredientSetsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _positionMeta = const VerificationMeta(
+    'position',
+  );
+  @override
+  late final GeneratedColumn<int> position = GeneratedColumn<int>(
+    'position',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _nameMeta = const VerificationMeta('name');
+  @override
+  late final GeneratedColumn<String> name = GeneratedColumn<String>(
+    'name',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _itemIdsMeta = const VerificationMeta(
+    'itemIds',
+  );
+  @override
+  late final GeneratedColumn<String> itemIds = GeneratedColumn<String>(
+    'item_ids',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> updatedAt = GeneratedColumn<DateTime>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    position,
+    name,
+    itemIds,
+    updatedAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'cached_ingredient_sets';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<CachedIngredientSet> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('position')) {
+      context.handle(
+        _positionMeta,
+        position.isAcceptableOrUnknown(data['position']!, _positionMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_positionMeta);
+    }
+    if (data.containsKey('name')) {
+      context.handle(
+        _nameMeta,
+        name.isAcceptableOrUnknown(data['name']!, _nameMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_nameMeta);
+    }
+    if (data.containsKey('item_ids')) {
+      context.handle(
+        _itemIdsMeta,
+        itemIds.isAcceptableOrUnknown(data['item_ids']!, _itemIdsMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_itemIdsMeta);
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_updatedAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  CachedIngredientSet map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return CachedIngredientSet(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      position: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}position'],
+      )!,
+      name: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}name'],
+      )!,
+      itemIds: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}item_ids'],
+      )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}updated_at'],
+      )!,
+    );
+  }
+
+  @override
+  $CachedIngredientSetsTable createAlias(String alias) {
+    return $CachedIngredientSetsTable(attachedDatabase, alias);
+  }
+}
+
+class CachedIngredientSet extends DataClass
+    implements Insertable<CachedIngredientSet> {
+  final String id;
+  final int position;
+  final String name;
+
+  /// JSON array of server item IDs.
+  final String itemIds;
+  final DateTime updatedAt;
+  const CachedIngredientSet({
+    required this.id,
+    required this.position,
+    required this.name,
+    required this.itemIds,
+    required this.updatedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['position'] = Variable<int>(position);
+    map['name'] = Variable<String>(name);
+    map['item_ids'] = Variable<String>(itemIds);
+    map['updated_at'] = Variable<DateTime>(updatedAt);
+    return map;
+  }
+
+  CachedIngredientSetsCompanion toCompanion(bool nullToAbsent) {
+    return CachedIngredientSetsCompanion(
+      id: Value(id),
+      position: Value(position),
+      name: Value(name),
+      itemIds: Value(itemIds),
+      updatedAt: Value(updatedAt),
+    );
+  }
+
+  factory CachedIngredientSet.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return CachedIngredientSet(
+      id: serializer.fromJson<String>(json['id']),
+      position: serializer.fromJson<int>(json['position']),
+      name: serializer.fromJson<String>(json['name']),
+      itemIds: serializer.fromJson<String>(json['itemIds']),
+      updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'position': serializer.toJson<int>(position),
+      'name': serializer.toJson<String>(name),
+      'itemIds': serializer.toJson<String>(itemIds),
+      'updatedAt': serializer.toJson<DateTime>(updatedAt),
+    };
+  }
+
+  CachedIngredientSet copyWith({
+    String? id,
+    int? position,
+    String? name,
+    String? itemIds,
+    DateTime? updatedAt,
+  }) => CachedIngredientSet(
+    id: id ?? this.id,
+    position: position ?? this.position,
+    name: name ?? this.name,
+    itemIds: itemIds ?? this.itemIds,
+    updatedAt: updatedAt ?? this.updatedAt,
+  );
+  CachedIngredientSet copyWithCompanion(CachedIngredientSetsCompanion data) {
+    return CachedIngredientSet(
+      id: data.id.present ? data.id.value : this.id,
+      position: data.position.present ? data.position.value : this.position,
+      name: data.name.present ? data.name.value : this.name,
+      itemIds: data.itemIds.present ? data.itemIds.value : this.itemIds,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('CachedIngredientSet(')
+          ..write('id: $id, ')
+          ..write('position: $position, ')
+          ..write('name: $name, ')
+          ..write('itemIds: $itemIds, ')
+          ..write('updatedAt: $updatedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(id, position, name, itemIds, updatedAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is CachedIngredientSet &&
+          other.id == this.id &&
+          other.position == this.position &&
+          other.name == this.name &&
+          other.itemIds == this.itemIds &&
+          other.updatedAt == this.updatedAt);
+}
+
+class CachedIngredientSetsCompanion
+    extends UpdateCompanion<CachedIngredientSet> {
+  final Value<String> id;
+  final Value<int> position;
+  final Value<String> name;
+  final Value<String> itemIds;
+  final Value<DateTime> updatedAt;
+  final Value<int> rowid;
+  const CachedIngredientSetsCompanion({
+    this.id = const Value.absent(),
+    this.position = const Value.absent(),
+    this.name = const Value.absent(),
+    this.itemIds = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  CachedIngredientSetsCompanion.insert({
+    required String id,
+    required int position,
+    required String name,
+    required String itemIds,
+    required DateTime updatedAt,
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       position = Value(position),
+       name = Value(name),
+       itemIds = Value(itemIds),
+       updatedAt = Value(updatedAt);
+  static Insertable<CachedIngredientSet> custom({
+    Expression<String>? id,
+    Expression<int>? position,
+    Expression<String>? name,
+    Expression<String>? itemIds,
+    Expression<DateTime>? updatedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (position != null) 'position': position,
+      if (name != null) 'name': name,
+      if (itemIds != null) 'item_ids': itemIds,
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  CachedIngredientSetsCompanion copyWith({
+    Value<String>? id,
+    Value<int>? position,
+    Value<String>? name,
+    Value<String>? itemIds,
+    Value<DateTime>? updatedAt,
+    Value<int>? rowid,
+  }) {
+    return CachedIngredientSetsCompanion(
+      id: id ?? this.id,
+      position: position ?? this.position,
+      name: name ?? this.name,
+      itemIds: itemIds ?? this.itemIds,
+      updatedAt: updatedAt ?? this.updatedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (position.present) {
+      map['position'] = Variable<int>(position.value);
+    }
+    if (name.present) {
+      map['name'] = Variable<String>(name.value);
+    }
+    if (itemIds.present) {
+      map['item_ids'] = Variable<String>(itemIds.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<DateTime>(updatedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('CachedIngredientSetsCompanion(')
+          ..write('id: $id, ')
+          ..write('position: $position, ')
+          ..write('name: $name, ')
+          ..write('itemIds: $itemIds, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $CachedIngredientSetListsTable extends CachedIngredientSetLists
+    with TableInfo<$CachedIngredientSetListsTable, CachedIngredientSetList> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $CachedIngredientSetListsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<int> id = GeneratedColumn<int>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _maxSetsMeta = const VerificationMeta(
+    'maxSets',
+  );
+  @override
+  late final GeneratedColumn<int> maxSets = GeneratedColumn<int>(
+    'max_sets',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _cachedAtMeta = const VerificationMeta(
+    'cachedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> cachedAt = GeneratedColumn<DateTime>(
+    'cached_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [id, maxSets, cachedAt];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'cached_ingredient_set_lists';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<CachedIngredientSetList> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    }
+    if (data.containsKey('max_sets')) {
+      context.handle(
+        _maxSetsMeta,
+        maxSets.isAcceptableOrUnknown(data['max_sets']!, _maxSetsMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_maxSetsMeta);
+    }
+    if (data.containsKey('cached_at')) {
+      context.handle(
+        _cachedAtMeta,
+        cachedAt.isAcceptableOrUnknown(data['cached_at']!, _cachedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_cachedAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  CachedIngredientSetList map(
+    Map<String, dynamic> data, {
+    String? tablePrefix,
+  }) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return CachedIngredientSetList(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}id'],
+      )!,
+      maxSets: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}max_sets'],
+      )!,
+      cachedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}cached_at'],
+      )!,
+    );
+  }
+
+  @override
+  $CachedIngredientSetListsTable createAlias(String alias) {
+    return $CachedIngredientSetListsTable(attachedDatabase, alias);
+  }
+}
+
+class CachedIngredientSetList extends DataClass
+    implements Insertable<CachedIngredientSetList> {
+  final int id;
+  final int maxSets;
+  final DateTime cachedAt;
+  const CachedIngredientSetList({
+    required this.id,
+    required this.maxSets,
+    required this.cachedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<int>(id);
+    map['max_sets'] = Variable<int>(maxSets);
+    map['cached_at'] = Variable<DateTime>(cachedAt);
+    return map;
+  }
+
+  CachedIngredientSetListsCompanion toCompanion(bool nullToAbsent) {
+    return CachedIngredientSetListsCompanion(
+      id: Value(id),
+      maxSets: Value(maxSets),
+      cachedAt: Value(cachedAt),
+    );
+  }
+
+  factory CachedIngredientSetList.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return CachedIngredientSetList(
+      id: serializer.fromJson<int>(json['id']),
+      maxSets: serializer.fromJson<int>(json['maxSets']),
+      cachedAt: serializer.fromJson<DateTime>(json['cachedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<int>(id),
+      'maxSets': serializer.toJson<int>(maxSets),
+      'cachedAt': serializer.toJson<DateTime>(cachedAt),
+    };
+  }
+
+  CachedIngredientSetList copyWith({
+    int? id,
+    int? maxSets,
+    DateTime? cachedAt,
+  }) => CachedIngredientSetList(
+    id: id ?? this.id,
+    maxSets: maxSets ?? this.maxSets,
+    cachedAt: cachedAt ?? this.cachedAt,
+  );
+  CachedIngredientSetList copyWithCompanion(
+    CachedIngredientSetListsCompanion data,
+  ) {
+    return CachedIngredientSetList(
+      id: data.id.present ? data.id.value : this.id,
+      maxSets: data.maxSets.present ? data.maxSets.value : this.maxSets,
+      cachedAt: data.cachedAt.present ? data.cachedAt.value : this.cachedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('CachedIngredientSetList(')
+          ..write('id: $id, ')
+          ..write('maxSets: $maxSets, ')
+          ..write('cachedAt: $cachedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(id, maxSets, cachedAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is CachedIngredientSetList &&
+          other.id == this.id &&
+          other.maxSets == this.maxSets &&
+          other.cachedAt == this.cachedAt);
+}
+
+class CachedIngredientSetListsCompanion
+    extends UpdateCompanion<CachedIngredientSetList> {
+  final Value<int> id;
+  final Value<int> maxSets;
+  final Value<DateTime> cachedAt;
+  const CachedIngredientSetListsCompanion({
+    this.id = const Value.absent(),
+    this.maxSets = const Value.absent(),
+    this.cachedAt = const Value.absent(),
+  });
+  CachedIngredientSetListsCompanion.insert({
+    this.id = const Value.absent(),
+    required int maxSets,
+    required DateTime cachedAt,
+  }) : maxSets = Value(maxSets),
+       cachedAt = Value(cachedAt);
+  static Insertable<CachedIngredientSetList> custom({
+    Expression<int>? id,
+    Expression<int>? maxSets,
+    Expression<DateTime>? cachedAt,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (maxSets != null) 'max_sets': maxSets,
+      if (cachedAt != null) 'cached_at': cachedAt,
+    });
+  }
+
+  CachedIngredientSetListsCompanion copyWith({
+    Value<int>? id,
+    Value<int>? maxSets,
+    Value<DateTime>? cachedAt,
+  }) {
+    return CachedIngredientSetListsCompanion(
+      id: id ?? this.id,
+      maxSets: maxSets ?? this.maxSets,
+      cachedAt: cachedAt ?? this.cachedAt,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<int>(id.value);
+    }
+    if (maxSets.present) {
+      map['max_sets'] = Variable<int>(maxSets.value);
+    }
+    if (cachedAt.present) {
+      map['cached_at'] = Variable<DateTime>(cachedAt.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('CachedIngredientSetListsCompanion(')
+          ..write('id: $id, ')
+          ..write('maxSets: $maxSets, ')
+          ..write('cachedAt: $cachedAt')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $KitchenOutboxTable extends KitchenOutbox
+    with TableInfo<$KitchenOutboxTable, KitchenOutboxData> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $KitchenOutboxTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _seqMeta = const VerificationMeta('seq');
+  @override
+  late final GeneratedColumn<int> seq = GeneratedColumn<int>(
+    'seq',
+    aliasedName,
+    false,
+    hasAutoIncrement: true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'PRIMARY KEY AUTOINCREMENT',
+    ),
+  );
+  static const VerificationMeta _accountIdMeta = const VerificationMeta(
+    'accountId',
+  );
+  @override
+  late final GeneratedColumn<String> accountId = GeneratedColumn<String>(
+    'account_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _changeIdMeta = const VerificationMeta(
+    'changeId',
+  );
+  @override
+  late final GeneratedColumn<String> changeId = GeneratedColumn<String>(
+    'change_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+    defaultConstraints: GeneratedColumn.constraintIsAlways('UNIQUE'),
+  );
+  static const VerificationMeta _ingredientIdMeta = const VerificationMeta(
+    'ingredientId',
+  );
+  @override
+  late final GeneratedColumn<String> ingredientId = GeneratedColumn<String>(
+    'ingredient_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _customNameMeta = const VerificationMeta(
+    'customName',
+  );
+  @override
+  late final GeneratedColumn<String> customName = GeneratedColumn<String>(
+    'custom_name',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _operationMeta = const VerificationMeta(
+    'operation',
+  );
+  @override
+  late final GeneratedColumn<String> operation = GeneratedColumn<String>(
+    'operation',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _patchMeta = const VerificationMeta('patch');
+  @override
+  late final GeneratedColumn<String> patch = GeneratedColumn<String>(
+    'patch',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _timelineMeta = const VerificationMeta(
+    'timeline',
+  );
+  @override
+  late final GeneratedColumn<String> timeline = GeneratedColumn<String>(
+    'timeline',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _elapsedMsMeta = const VerificationMeta(
+    'elapsedMs',
+  );
+  @override
+  late final GeneratedColumn<int> elapsedMs = GeneratedColumn<int>(
+    'elapsed_ms',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _wallMsMeta = const VerificationMeta('wallMs');
+  @override
+  late final GeneratedColumn<int> wallMs = GeneratedColumn<int>(
+    'wall_ms',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    seq,
+    accountId,
+    changeId,
+    ingredientId,
+    customName,
+    operation,
+    patch,
+    timeline,
+    elapsedMs,
+    wallMs,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'kitchen_outbox';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<KitchenOutboxData> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('seq')) {
+      context.handle(
+        _seqMeta,
+        seq.isAcceptableOrUnknown(data['seq']!, _seqMeta),
+      );
+    }
+    if (data.containsKey('account_id')) {
+      context.handle(
+        _accountIdMeta,
+        accountId.isAcceptableOrUnknown(data['account_id']!, _accountIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_accountIdMeta);
+    }
+    if (data.containsKey('change_id')) {
+      context.handle(
+        _changeIdMeta,
+        changeId.isAcceptableOrUnknown(data['change_id']!, _changeIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_changeIdMeta);
+    }
+    if (data.containsKey('ingredient_id')) {
+      context.handle(
+        _ingredientIdMeta,
+        ingredientId.isAcceptableOrUnknown(
+          data['ingredient_id']!,
+          _ingredientIdMeta,
+        ),
+      );
+    }
+    if (data.containsKey('custom_name')) {
+      context.handle(
+        _customNameMeta,
+        customName.isAcceptableOrUnknown(data['custom_name']!, _customNameMeta),
+      );
+    }
+    if (data.containsKey('operation')) {
+      context.handle(
+        _operationMeta,
+        operation.isAcceptableOrUnknown(data['operation']!, _operationMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_operationMeta);
+    }
+    if (data.containsKey('patch')) {
+      context.handle(
+        _patchMeta,
+        patch.isAcceptableOrUnknown(data['patch']!, _patchMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_patchMeta);
+    }
+    if (data.containsKey('timeline')) {
+      context.handle(
+        _timelineMeta,
+        timeline.isAcceptableOrUnknown(data['timeline']!, _timelineMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_timelineMeta);
+    }
+    if (data.containsKey('elapsed_ms')) {
+      context.handle(
+        _elapsedMsMeta,
+        elapsedMs.isAcceptableOrUnknown(data['elapsed_ms']!, _elapsedMsMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_elapsedMsMeta);
+    }
+    if (data.containsKey('wall_ms')) {
+      context.handle(
+        _wallMsMeta,
+        wallMs.isAcceptableOrUnknown(data['wall_ms']!, _wallMsMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_wallMsMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {seq};
+  @override
+  KitchenOutboxData map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return KitchenOutboxData(
+      seq: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}seq'],
+      )!,
+      accountId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}account_id'],
+      )!,
+      changeId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}change_id'],
+      )!,
+      ingredientId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}ingredient_id'],
+      ),
+      customName: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}custom_name'],
+      ),
+      operation: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}operation'],
+      )!,
+      patch: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}patch'],
+      )!,
+      timeline: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}timeline'],
+      )!,
+      elapsedMs: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}elapsed_ms'],
+      )!,
+      wallMs: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}wall_ms'],
+      )!,
+    );
+  }
+
+  @override
+  $KitchenOutboxTable createAlias(String alias) {
+    return $KitchenOutboxTable(attachedDatabase, alias);
+  }
+}
+
+class KitchenOutboxData extends DataClass
+    implements Insertable<KitchenOutboxData> {
+  final int seq;
+
+  /// The account whose kitchen this change is for. Only that account's
+  /// session reads or sends it.
+  final String accountId;
+
+  /// Random UUID made with the change (contract `KitchenChange.changeId`).
+  final String changeId;
+
+  /// Exactly one of the two is set.
+  final String? ingredientId;
+  final String? customName;
+
+  /// `upsert` or `remove`.
+  final String operation;
+
+  /// The fields an upsert sets, as JSON (KitchenPatch).
+  final String patch;
+
+  /// When the edit was made: the monotonic timeline, the milliseconds on it
+  /// and the wall clock (DeviceClock).
+  final String timeline;
+  final int elapsedMs;
+  final int wallMs;
+  const KitchenOutboxData({
+    required this.seq,
+    required this.accountId,
+    required this.changeId,
+    this.ingredientId,
+    this.customName,
+    required this.operation,
+    required this.patch,
+    required this.timeline,
+    required this.elapsedMs,
+    required this.wallMs,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['seq'] = Variable<int>(seq);
+    map['account_id'] = Variable<String>(accountId);
+    map['change_id'] = Variable<String>(changeId);
+    if (!nullToAbsent || ingredientId != null) {
+      map['ingredient_id'] = Variable<String>(ingredientId);
+    }
+    if (!nullToAbsent || customName != null) {
+      map['custom_name'] = Variable<String>(customName);
+    }
+    map['operation'] = Variable<String>(operation);
+    map['patch'] = Variable<String>(patch);
+    map['timeline'] = Variable<String>(timeline);
+    map['elapsed_ms'] = Variable<int>(elapsedMs);
+    map['wall_ms'] = Variable<int>(wallMs);
+    return map;
+  }
+
+  KitchenOutboxCompanion toCompanion(bool nullToAbsent) {
+    return KitchenOutboxCompanion(
+      seq: Value(seq),
+      accountId: Value(accountId),
+      changeId: Value(changeId),
+      ingredientId: ingredientId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(ingredientId),
+      customName: customName == null && nullToAbsent
+          ? const Value.absent()
+          : Value(customName),
+      operation: Value(operation),
+      patch: Value(patch),
+      timeline: Value(timeline),
+      elapsedMs: Value(elapsedMs),
+      wallMs: Value(wallMs),
+    );
+  }
+
+  factory KitchenOutboxData.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return KitchenOutboxData(
+      seq: serializer.fromJson<int>(json['seq']),
+      accountId: serializer.fromJson<String>(json['accountId']),
+      changeId: serializer.fromJson<String>(json['changeId']),
+      ingredientId: serializer.fromJson<String?>(json['ingredientId']),
+      customName: serializer.fromJson<String?>(json['customName']),
+      operation: serializer.fromJson<String>(json['operation']),
+      patch: serializer.fromJson<String>(json['patch']),
+      timeline: serializer.fromJson<String>(json['timeline']),
+      elapsedMs: serializer.fromJson<int>(json['elapsedMs']),
+      wallMs: serializer.fromJson<int>(json['wallMs']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'seq': serializer.toJson<int>(seq),
+      'accountId': serializer.toJson<String>(accountId),
+      'changeId': serializer.toJson<String>(changeId),
+      'ingredientId': serializer.toJson<String?>(ingredientId),
+      'customName': serializer.toJson<String?>(customName),
+      'operation': serializer.toJson<String>(operation),
+      'patch': serializer.toJson<String>(patch),
+      'timeline': serializer.toJson<String>(timeline),
+      'elapsedMs': serializer.toJson<int>(elapsedMs),
+      'wallMs': serializer.toJson<int>(wallMs),
+    };
+  }
+
+  KitchenOutboxData copyWith({
+    int? seq,
+    String? accountId,
+    String? changeId,
+    Value<String?> ingredientId = const Value.absent(),
+    Value<String?> customName = const Value.absent(),
+    String? operation,
+    String? patch,
+    String? timeline,
+    int? elapsedMs,
+    int? wallMs,
+  }) => KitchenOutboxData(
+    seq: seq ?? this.seq,
+    accountId: accountId ?? this.accountId,
+    changeId: changeId ?? this.changeId,
+    ingredientId: ingredientId.present ? ingredientId.value : this.ingredientId,
+    customName: customName.present ? customName.value : this.customName,
+    operation: operation ?? this.operation,
+    patch: patch ?? this.patch,
+    timeline: timeline ?? this.timeline,
+    elapsedMs: elapsedMs ?? this.elapsedMs,
+    wallMs: wallMs ?? this.wallMs,
+  );
+  KitchenOutboxData copyWithCompanion(KitchenOutboxCompanion data) {
+    return KitchenOutboxData(
+      seq: data.seq.present ? data.seq.value : this.seq,
+      accountId: data.accountId.present ? data.accountId.value : this.accountId,
+      changeId: data.changeId.present ? data.changeId.value : this.changeId,
+      ingredientId: data.ingredientId.present
+          ? data.ingredientId.value
+          : this.ingredientId,
+      customName: data.customName.present
+          ? data.customName.value
+          : this.customName,
+      operation: data.operation.present ? data.operation.value : this.operation,
+      patch: data.patch.present ? data.patch.value : this.patch,
+      timeline: data.timeline.present ? data.timeline.value : this.timeline,
+      elapsedMs: data.elapsedMs.present ? data.elapsedMs.value : this.elapsedMs,
+      wallMs: data.wallMs.present ? data.wallMs.value : this.wallMs,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('KitchenOutboxData(')
+          ..write('seq: $seq, ')
+          ..write('accountId: $accountId, ')
+          ..write('changeId: $changeId, ')
+          ..write('ingredientId: $ingredientId, ')
+          ..write('customName: $customName, ')
+          ..write('operation: $operation, ')
+          ..write('patch: $patch, ')
+          ..write('timeline: $timeline, ')
+          ..write('elapsedMs: $elapsedMs, ')
+          ..write('wallMs: $wallMs')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    seq,
+    accountId,
+    changeId,
+    ingredientId,
+    customName,
+    operation,
+    patch,
+    timeline,
+    elapsedMs,
+    wallMs,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is KitchenOutboxData &&
+          other.seq == this.seq &&
+          other.accountId == this.accountId &&
+          other.changeId == this.changeId &&
+          other.ingredientId == this.ingredientId &&
+          other.customName == this.customName &&
+          other.operation == this.operation &&
+          other.patch == this.patch &&
+          other.timeline == this.timeline &&
+          other.elapsedMs == this.elapsedMs &&
+          other.wallMs == this.wallMs);
+}
+
+class KitchenOutboxCompanion extends UpdateCompanion<KitchenOutboxData> {
+  final Value<int> seq;
+  final Value<String> accountId;
+  final Value<String> changeId;
+  final Value<String?> ingredientId;
+  final Value<String?> customName;
+  final Value<String> operation;
+  final Value<String> patch;
+  final Value<String> timeline;
+  final Value<int> elapsedMs;
+  final Value<int> wallMs;
+  const KitchenOutboxCompanion({
+    this.seq = const Value.absent(),
+    this.accountId = const Value.absent(),
+    this.changeId = const Value.absent(),
+    this.ingredientId = const Value.absent(),
+    this.customName = const Value.absent(),
+    this.operation = const Value.absent(),
+    this.patch = const Value.absent(),
+    this.timeline = const Value.absent(),
+    this.elapsedMs = const Value.absent(),
+    this.wallMs = const Value.absent(),
+  });
+  KitchenOutboxCompanion.insert({
+    this.seq = const Value.absent(),
+    required String accountId,
+    required String changeId,
+    this.ingredientId = const Value.absent(),
+    this.customName = const Value.absent(),
+    required String operation,
+    required String patch,
+    required String timeline,
+    required int elapsedMs,
+    required int wallMs,
+  }) : accountId = Value(accountId),
+       changeId = Value(changeId),
+       operation = Value(operation),
+       patch = Value(patch),
+       timeline = Value(timeline),
+       elapsedMs = Value(elapsedMs),
+       wallMs = Value(wallMs);
+  static Insertable<KitchenOutboxData> custom({
+    Expression<int>? seq,
+    Expression<String>? accountId,
+    Expression<String>? changeId,
+    Expression<String>? ingredientId,
+    Expression<String>? customName,
+    Expression<String>? operation,
+    Expression<String>? patch,
+    Expression<String>? timeline,
+    Expression<int>? elapsedMs,
+    Expression<int>? wallMs,
+  }) {
+    return RawValuesInsertable({
+      if (seq != null) 'seq': seq,
+      if (accountId != null) 'account_id': accountId,
+      if (changeId != null) 'change_id': changeId,
+      if (ingredientId != null) 'ingredient_id': ingredientId,
+      if (customName != null) 'custom_name': customName,
+      if (operation != null) 'operation': operation,
+      if (patch != null) 'patch': patch,
+      if (timeline != null) 'timeline': timeline,
+      if (elapsedMs != null) 'elapsed_ms': elapsedMs,
+      if (wallMs != null) 'wall_ms': wallMs,
+    });
+  }
+
+  KitchenOutboxCompanion copyWith({
+    Value<int>? seq,
+    Value<String>? accountId,
+    Value<String>? changeId,
+    Value<String?>? ingredientId,
+    Value<String?>? customName,
+    Value<String>? operation,
+    Value<String>? patch,
+    Value<String>? timeline,
+    Value<int>? elapsedMs,
+    Value<int>? wallMs,
+  }) {
+    return KitchenOutboxCompanion(
+      seq: seq ?? this.seq,
+      accountId: accountId ?? this.accountId,
+      changeId: changeId ?? this.changeId,
+      ingredientId: ingredientId ?? this.ingredientId,
+      customName: customName ?? this.customName,
+      operation: operation ?? this.operation,
+      patch: patch ?? this.patch,
+      timeline: timeline ?? this.timeline,
+      elapsedMs: elapsedMs ?? this.elapsedMs,
+      wallMs: wallMs ?? this.wallMs,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (seq.present) {
+      map['seq'] = Variable<int>(seq.value);
+    }
+    if (accountId.present) {
+      map['account_id'] = Variable<String>(accountId.value);
+    }
+    if (changeId.present) {
+      map['change_id'] = Variable<String>(changeId.value);
+    }
+    if (ingredientId.present) {
+      map['ingredient_id'] = Variable<String>(ingredientId.value);
+    }
+    if (customName.present) {
+      map['custom_name'] = Variable<String>(customName.value);
+    }
+    if (operation.present) {
+      map['operation'] = Variable<String>(operation.value);
+    }
+    if (patch.present) {
+      map['patch'] = Variable<String>(patch.value);
+    }
+    if (timeline.present) {
+      map['timeline'] = Variable<String>(timeline.value);
+    }
+    if (elapsedMs.present) {
+      map['elapsed_ms'] = Variable<int>(elapsedMs.value);
+    }
+    if (wallMs.present) {
+      map['wall_ms'] = Variable<int>(wallMs.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('KitchenOutboxCompanion(')
+          ..write('seq: $seq, ')
+          ..write('accountId: $accountId, ')
+          ..write('changeId: $changeId, ')
+          ..write('ingredientId: $ingredientId, ')
+          ..write('customName: $customName, ')
+          ..write('operation: $operation, ')
+          ..write('patch: $patch, ')
+          ..write('timeline: $timeline, ')
+          ..write('elapsedMs: $elapsedMs, ')
+          ..write('wallMs: $wallMs')
           ..write(')'))
         .toString();
   }
@@ -3702,6 +5198,11 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $CachedCatalogsTable cachedCatalogs = $CachedCatalogsTable(this);
   late final $CachedCatalogIngredientsTable cachedCatalogIngredients =
       $CachedCatalogIngredientsTable(this);
+  late final $CachedIngredientSetsTable cachedIngredientSets =
+      $CachedIngredientSetsTable(this);
+  late final $CachedIngredientSetListsTable cachedIngredientSetLists =
+      $CachedIngredientSetListsTable(this);
+  late final $KitchenOutboxTable kitchenOutbox = $KitchenOutboxTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -3715,6 +5216,9 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     cachedKitchenItems,
     cachedCatalogs,
     cachedCatalogIngredients,
+    cachedIngredientSets,
+    cachedIngredientSetLists,
+    kitchenOutbox,
   ];
   @override
   DriftDatabaseOptions get options =>
@@ -4685,6 +6189,7 @@ typedef $$CachedKitchensTableCreateCompanionBuilder =
       required int maxItems,
       Value<String?> referenceVersion,
       required DateTime cachedAt,
+      Value<String?> syncCursor,
     });
 typedef $$CachedKitchensTableUpdateCompanionBuilder =
     CachedKitchensCompanion Function({
@@ -4692,6 +6197,7 @@ typedef $$CachedKitchensTableUpdateCompanionBuilder =
       Value<int> maxItems,
       Value<String?> referenceVersion,
       Value<DateTime> cachedAt,
+      Value<String?> syncCursor,
     });
 
 class $$CachedKitchensTableFilterComposer
@@ -4720,6 +6226,11 @@ class $$CachedKitchensTableFilterComposer
 
   ColumnFilters<DateTime> get cachedAt => $composableBuilder(
     column: $table.cachedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get syncCursor => $composableBuilder(
+    column: $table.syncCursor,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -4752,6 +6263,11 @@ class $$CachedKitchensTableOrderingComposer
     column: $table.cachedAt,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<String> get syncCursor => $composableBuilder(
+    column: $table.syncCursor,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$CachedKitchensTableAnnotationComposer
@@ -4776,6 +6292,11 @@ class $$CachedKitchensTableAnnotationComposer
 
   GeneratedColumn<DateTime> get cachedAt =>
       $composableBuilder(column: $table.cachedAt, builder: (column) => column);
+
+  GeneratedColumn<String> get syncCursor => $composableBuilder(
+    column: $table.syncCursor,
+    builder: (column) => column,
+  );
 }
 
 class $$CachedKitchensTableTableManager
@@ -4815,11 +6336,13 @@ class $$CachedKitchensTableTableManager
                 Value<int> maxItems = const Value.absent(),
                 Value<String?> referenceVersion = const Value.absent(),
                 Value<DateTime> cachedAt = const Value.absent(),
+                Value<String?> syncCursor = const Value.absent(),
               }) => CachedKitchensCompanion(
                 id: id,
                 maxItems: maxItems,
                 referenceVersion: referenceVersion,
                 cachedAt: cachedAt,
+                syncCursor: syncCursor,
               ),
           createCompanionCallback:
               ({
@@ -4827,11 +6350,13 @@ class $$CachedKitchensTableTableManager
                 required int maxItems,
                 Value<String?> referenceVersion = const Value.absent(),
                 required DateTime cachedAt,
+                Value<String?> syncCursor = const Value.absent(),
               }) => CachedKitchensCompanion.insert(
                 id: id,
                 maxItems: maxItems,
                 referenceVersion: referenceVersion,
                 cachedAt: cachedAt,
+                syncCursor: syncCursor,
               ),
           withReferenceMapper: (p0) => p0
               .map(
@@ -4882,6 +6407,9 @@ typedef $$CachedKitchenItemsTableCreateCompanionBuilder =
       Value<int?> usageRank,
       required DateTime changedAt,
       required DateTime createdAt,
+      Value<String?> quantity,
+      Value<String?> brandId,
+      Value<String?> brandName,
       Value<int> rowid,
     });
 typedef $$CachedKitchenItemsTableUpdateCompanionBuilder =
@@ -4899,6 +6427,9 @@ typedef $$CachedKitchenItemsTableUpdateCompanionBuilder =
       Value<int?> usageRank,
       Value<DateTime> changedAt,
       Value<DateTime> createdAt,
+      Value<String?> quantity,
+      Value<String?> brandId,
+      Value<String?> brandName,
       Value<int> rowid,
     });
 
@@ -4973,6 +6504,21 @@ class $$CachedKitchenItemsTableFilterComposer
 
   ColumnFilters<DateTime> get createdAt => $composableBuilder(
     column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get quantity => $composableBuilder(
+    column: $table.quantity,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get brandId => $composableBuilder(
+    column: $table.brandId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get brandName => $composableBuilder(
+    column: $table.brandName,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -5050,6 +6596,21 @@ class $$CachedKitchenItemsTableOrderingComposer
     column: $table.createdAt,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<String> get quantity => $composableBuilder(
+    column: $table.quantity,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get brandId => $composableBuilder(
+    column: $table.brandId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get brandName => $composableBuilder(
+    column: $table.brandName,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$CachedKitchenItemsTableAnnotationComposer
@@ -5109,6 +6670,15 @@ class $$CachedKitchenItemsTableAnnotationComposer
 
   GeneratedColumn<DateTime> get createdAt =>
       $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<String> get quantity =>
+      $composableBuilder(column: $table.quantity, builder: (column) => column);
+
+  GeneratedColumn<String> get brandId =>
+      $composableBuilder(column: $table.brandId, builder: (column) => column);
+
+  GeneratedColumn<String> get brandName =>
+      $composableBuilder(column: $table.brandName, builder: (column) => column);
 }
 
 class $$CachedKitchenItemsTableTableManager
@@ -5164,6 +6734,9 @@ class $$CachedKitchenItemsTableTableManager
                 Value<int?> usageRank = const Value.absent(),
                 Value<DateTime> changedAt = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
+                Value<String?> quantity = const Value.absent(),
+                Value<String?> brandId = const Value.absent(),
+                Value<String?> brandName = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => CachedKitchenItemsCompanion(
                 id: id,
@@ -5179,6 +6752,9 @@ class $$CachedKitchenItemsTableTableManager
                 usageRank: usageRank,
                 changedAt: changedAt,
                 createdAt: createdAt,
+                quantity: quantity,
+                brandId: brandId,
+                brandName: brandName,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -5196,6 +6772,9 @@ class $$CachedKitchenItemsTableTableManager
                 Value<int?> usageRank = const Value.absent(),
                 required DateTime changedAt,
                 required DateTime createdAt,
+                Value<String?> quantity = const Value.absent(),
+                Value<String?> brandId = const Value.absent(),
+                Value<String?> brandName = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => CachedKitchenItemsCompanion.insert(
                 id: id,
@@ -5211,6 +6790,9 @@ class $$CachedKitchenItemsTableTableManager
                 usageRank: usageRank,
                 changedAt: changedAt,
                 createdAt: createdAt,
+                quantity: quantity,
+                brandId: brandId,
+                brandName: brandName,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
@@ -5450,6 +7032,7 @@ typedef $$CachedCatalogIngredientsTableCreateCompanionBuilder =
       required String localNames,
       Value<String?> category,
       required bool brandVaries,
+      Value<String> brands,
       Value<int> rowid,
     });
 typedef $$CachedCatalogIngredientsTableUpdateCompanionBuilder =
@@ -5461,6 +7044,7 @@ typedef $$CachedCatalogIngredientsTableUpdateCompanionBuilder =
       Value<String> localNames,
       Value<String?> category,
       Value<bool> brandVaries,
+      Value<String> brands,
       Value<int> rowid,
     });
 
@@ -5505,6 +7089,11 @@ class $$CachedCatalogIngredientsTableFilterComposer
 
   ColumnFilters<bool> get brandVaries => $composableBuilder(
     column: $table.brandVaries,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get brands => $composableBuilder(
+    column: $table.brands,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -5552,6 +7141,11 @@ class $$CachedCatalogIngredientsTableOrderingComposer
     column: $table.brandVaries,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<String> get brands => $composableBuilder(
+    column: $table.brands,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$CachedCatalogIngredientsTableAnnotationComposer
@@ -5589,6 +7183,9 @@ class $$CachedCatalogIngredientsTableAnnotationComposer
     column: $table.brandVaries,
     builder: (column) => column,
   );
+
+  GeneratedColumn<String> get brands =>
+      $composableBuilder(column: $table.brands, builder: (column) => column);
 }
 
 class $$CachedCatalogIngredientsTableTableManager
@@ -5644,6 +7241,7 @@ class $$CachedCatalogIngredientsTableTableManager
                 Value<String> localNames = const Value.absent(),
                 Value<String?> category = const Value.absent(),
                 Value<bool> brandVaries = const Value.absent(),
+                Value<String> brands = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => CachedCatalogIngredientsCompanion(
                 ingredientId: ingredientId,
@@ -5653,6 +7251,7 @@ class $$CachedCatalogIngredientsTableTableManager
                 localNames: localNames,
                 category: category,
                 brandVaries: brandVaries,
+                brands: brands,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -5664,6 +7263,7 @@ class $$CachedCatalogIngredientsTableTableManager
                 required String localNames,
                 Value<String?> category = const Value.absent(),
                 required bool brandVaries,
+                Value<String> brands = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => CachedCatalogIngredientsCompanion.insert(
                 ingredientId: ingredientId,
@@ -5673,6 +7273,7 @@ class $$CachedCatalogIngredientsTableTableManager
                 localNames: localNames,
                 category: category,
                 brandVaries: brandVaries,
+                brands: brands,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
@@ -5716,6 +7317,726 @@ typedef $$CachedCatalogIngredientsTableProcessedTableManager =
       CachedCatalogIngredient,
       PrefetchHooks Function()
     >;
+typedef $$CachedIngredientSetsTableCreateCompanionBuilder =
+    CachedIngredientSetsCompanion Function({
+      required String id,
+      required int position,
+      required String name,
+      required String itemIds,
+      required DateTime updatedAt,
+      Value<int> rowid,
+    });
+typedef $$CachedIngredientSetsTableUpdateCompanionBuilder =
+    CachedIngredientSetsCompanion Function({
+      Value<String> id,
+      Value<int> position,
+      Value<String> name,
+      Value<String> itemIds,
+      Value<DateTime> updatedAt,
+      Value<int> rowid,
+    });
+
+class $$CachedIngredientSetsTableFilterComposer
+    extends Composer<_$AppDatabase, $CachedIngredientSetsTable> {
+  $$CachedIngredientSetsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get position => $composableBuilder(
+    column: $table.position,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get itemIds => $composableBuilder(
+    column: $table.itemIds,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$CachedIngredientSetsTableOrderingComposer
+    extends Composer<_$AppDatabase, $CachedIngredientSetsTable> {
+  $$CachedIngredientSetsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get position => $composableBuilder(
+    column: $table.position,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get itemIds => $composableBuilder(
+    column: $table.itemIds,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$CachedIngredientSetsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $CachedIngredientSetsTable> {
+  $$CachedIngredientSetsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<int> get position =>
+      $composableBuilder(column: $table.position, builder: (column) => column);
+
+  GeneratedColumn<String> get name =>
+      $composableBuilder(column: $table.name, builder: (column) => column);
+
+  GeneratedColumn<String> get itemIds =>
+      $composableBuilder(column: $table.itemIds, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+}
+
+class $$CachedIngredientSetsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $CachedIngredientSetsTable,
+          CachedIngredientSet,
+          $$CachedIngredientSetsTableFilterComposer,
+          $$CachedIngredientSetsTableOrderingComposer,
+          $$CachedIngredientSetsTableAnnotationComposer,
+          $$CachedIngredientSetsTableCreateCompanionBuilder,
+          $$CachedIngredientSetsTableUpdateCompanionBuilder,
+          (
+            CachedIngredientSet,
+            BaseReferences<
+              _$AppDatabase,
+              $CachedIngredientSetsTable,
+              CachedIngredientSet
+            >,
+          ),
+          CachedIngredientSet,
+          PrefetchHooks Function()
+        > {
+  $$CachedIngredientSetsTableTableManager(
+    _$AppDatabase db,
+    $CachedIngredientSetsTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$CachedIngredientSetsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$CachedIngredientSetsTableOrderingComposer(
+                $db: db,
+                $table: table,
+              ),
+          createComputedFieldComposer: () =>
+              $$CachedIngredientSetsTableAnnotationComposer(
+                $db: db,
+                $table: table,
+              ),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<int> position = const Value.absent(),
+                Value<String> name = const Value.absent(),
+                Value<String> itemIds = const Value.absent(),
+                Value<DateTime> updatedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => CachedIngredientSetsCompanion(
+                id: id,
+                position: position,
+                name: name,
+                itemIds: itemIds,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required int position,
+                required String name,
+                required String itemIds,
+                required DateTime updatedAt,
+                Value<int> rowid = const Value.absent(),
+              }) => CachedIngredientSetsCompanion.insert(
+                id: id,
+                position: position,
+                name: name,
+                itemIds: itemIds,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$CachedIngredientSetsTable, CachedIngredientSet>(
+                    table,
+                  ),
+                  BaseReferences<
+                    _$AppDatabase,
+                    $CachedIngredientSetsTable,
+                    CachedIngredientSet
+                  >(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$CachedIngredientSetsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $CachedIngredientSetsTable,
+      CachedIngredientSet,
+      $$CachedIngredientSetsTableFilterComposer,
+      $$CachedIngredientSetsTableOrderingComposer,
+      $$CachedIngredientSetsTableAnnotationComposer,
+      $$CachedIngredientSetsTableCreateCompanionBuilder,
+      $$CachedIngredientSetsTableUpdateCompanionBuilder,
+      (
+        CachedIngredientSet,
+        BaseReferences<
+          _$AppDatabase,
+          $CachedIngredientSetsTable,
+          CachedIngredientSet
+        >,
+      ),
+      CachedIngredientSet,
+      PrefetchHooks Function()
+    >;
+typedef $$CachedIngredientSetListsTableCreateCompanionBuilder =
+    CachedIngredientSetListsCompanion Function({
+      Value<int> id,
+      required int maxSets,
+      required DateTime cachedAt,
+    });
+typedef $$CachedIngredientSetListsTableUpdateCompanionBuilder =
+    CachedIngredientSetListsCompanion Function({
+      Value<int> id,
+      Value<int> maxSets,
+      Value<DateTime> cachedAt,
+    });
+
+class $$CachedIngredientSetListsTableFilterComposer
+    extends Composer<_$AppDatabase, $CachedIngredientSetListsTable> {
+  $$CachedIngredientSetListsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<int> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get maxSets => $composableBuilder(
+    column: $table.maxSets,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get cachedAt => $composableBuilder(
+    column: $table.cachedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$CachedIngredientSetListsTableOrderingComposer
+    extends Composer<_$AppDatabase, $CachedIngredientSetListsTable> {
+  $$CachedIngredientSetListsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<int> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get maxSets => $composableBuilder(
+    column: $table.maxSets,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get cachedAt => $composableBuilder(
+    column: $table.cachedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$CachedIngredientSetListsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $CachedIngredientSetListsTable> {
+  $$CachedIngredientSetListsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<int> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<int> get maxSets =>
+      $composableBuilder(column: $table.maxSets, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get cachedAt =>
+      $composableBuilder(column: $table.cachedAt, builder: (column) => column);
+}
+
+class $$CachedIngredientSetListsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $CachedIngredientSetListsTable,
+          CachedIngredientSetList,
+          $$CachedIngredientSetListsTableFilterComposer,
+          $$CachedIngredientSetListsTableOrderingComposer,
+          $$CachedIngredientSetListsTableAnnotationComposer,
+          $$CachedIngredientSetListsTableCreateCompanionBuilder,
+          $$CachedIngredientSetListsTableUpdateCompanionBuilder,
+          (
+            CachedIngredientSetList,
+            BaseReferences<
+              _$AppDatabase,
+              $CachedIngredientSetListsTable,
+              CachedIngredientSetList
+            >,
+          ),
+          CachedIngredientSetList,
+          PrefetchHooks Function()
+        > {
+  $$CachedIngredientSetListsTableTableManager(
+    _$AppDatabase db,
+    $CachedIngredientSetListsTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$CachedIngredientSetListsTableFilterComposer(
+                $db: db,
+                $table: table,
+              ),
+          createOrderingComposer: () =>
+              $$CachedIngredientSetListsTableOrderingComposer(
+                $db: db,
+                $table: table,
+              ),
+          createComputedFieldComposer: () =>
+              $$CachedIngredientSetListsTableAnnotationComposer(
+                $db: db,
+                $table: table,
+              ),
+          updateCompanionCallback:
+              ({
+                Value<int> id = const Value.absent(),
+                Value<int> maxSets = const Value.absent(),
+                Value<DateTime> cachedAt = const Value.absent(),
+              }) => CachedIngredientSetListsCompanion(
+                id: id,
+                maxSets: maxSets,
+                cachedAt: cachedAt,
+              ),
+          createCompanionCallback:
+              ({
+                Value<int> id = const Value.absent(),
+                required int maxSets,
+                required DateTime cachedAt,
+              }) => CachedIngredientSetListsCompanion.insert(
+                id: id,
+                maxSets: maxSets,
+                cachedAt: cachedAt,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<
+                    $CachedIngredientSetListsTable,
+                    CachedIngredientSetList
+                  >(table),
+                  BaseReferences<
+                    _$AppDatabase,
+                    $CachedIngredientSetListsTable,
+                    CachedIngredientSetList
+                  >(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$CachedIngredientSetListsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $CachedIngredientSetListsTable,
+      CachedIngredientSetList,
+      $$CachedIngredientSetListsTableFilterComposer,
+      $$CachedIngredientSetListsTableOrderingComposer,
+      $$CachedIngredientSetListsTableAnnotationComposer,
+      $$CachedIngredientSetListsTableCreateCompanionBuilder,
+      $$CachedIngredientSetListsTableUpdateCompanionBuilder,
+      (
+        CachedIngredientSetList,
+        BaseReferences<
+          _$AppDatabase,
+          $CachedIngredientSetListsTable,
+          CachedIngredientSetList
+        >,
+      ),
+      CachedIngredientSetList,
+      PrefetchHooks Function()
+    >;
+typedef $$KitchenOutboxTableCreateCompanionBuilder =
+    KitchenOutboxCompanion Function({
+      Value<int> seq,
+      required String accountId,
+      required String changeId,
+      Value<String?> ingredientId,
+      Value<String?> customName,
+      required String operation,
+      required String patch,
+      required String timeline,
+      required int elapsedMs,
+      required int wallMs,
+    });
+typedef $$KitchenOutboxTableUpdateCompanionBuilder =
+    KitchenOutboxCompanion Function({
+      Value<int> seq,
+      Value<String> accountId,
+      Value<String> changeId,
+      Value<String?> ingredientId,
+      Value<String?> customName,
+      Value<String> operation,
+      Value<String> patch,
+      Value<String> timeline,
+      Value<int> elapsedMs,
+      Value<int> wallMs,
+    });
+
+class $$KitchenOutboxTableFilterComposer
+    extends Composer<_$AppDatabase, $KitchenOutboxTable> {
+  $$KitchenOutboxTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<int> get seq => $composableBuilder(
+    column: $table.seq,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get accountId => $composableBuilder(
+    column: $table.accountId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get changeId => $composableBuilder(
+    column: $table.changeId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get ingredientId => $composableBuilder(
+    column: $table.ingredientId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get customName => $composableBuilder(
+    column: $table.customName,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get operation => $composableBuilder(
+    column: $table.operation,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get patch => $composableBuilder(
+    column: $table.patch,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get timeline => $composableBuilder(
+    column: $table.timeline,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get elapsedMs => $composableBuilder(
+    column: $table.elapsedMs,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get wallMs => $composableBuilder(
+    column: $table.wallMs,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$KitchenOutboxTableOrderingComposer
+    extends Composer<_$AppDatabase, $KitchenOutboxTable> {
+  $$KitchenOutboxTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<int> get seq => $composableBuilder(
+    column: $table.seq,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get accountId => $composableBuilder(
+    column: $table.accountId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get changeId => $composableBuilder(
+    column: $table.changeId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get ingredientId => $composableBuilder(
+    column: $table.ingredientId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get customName => $composableBuilder(
+    column: $table.customName,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get operation => $composableBuilder(
+    column: $table.operation,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get patch => $composableBuilder(
+    column: $table.patch,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get timeline => $composableBuilder(
+    column: $table.timeline,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get elapsedMs => $composableBuilder(
+    column: $table.elapsedMs,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get wallMs => $composableBuilder(
+    column: $table.wallMs,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$KitchenOutboxTableAnnotationComposer
+    extends Composer<_$AppDatabase, $KitchenOutboxTable> {
+  $$KitchenOutboxTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<int> get seq =>
+      $composableBuilder(column: $table.seq, builder: (column) => column);
+
+  GeneratedColumn<String> get accountId =>
+      $composableBuilder(column: $table.accountId, builder: (column) => column);
+
+  GeneratedColumn<String> get changeId =>
+      $composableBuilder(column: $table.changeId, builder: (column) => column);
+
+  GeneratedColumn<String> get ingredientId => $composableBuilder(
+    column: $table.ingredientId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get customName => $composableBuilder(
+    column: $table.customName,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get operation =>
+      $composableBuilder(column: $table.operation, builder: (column) => column);
+
+  GeneratedColumn<String> get patch =>
+      $composableBuilder(column: $table.patch, builder: (column) => column);
+
+  GeneratedColumn<String> get timeline =>
+      $composableBuilder(column: $table.timeline, builder: (column) => column);
+
+  GeneratedColumn<int> get elapsedMs =>
+      $composableBuilder(column: $table.elapsedMs, builder: (column) => column);
+
+  GeneratedColumn<int> get wallMs =>
+      $composableBuilder(column: $table.wallMs, builder: (column) => column);
+}
+
+class $$KitchenOutboxTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $KitchenOutboxTable,
+          KitchenOutboxData,
+          $$KitchenOutboxTableFilterComposer,
+          $$KitchenOutboxTableOrderingComposer,
+          $$KitchenOutboxTableAnnotationComposer,
+          $$KitchenOutboxTableCreateCompanionBuilder,
+          $$KitchenOutboxTableUpdateCompanionBuilder,
+          (
+            KitchenOutboxData,
+            BaseReferences<
+              _$AppDatabase,
+              $KitchenOutboxTable,
+              KitchenOutboxData
+            >,
+          ),
+          KitchenOutboxData,
+          PrefetchHooks Function()
+        > {
+  $$KitchenOutboxTableTableManager(_$AppDatabase db, $KitchenOutboxTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$KitchenOutboxTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$KitchenOutboxTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$KitchenOutboxTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<int> seq = const Value.absent(),
+                Value<String> accountId = const Value.absent(),
+                Value<String> changeId = const Value.absent(),
+                Value<String?> ingredientId = const Value.absent(),
+                Value<String?> customName = const Value.absent(),
+                Value<String> operation = const Value.absent(),
+                Value<String> patch = const Value.absent(),
+                Value<String> timeline = const Value.absent(),
+                Value<int> elapsedMs = const Value.absent(),
+                Value<int> wallMs = const Value.absent(),
+              }) => KitchenOutboxCompanion(
+                seq: seq,
+                accountId: accountId,
+                changeId: changeId,
+                ingredientId: ingredientId,
+                customName: customName,
+                operation: operation,
+                patch: patch,
+                timeline: timeline,
+                elapsedMs: elapsedMs,
+                wallMs: wallMs,
+              ),
+          createCompanionCallback:
+              ({
+                Value<int> seq = const Value.absent(),
+                required String accountId,
+                required String changeId,
+                Value<String?> ingredientId = const Value.absent(),
+                Value<String?> customName = const Value.absent(),
+                required String operation,
+                required String patch,
+                required String timeline,
+                required int elapsedMs,
+                required int wallMs,
+              }) => KitchenOutboxCompanion.insert(
+                seq: seq,
+                accountId: accountId,
+                changeId: changeId,
+                ingredientId: ingredientId,
+                customName: customName,
+                operation: operation,
+                patch: patch,
+                timeline: timeline,
+                elapsedMs: elapsedMs,
+                wallMs: wallMs,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$KitchenOutboxTable, KitchenOutboxData>(table),
+                  BaseReferences<
+                    _$AppDatabase,
+                    $KitchenOutboxTable,
+                    KitchenOutboxData
+                  >(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$KitchenOutboxTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $KitchenOutboxTable,
+      KitchenOutboxData,
+      $$KitchenOutboxTableFilterComposer,
+      $$KitchenOutboxTableOrderingComposer,
+      $$KitchenOutboxTableAnnotationComposer,
+      $$KitchenOutboxTableCreateCompanionBuilder,
+      $$KitchenOutboxTableUpdateCompanionBuilder,
+      (
+        KitchenOutboxData,
+        BaseReferences<_$AppDatabase, $KitchenOutboxTable, KitchenOutboxData>,
+      ),
+      KitchenOutboxData,
+      PrefetchHooks Function()
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -5739,4 +8060,13 @@ class $AppDatabaseManager {
         _db,
         _db.cachedCatalogIngredients,
       );
+  $$CachedIngredientSetsTableTableManager get cachedIngredientSets =>
+      $$CachedIngredientSetsTableTableManager(_db, _db.cachedIngredientSets);
+  $$CachedIngredientSetListsTableTableManager get cachedIngredientSetLists =>
+      $$CachedIngredientSetListsTableTableManager(
+        _db,
+        _db.cachedIngredientSetLists,
+      );
+  $$KitchenOutboxTableTableManager get kitchenOutbox =>
+      $$KitchenOutboxTableTableManager(_db, _db.kitchenOutbox);
 }

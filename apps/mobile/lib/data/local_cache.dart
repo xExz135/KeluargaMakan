@@ -22,6 +22,12 @@
 // epoch, nothing is written (security review T-033, structural note): a
 // late answer cannot put an account's data back between the wipe and the
 // removal of the tokens.
+//
+// The kitchen outbox (KIT-16, T-034) follows the same rules: each queued
+// change names its account, is read only while that account is signed in
+// and owns the cache, is written only under the session epoch it was made
+// in, and goes with the rest when the session ends or another account
+// signs in.
 
 import 'dart:convert';
 
@@ -32,6 +38,8 @@ import 'package:keluargamakan_api/api.dart' as api;
 
 import '../core/api/api_client.dart';
 import '../core/storage/app_database.dart';
+import '../sync/device_clock.dart';
+import '../sync/kitchen_change.dart';
 import 'models/family.dart';
 import 'models/household.dart';
 import 'models/kitchen.dart';
@@ -306,6 +314,7 @@ final class LocalCache {
     KitchenList list, {
     required String accountId,
     required int epoch,
+    String? cursor,
   }) => _bestEffort(
     'saveKitchen',
     () => _db.transaction(() async {
@@ -322,6 +331,7 @@ final class LocalCache {
               maxItems: list.maxItems,
               referenceVersion: Value(list.referenceVersion),
               cachedAt: now,
+              syncCursor: Value(cursor),
             ),
           );
       await _db.batch((b) {
@@ -341,6 +351,12 @@ final class LocalCache {
               usageRank: Value(item.usageRank),
               changedAt: item.changedAt,
               createdAt: item.createdAt,
+              quantity: Value(item.quantity?.wire),
+              brandId: Value(switch (item.brand) {
+                ReferenceBrand(:final brandId) => brandId,
+                _ => null,
+              }),
+              brandName: Value(item.brand?.name),
             ),
         ]);
       });
@@ -349,9 +365,13 @@ final class LocalCache {
 
   /// The cached kitchen, or null when there is no usable copy for the
   /// signed-in account.
-  Future<KitchenList?> kitchen() => _readSafely('kitchen', _kitchen);
+  Future<KitchenList?> kitchen() async => (await kitchenWithCursor())?.list;
 
-  Future<KitchenList?> _kitchen() async {
+  /// The cached kitchen with the cursor of the sync that gave it (KIT-16).
+  Future<({KitchenList list, String? cursor})?> kitchenWithCursor() =>
+      _readSafely('kitchen', _kitchen);
+
+  Future<({KitchenList list, String? cursor})?> _kitchen() async {
     if (!await _readable()) return null;
     final meta = await _db.select(_db.cachedKitchens).getSingleOrNull();
     if (meta == null) return null;
@@ -378,13 +398,239 @@ final class LocalCache {
           usageRank: row.usageRank,
           changedAt: row.changedAt,
           createdAt: row.createdAt,
+          quantity: KitchenAmount.fromWire(row.quantity),
+          brand: switch ((row.brandId, row.brandName)) {
+            (final String id, final String name) => ReferenceBrand(id, name),
+            (null, final String name) => TypedBrand(name),
+            _ => null,
+          },
         ),
       );
     }
-    return KitchenList(
+    return (
+      list: KitchenList(
+        items: items,
+        maxItems: meta.maxItems,
+        referenceVersion: meta.referenceVersion,
+        source: FromCache(meta.cachedAt),
+      ),
+      cursor: meta.syncCursor,
+    );
+  }
+
+  // ------------------------------------------------------------ Outbox
+
+  /// The kitchen changes queued on this phone for the signed-in account,
+  /// oldest first, or null when nothing can be read for it. A row this app
+  /// version cannot read is dropped: it is never sent half understood.
+  Future<List<QueuedChange>?> outbox() => _readSafely('outbox', _outbox);
+
+  Future<List<QueuedChange>?> _outbox() async {
+    if (!await _readable()) return null;
+    final account = _currentAccountId();
+    if (account == null) return null;
+    final rows =
+        await (_db.select(_db.kitchenOutbox)
+              ..where((t) => t.accountId.equals(account))
+              ..orderBy([(t) => OrderingTerm(expression: t.seq)]))
+            .get();
+    final changes = <QueuedChange>[];
+    final unreadable = <int>[];
+    for (final row in rows) {
+      final change = _readChange(row);
+      if (change == null) {
+        unreadable.add(row.seq);
+      } else {
+        changes.add(change);
+      }
+    }
+    if (unreadable.isNotEmpty) {
+      debugPrint('Outbox rows dropped (unreadable)');
+      await (_db.delete(
+        _db.kitchenOutbox,
+      )..where((t) => t.seq.isIn(unreadable))).go();
+    }
+    return changes;
+  }
+
+  static QueuedChange? _readChange(KitchenOutboxData row) {
+    final IngredientKey ingredient;
+    switch ((row.ingredientId, row.customName)) {
+      case (final String id, null):
+        ingredient = ReferenceIngredient(id);
+      case (null, final String name):
+        ingredient = CustomIngredient(name);
+      case _:
+        return null;
+    }
+    final op = switch (row.operation) {
+      'upsert' => KitchenChangeOp.upsert,
+      'remove' => KitchenChangeOp.remove,
+      _ => null,
+    };
+    if (op == null) return null;
+    final KitchenPatch patch;
+    try {
+      patch = KitchenPatch.fromJson(jsonDecode(row.patch));
+    } on FormatException {
+      return null;
+    }
+    return QueuedChange(
+      seq: row.seq,
+      changeId: row.changeId,
+      ingredient: ingredient,
+      op: op,
+      patch: patch,
+      stamp: ClockReading(
+        timeline: row.timeline,
+        elapsedMs: row.elapsedMs,
+        wallMs: row.wallMs,
+      ),
+    );
+  }
+
+  /// How many changes are queued for [accountId] (no other data is read).
+  Future<int> outboxCount(String accountId) async =>
+      await _readSafely('outboxCount', () async {
+        final count = _db.kitchenOutbox.seq.count();
+        final query = _db.selectOnly(_db.kitchenOutbox)
+          ..addColumns([count])
+          ..where(_db.kitchenOutbox.accountId.equals(accountId));
+        return (await query.getSingle()).read(count);
+      }) ??
+      0;
+
+  /// Queues [change] for [accountId] and drops the changes it replaces
+  /// ([changesReplacedBy]), in one transaction, only while that account's
+  /// session of [epoch] is current. Best effort: false when nothing was
+  /// written.
+  Future<bool> queueKitchenChange(
+    QueuedChange change, {
+    required Set<String> replacing,
+    required String accountId,
+    required int epoch,
+  }) async {
+    var written = false;
+    await _bestEffort(
+      'queueKitchenChange',
+      () => _db.transaction(() async {
+        if (!_mayWrite(accountId, epoch)) return;
+        await claimFor(accountId);
+        if (replacing.isNotEmpty) {
+          await (_db.delete(
+            _db.kitchenOutbox,
+          )..where((t) => t.changeId.isIn(replacing))).go();
+        }
+        final (ingredientId, customName) = switch (change.ingredient) {
+          ReferenceIngredient(:final ingredientId) => (ingredientId, null),
+          CustomIngredient(:final name) => (null, name),
+        };
+        await _db
+            .into(_db.kitchenOutbox)
+            .insert(
+              KitchenOutboxCompanion.insert(
+                accountId: accountId,
+                changeId: change.changeId,
+                ingredientId: Value(ingredientId),
+                customName: Value(customName),
+                operation: change.op.name,
+                patch: change.patchJson(),
+                timeline: change.stamp.timeline,
+                elapsedMs: change.stamp.elapsedMs,
+                wallMs: change.stamp.wallMs,
+              ),
+            );
+        written = true;
+      }),
+    );
+    return written;
+  }
+
+  /// Removes answered (or dropped) changes. Removing never exposes data, so
+  /// it needs no session check.
+  Future<void> unqueueKitchenChanges(Iterable<String> changeIds) {
+    final ids = changeIds.toList();
+    if (ids.isEmpty) return Future.value();
+    return _bestEffort(
+      'unqueueKitchenChanges',
+      () => (_db.delete(
+        _db.kitchenOutbox,
+      )..where((t) => t.changeId.isIn(ids))).go(),
+    );
+  }
+
+  // ------------------------------------------------------------ Sets
+
+  /// Replaces the cached ingredient sets (KIT-08) for [accountId].
+  Future<void> saveSets(
+    IngredientSets sets, {
+    required String accountId,
+    required int epoch,
+  }) => _bestEffort(
+    'saveSets',
+    () => _db.transaction(() async {
+      if (!_mayWrite(accountId, epoch)) return;
+      await claimFor(accountId);
+      final now = _now().toUtc();
+      await _db.delete(_db.cachedIngredientSets).go();
+      await _db.delete(_db.cachedIngredientSetLists).go();
+      await _db
+          .into(_db.cachedIngredientSetLists)
+          .insert(
+            CachedIngredientSetListsCompanion.insert(
+              id: const Value(1),
+              maxSets: sets.maxSets,
+              cachedAt: now,
+            ),
+          );
+      await _db.batch((b) {
+        b.insertAll(_db.cachedIngredientSets, [
+          for (final (i, set) in sets.items.indexed)
+            CachedIngredientSetsCompanion.insert(
+              id: set.id,
+              position: i,
+              name: set.name,
+              itemIds: jsonEncode(set.itemIds),
+              updatedAt: set.updatedAt,
+            ),
+        ]);
+      });
+    }),
+  );
+
+  /// The cached sets, or null when there is no usable copy.
+  Future<IngredientSets?> sets() => _readSafely('sets', _sets);
+
+  Future<IngredientSets?> _sets() async {
+    if (!await _readable()) return null;
+    final meta = await _db
+        .select(_db.cachedIngredientSetLists)
+        .getSingleOrNull();
+    if (meta == null) return null;
+    final rows = await (_db.select(
+      _db.cachedIngredientSets,
+    )..orderBy([(t) => OrderingTerm(expression: t.position)])).get();
+    final items = <IngredientSetInfo>[];
+    for (final row in rows) {
+      final Object? ids;
+      try {
+        ids = jsonDecode(row.itemIds);
+      } on FormatException {
+        return null;
+      }
+      if (ids is! List || ids.any((i) => i is! String)) return null;
+      items.add(
+        IngredientSetInfo(
+          id: row.id,
+          name: row.name,
+          itemIds: ids.cast<String>(),
+          updatedAt: row.updatedAt,
+        ),
+      );
+    }
+    return IngredientSets(
       items: items,
-      maxItems: meta.maxItems,
-      referenceVersion: meta.referenceVersion,
+      maxSets: meta.maxSets,
       source: FromCache(meta.cachedAt),
     );
   }
@@ -420,6 +666,12 @@ final class LocalCache {
               localNames: jsonEncode(item.localNames),
               category: Value(item.category?.toJson()),
               brandVaries: item.brandVaries,
+              brands: Value(
+                jsonEncode([
+                  for (final b in item.brands)
+                    {'brandId': b.brandId, 'name': b.name},
+                ]),
+              ),
             ),
         ]);
       });
@@ -452,6 +704,21 @@ final class LocalCache {
         return null;
       }
       if (names is! List || names.any((n) => n is! String)) return null;
+      final Object? brands;
+      try {
+        brands = jsonDecode(row.brands);
+      } on FormatException {
+        return null;
+      }
+      if (brands is! List) return null;
+      final catalogBrands = <CatalogBrand>[];
+      for (final brand in brands) {
+        if (brand case {'brandId': final String id, 'name': final String n}) {
+          catalogBrands.add(CatalogBrand(brandId: id, name: n));
+        } else {
+          return null;
+        }
+      }
       items.add(
         CatalogEntry(
           ingredientId: row.ingredientId,
@@ -459,6 +726,7 @@ final class LocalCache {
           localNames: names.cast<String>(),
           category: api.KitchenCategory.fromJson(row.category),
           brandVaries: row.brandVaries,
+          brands: catalogBrands,
         ),
       );
     }
