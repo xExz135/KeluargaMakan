@@ -114,9 +114,21 @@ final class SessionManager {
 
   SessionTokens? _tokens;
   Future<RefreshOutcome>? _inFlight;
+  int _epoch = 0;
+  bool _ending = false;
 
   SessionTokens? get current => _tokens;
   bool get isSignedIn => _tokens != null;
+
+  /// Changes when a session starts and when ending one begins (before local
+  /// data is wiped). A cache write stamped with an older epoch is dropped,
+  /// so a late answer cannot put an account's data back between the wipe
+  /// and the removal of the tokens (security review T-033).
+  int get epoch => _epoch;
+
+  /// True from the start of the wipe until the session has ended. Cache
+  /// writes are refused meanwhile.
+  bool get isEnding => _ending;
 
   /// Fires after the session ended. An error event
   /// ([SessionDataNotCleared]) means local user data could not be removed.
@@ -148,6 +160,8 @@ final class SessionManager {
 
   /// Starts a session after sign-in.
   Future<void> start(SessionTokens tokens) async {
+    _epoch++;
+    _ending = false;
     _tokens = tokens;
     _accounts.add(tokens.accountId);
     await _store.write(tokens);
@@ -170,6 +184,7 @@ final class SessionManager {
   Future<bool> end(SessionEndReason reason) async {
     final cleared = await clearLocalData(reason);
     _tokens = null;
+    _ending = false;
     _accounts.add(null);
     final revocation = _revocation;
     final marked = revocation != null && await _tryTwice(revocation.set);
@@ -189,6 +204,8 @@ final class SessionManager {
   /// before telling the server, so local data goes first. Returns false when
   /// a handler failed twice.
   Future<bool> clearLocalData(SessionEndReason reason) async {
+    _epoch++;
+    _ending = true;
     var cleared = true;
     for (final handler in _endHandlers) {
       if (!await _tryTwice(() => handler(reason))) cleared = false;

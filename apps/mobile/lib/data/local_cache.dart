@@ -11,10 +11,22 @@
 // The same holds in memory (security review T-027 M1): anything holding
 // household data in memory must reset on a session change, by watching
 // currentAccountIdProvider.
+//
+// Every read and write here is best effort (security review T-033 M1): a
+// failure (storage full, a constraint, a broken file) is logged with the
+// operation and the error type only, never its text, which for SQLite
+// includes the statement's parameters (names). The caller goes on with the
+// network result; a failed read counts as "no copy".
+//
+// While a session is ending, and for writes stamped with an older session
+// epoch, nothing is written (security review T-033, structural note): a
+// late answer cannot put an account's data back between the wipe and the
+// removal of the tokens.
 
 import 'dart:convert';
 
 import 'package:drift/drift.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:keluargamakan_api/api.dart' as api;
 
@@ -28,12 +40,58 @@ import 'models/sourced.dart';
 typedef Clock = DateTime Function();
 
 final class LocalCache {
-  LocalCache(this._db, {required this._currentAccountId, Clock? clock})
-    : _now = clock ?? DateTime.now;
+  LocalCache(
+    this._db, {
+    required this._currentAccountId,
+    int Function()? currentEpoch,
+    bool Function()? sessionEnding,
+    Clock? clock,
+  }) : _now = clock ?? DateTime.now,
+       _currentEpoch = currentEpoch ?? (() => 0),
+       _sessionEnding = sessionEnding ?? (() => false);
 
   final AppDatabase _db;
   final String? Function() _currentAccountId;
+  final int Function() _currentEpoch;
+  final bool Function() _sessionEnding;
   final Clock _now;
+
+  /// The session epoch now; a write that starts under it carries it.
+  int get epoch => _currentEpoch();
+
+  // ------------------------------------------------------------ Safety net
+
+  /// Runs [write]; a failure is logged by [operation] and error type only.
+  Future<void> _bestEffort(
+    String operation,
+    Future<void> Function() write,
+  ) async {
+    try {
+      await write();
+    } on Object catch (e) {
+      debugPrint('Cache write failed: $operation (${e.runtimeType})');
+    }
+  }
+
+  /// Runs [read]; a failure is logged like a write and reads as no copy.
+  Future<T?> _readSafely<T>(
+    String operation,
+    Future<T?> Function() read,
+  ) async {
+    try {
+      return await read();
+    } on Object catch (e) {
+      debugPrint('Cache read failed: $operation (${e.runtimeType})');
+      return null;
+    }
+  }
+
+  /// Whether a write that started under [epoch] for [accountId] may still
+  /// be stored.
+  bool _mayWrite(String accountId, int epoch) =>
+      !_sessionEnding() &&
+      _currentEpoch() == epoch &&
+      _currentAccountId() == accountId;
 
   // ------------------------------------------------------------ Owner
 
@@ -64,38 +122,45 @@ final class LocalCache {
     return account != null && await _owner() == account;
   }
 
-  /// Runs [write] for the signed-in account; does nothing when signed out.
-  Future<void> _writeAsOwner(Future<void> Function() write) async {
-    final account = _currentAccountId();
-    if (account == null) return;
-    await _db.transaction(() async {
-      await claimFor(account);
-      await write();
-    });
-  }
+  /// Runs [write] for the signed-in account; does nothing when signed out
+  /// or while the session is ending. Best effort.
+  Future<void> _writeAsOwner(String operation, Future<void> Function() write) =>
+      _bestEffort(operation, () async {
+        final account = _currentAccountId();
+        if (account == null || _sessionEnding()) return;
+        final epoch = _currentEpoch();
+        await _db.transaction(() async {
+          if (!_mayWrite(account, epoch)) return;
+          await claimFor(account);
+          await write();
+        });
+      });
 
   // ------------------------------------------------------------ Household
 
-  Future<void> saveHousehold(HouseholdInfo h) => _writeAsOwner(() async {
-    await _db.delete(_db.cachedHouseholds).go();
-    await _db
-        .into(_db.cachedHouseholds)
-        .insert(
-          CachedHouseholdsCompanion.insert(
-            id: h.id,
-            name: Value(h.name),
-            city: Value(h.city),
-            timeZone: h.timeZoneName,
-            language: h.language.toJson(),
-            managerAccountId: h.managerAccountId,
-            managerProfileId: h.managerProfileId,
-            updatedAt: h.updatedAt,
-            cachedAt: _now().toUtc(),
-          ),
-        );
-  });
+  Future<void> saveHousehold(HouseholdInfo h) =>
+      _writeAsOwner('saveHousehold', () async {
+        await _db.delete(_db.cachedHouseholds).go();
+        await _db
+            .into(_db.cachedHouseholds)
+            .insert(
+              CachedHouseholdsCompanion.insert(
+                id: h.id,
+                name: Value(h.name),
+                city: Value(h.city),
+                timeZone: h.timeZoneName,
+                language: h.language.toJson(),
+                managerAccountId: h.managerAccountId,
+                managerProfileId: h.managerProfileId,
+                updatedAt: h.updatedAt,
+                cachedAt: _now().toUtc(),
+              ),
+            );
+      });
 
-  Future<HouseholdInfo?> household() async {
+  Future<HouseholdInfo?> household() => _readSafely('household', _household);
+
+  Future<HouseholdInfo?> _household() async {
     if (!await _readable()) return null;
     final row = await _db.select(_db.cachedHouseholds).getSingleOrNull();
     if (row == null) return null;
@@ -118,6 +183,7 @@ final class LocalCache {
 
   /// Replaces the cached profiles with [members]. Rules are not written.
   Future<void> saveProfiles(List<FamilyMember> members) => _writeAsOwner(
+    'saveProfiles',
     () async {
       final now = _now().toUtc();
       await _db.delete(_db.cachedProfiles).go();
@@ -142,12 +208,16 @@ final class LocalCache {
     },
   );
 
-  Future<void> removeProfile(String id) =>
-      (_db.delete(_db.cachedProfiles)..where((t) => t.id.equals(id))).go();
+  Future<void> removeProfile(String id) => _bestEffort(
+    'removeProfile',
+    () => (_db.delete(_db.cachedProfiles)..where((t) => t.id.equals(id))).go(),
+  );
 
   /// The cached profiles with [RulesNotLoaded], or null when there is no
   /// usable cached copy.
-  Future<FamilyProfiles?> profiles() async {
+  Future<FamilyProfiles?> profiles() => _readSafely('profiles', _profiles);
+
+  Future<FamilyProfiles?> _profiles() async {
     if (!await _readable()) return null;
     final rows = await (_db.select(
       _db.cachedProfiles,
@@ -187,24 +257,29 @@ final class LocalCache {
 
   // ------------------------------------------------------------ Allergens
 
-  Future<void> saveAllergens(AllergenReference list) =>
-      _db.transaction(() async {
-        final now = _now().toUtc();
-        await _db.delete(_db.cachedAllergens).go();
-        await _db.batch((b) {
-          b.insertAll(_db.cachedAllergens, [
-            for (final (i, code) in list.items.indexed)
-              CachedAllergensCompanion.insert(
-                code: code.toJson(),
-                position: i,
-                ruleSetVersion: list.ruleSetVersion,
-                cachedAt: now,
-              ),
-          ]);
-        });
+  Future<void> saveAllergens(AllergenReference list) => _bestEffort(
+    'saveAllergens',
+    () => _db.transaction(() async {
+      final now = _now().toUtc();
+      await _db.delete(_db.cachedAllergens).go();
+      await _db.batch((b) {
+        b.insertAll(_db.cachedAllergens, [
+          for (final (i, code) in list.items.indexed)
+            CachedAllergensCompanion.insert(
+              code: code.toJson(),
+              position: i,
+              ruleSetVersion: list.ruleSetVersion,
+              cachedAt: now,
+            ),
+        ]);
       });
+    }),
+  );
 
-  Future<AllergenReference?> allergens() async {
+  Future<AllergenReference?> allergens() =>
+      _readSafely('allergens', _allergens);
+
+  Future<AllergenReference?> _allergens() async {
     final rows = await (_db.select(
       _db.cachedAllergens,
     )..orderBy([(t) => OrderingTerm(expression: t.position)])).get();
@@ -227,48 +302,56 @@ final class LocalCache {
   /// Replaces the cached kitchen with [list], only while [accountId] is
   /// still the signed-in account (checked inside the write, so an answer
   /// that arrives after another account signed in is never stored for it).
-  Future<void> saveKitchen(KitchenList list, {required String accountId}) =>
-      _db.transaction(() async {
-        if (_currentAccountId() != accountId) return;
-        await claimFor(accountId);
-        final now = _now().toUtc();
-        await _db.delete(_db.cachedKitchenItems).go();
-        await _db.delete(_db.cachedKitchens).go();
-        await _db
-            .into(_db.cachedKitchens)
-            .insert(
-              CachedKitchensCompanion.insert(
-                id: const Value(1),
-                maxItems: list.maxItems,
-                referenceVersion: Value(list.referenceVersion),
-                cachedAt: now,
-              ),
-            );
-        await _db.batch((b) {
-          b.insertAll(_db.cachedKitchenItems, [
-            for (final (i, item) in list.items.indexed)
-              CachedKitchenItemsCompanion.insert(
-                id: item.id,
-                position: i,
-                ingredientId: Value(item.ingredientId),
-                isCustom: item.isCustom,
-                displayNameId: Value(item.displayName?.id),
-                displayNameEn: Value(item.displayName?.en),
-                customName: Value(item.customName),
-                category: item.category.toJson(),
-                state: item.state.wire,
-                isDefaultStaple: item.isDefaultStaple,
-                usageRank: Value(item.usageRank),
-                changedAt: item.changedAt,
-                createdAt: item.createdAt,
-              ),
-          ]);
-        });
+  Future<void> saveKitchen(
+    KitchenList list, {
+    required String accountId,
+    required int epoch,
+  }) => _bestEffort(
+    'saveKitchen',
+    () => _db.transaction(() async {
+      if (!_mayWrite(accountId, epoch)) return;
+      await claimFor(accountId);
+      final now = _now().toUtc();
+      await _db.delete(_db.cachedKitchenItems).go();
+      await _db.delete(_db.cachedKitchens).go();
+      await _db
+          .into(_db.cachedKitchens)
+          .insert(
+            CachedKitchensCompanion.insert(
+              id: const Value(1),
+              maxItems: list.maxItems,
+              referenceVersion: Value(list.referenceVersion),
+              cachedAt: now,
+            ),
+          );
+      await _db.batch((b) {
+        b.insertAll(_db.cachedKitchenItems, [
+          for (final (i, item) in list.items.indexed)
+            CachedKitchenItemsCompanion.insert(
+              id: item.id,
+              position: i,
+              ingredientId: Value(item.ingredientId),
+              isCustom: item.isCustom,
+              displayNameId: Value(item.displayName?.id),
+              displayNameEn: Value(item.displayName?.en),
+              customName: Value(item.customName),
+              category: item.category.toJson(),
+              state: item.state.wire,
+              isDefaultStaple: item.isDefaultStaple,
+              usageRank: Value(item.usageRank),
+              changedAt: item.changedAt,
+              createdAt: item.createdAt,
+            ),
+        ]);
       });
+    }),
+  );
 
   /// The cached kitchen, or null when there is no usable copy for the
   /// signed-in account.
-  Future<KitchenList?> kitchen() async {
+  Future<KitchenList?> kitchen() => _readSafely('kitchen', _kitchen);
+
+  Future<KitchenList?> _kitchen() async {
     if (!await _readable()) return null;
     final meta = await _db.select(_db.cachedKitchens).getSingleOrNull();
     if (meta == null) return null;
@@ -310,44 +393,51 @@ final class LocalCache {
 
   /// Replaces the cached reference catalog. Public reference data: not
   /// bound to an account and kept when the session ends.
-  Future<void> saveCatalog(IngredientCatalog catalog) =>
-      _db.transaction(() async {
-        final now = _now().toUtc();
-        await _db.delete(_db.cachedCatalogIngredients).go();
-        await _db.delete(_db.cachedCatalogs).go();
-        await _db
-            .into(_db.cachedCatalogs)
-            .insert(
-              CachedCatalogsCompanion.insert(
-                id: const Value(1),
-                referenceVersion: catalog.referenceVersion,
-                etag: Value(catalog.etag),
-                cachedAt: now,
-              ),
-            );
-        await _db.batch((b) {
-          b.insertAll(_db.cachedCatalogIngredients, [
-            for (final (i, item) in catalog.items.indexed)
-              CachedCatalogIngredientsCompanion.insert(
-                ingredientId: item.ingredientId,
-                position: i,
-                nameId: item.displayName.id,
-                nameEn: item.displayName.en,
-                localNames: jsonEncode(item.localNames),
-                category: Value(item.category?.toJson()),
-                brandVaries: item.brandVaries,
-              ),
-          ]);
-        });
+  Future<void> saveCatalog(IngredientCatalog catalog) => _bestEffort(
+    'saveCatalog',
+    () => _db.transaction(() async {
+      final now = _now().toUtc();
+      await _db.delete(_db.cachedCatalogIngredients).go();
+      await _db.delete(_db.cachedCatalogs).go();
+      await _db
+          .into(_db.cachedCatalogs)
+          .insert(
+            CachedCatalogsCompanion.insert(
+              id: const Value(1),
+              referenceVersion: catalog.referenceVersion,
+              etag: Value(catalog.etag),
+              cachedAt: now,
+            ),
+          );
+      await _db.batch((b) {
+        b.insertAll(_db.cachedCatalogIngredients, [
+          for (final (i, item) in catalog.items.indexed)
+            CachedCatalogIngredientsCompanion.insert(
+              ingredientId: item.ingredientId,
+              position: i,
+              nameId: item.displayName.id,
+              nameEn: item.displayName.en,
+              localNames: jsonEncode(item.localNames),
+              category: Value(item.category?.toJson()),
+              brandVaries: item.brandVaries,
+            ),
+        ]);
       });
+    }),
+  );
 
   /// Records that the cached catalog was confirmed current (304).
-  Future<void> touchCatalog() =>
-      (_db.update(_db.cachedCatalogs))
-          .write(CachedCatalogsCompanion(cachedAt: Value(_now().toUtc())));
+  Future<void> touchCatalog() => _bestEffort(
+    'touchCatalog',
+    () =>
+        (_db.update(_db.cachedCatalogs))
+            .write(CachedCatalogsCompanion(cachedAt: Value(_now().toUtc()))),
+  );
 
   /// The cached catalog, or null when there is no usable copy.
-  Future<IngredientCatalog?> catalog() async {
+  Future<IngredientCatalog?> catalog() => _readSafely('catalog', _catalog);
+
+  Future<IngredientCatalog?> _catalog() async {
     final meta = await _db.select(_db.cachedCatalogs).getSingleOrNull();
     if (meta == null) return null;
     final rows = await (_db.select(
@@ -385,5 +475,7 @@ final localCacheProvider = Provider<LocalCache>(
   (ref) => LocalCache(
     ref.watch(appDatabaseProvider),
     currentAccountId: () => ref.read(sessionManagerProvider).current?.accountId,
+    currentEpoch: () => ref.read(sessionManagerProvider).epoch,
+    sessionEnding: () => ref.read(sessionManagerProvider).isEnding,
   ),
 );

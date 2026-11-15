@@ -151,12 +151,12 @@ void main() {
       source: const FromNetwork(),
     );
     current = 'acc-2';
-    await cache.saveKitchen(list, accountId: 'acc-1');
+    await cache.saveKitchen(list, accountId: 'acc-1', epoch: 0);
     expect(await db.select(db.cachedKitchenItems).get(), isEmpty);
     expect(await cache.kitchen(), isNull);
 
     // The owner itself is stored and read back; another account is not.
-    await cache.saveKitchen(list, accountId: 'acc-2');
+    await cache.saveKitchen(list, accountId: 'acc-2', epoch: 0);
     expect((await cache.kitchen())!.items.single.customName, _secretA);
     current = 'acc-3';
     expect(await cache.kitchen(), isNull);

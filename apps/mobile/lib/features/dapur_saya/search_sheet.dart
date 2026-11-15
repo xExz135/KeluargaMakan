@@ -154,11 +154,19 @@ class _KitchenSearchSheetState extends ConsumerState<KitchenSearchSheet> {
     if (ingredient.category == null && category == null) return;
     if (!mounted) return;
     setState(() => _adding.add(ingredient.ingredientId));
-    final result = await ref
-        .read(kitchenProvider.notifier)
-        .add(ReferenceIngredient(ingredient.ingredientId), category: category);
+    final ApiResult<KitchenEntry> result;
+    try {
+      result = await ref
+          .read(kitchenProvider.notifier)
+          .add(
+            ReferenceIngredient(ingredient.ingredientId),
+            category: category,
+          );
+    } finally {
+      // "Tambah" never stays disabled, whatever happened (T-033 M1).
+      if (mounted) setState(() => _adding.remove(ingredient.ingredientId));
+    }
     if (!mounted) return;
-    setState(() => _adding.remove(ingredient.ingredientId));
     if (result case Err(:final failure)) {
       final maxItems = switch (ref.read(kitchenProvider)) {
         KitchenLoaded(:final list) => list.maxItems,
