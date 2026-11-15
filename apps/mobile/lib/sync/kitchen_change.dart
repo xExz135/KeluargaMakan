@@ -202,6 +202,7 @@ final class QueuedChange {
     required this.op,
     required this.patch,
     required this.stamp,
+    this.sendAttempts = 0,
   });
 
   /// Order on this phone: oldest first.
@@ -218,6 +219,20 @@ final class QueuedChange {
   /// When the edit was made. [pendingTimeline] until the device clock has
   /// answered; such a change is never sent or expired.
   final ClockReading stamp;
+
+  /// How often this change was sent. 0: it cannot have reached the server.
+  final int sendAttempts;
+
+  /// The same change after one more send.
+  QueuedChange sentOnceMore() => QueuedChange(
+    seq: seq,
+    changeId: changeId,
+    ingredient: ingredient,
+    op: op,
+    patch: patch,
+    stamp: stamp,
+    sendAttempts: sendAttempts + 1,
+  );
 
   /// The timeline of a change whose device clock reading has not arrived.
   static const pendingTimeline = 'pending';

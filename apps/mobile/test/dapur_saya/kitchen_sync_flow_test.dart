@@ -12,6 +12,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:keluargamakan/data/kitchen_state.dart';
+import 'package:keluargamakan/data/models/kitchen.dart';
+import 'package:keluargamakan_api/api.dart' as api;
 
 import '../helpers/fake_server.dart';
 import '../helpers/pump_app.dart';
@@ -541,5 +543,151 @@ void main() {
     final sent = sentChanges(server).single;
     expect(sent['ageMs'], lessThan(60000));
     expect(syncCaption(tester), 'Tersimpan');
+  });
+
+  testWidgets('KIT-16 DAT-08 L6 an item that only ever existed on this phone '
+      'is removed here: nothing, not even its name, is sent', (tester) async {
+    final phone = await openKitchen(tester, server);
+    goOffline(server);
+    final kitchen = phone.container.read(kitchenProvider.notifier);
+    // The phone already knows it is offline (a sync failed; the backoff
+    // decides when to try again), so the edit is not sent at once. A change
+    // that was sent, even without an answer, is removed on the server too
+    // (next test).
+    await kitchen.refresh();
+    await tester.pumpAndSettle();
+    expect(phone.phone.sync.timers.pending, hasLength(1));
+    kitchen.add(
+      const CustomIngredient('Obat herbal Nenek'),
+      category: api.KitchenCategory.leftovers,
+    );
+    await tester.pumpAndSettle();
+    final item = (phone.container.read(
+      kitchenProvider,
+    ) as KitchenLoaded).list.items.single;
+    expect(item.isLocalOnly, isTrue);
+    kitchen.remove(item.id);
+    await tester.pumpAndSettle();
+    expect(find.text('Obat herbal Nenek'), findsNothing);
+    expect(syncCaption(tester), 'Tersimpan');
+    expect(
+      await phone.phone.db.select(phone.phone.db.kitchenOutbox).get(),
+      isEmpty,
+    );
+
+    server.intercept = null;
+    await kitchen.syncNow();
+    await tester.pumpAndSettle();
+    for (final r in server.requests) {
+      expect(r.body, isNot(contains('Nenek')));
+    }
+  });
+
+  testWidgets('KIT-16 L6 a change that may have reached the server is still '
+      'removed there', (tester) async {
+    final phone = await openKitchen(tester, server);
+    server.kitchen.loseNextSyncAnswer = true;
+    final kitchen = phone.container.read(kitchenProvider.notifier);
+    kitchen.add(
+      const CustomIngredient('Kerupuk udang'),
+      category: api.KitchenCategory.leftovers,
+    );
+    await tester.pumpAndSettle();
+    // Applied on the server; the phone never heard.
+    expect(server.kitchenOf(phone.account), hasLength(1));
+    final rows = await phone.phone.db
+        .select(phone.phone.db.kitchenOutbox)
+        .get();
+    expect(rows.single.sendAttempts, 1);
+    final item = (phone.container.read(
+      kitchenProvider,
+    ) as KitchenLoaded).list.items.single;
+    kitchen.remove(item.id);
+    phone.phone.sync.timers.fireAll();
+    await tester.pumpAndSettle();
+    expect(server.kitchenOf(phone.account), isEmpty);
+    expect(withoutIdAndAge(sentChanges(server).last)['operation'], 'remove');
+  });
+
+  testWidgets('KIT-16 L6 at the queue limit a new edit is refused with a '
+      'message; nothing queued is dropped', (tester) async {
+    final (phone, id) = await withTempe(
+      tester,
+      config: {'kitchen.sync.maxQueuedChanges': 50},
+    );
+    goOffline(server);
+    final kitchen = phone.container.read(kitchenProvider.notifier);
+    for (var i = 0; i < 50; i++) {
+      expect(
+        kitchen.add(
+          CustomIngredient('Bahan $i'),
+          category: api.KitchenCategory.leftovers,
+        ),
+        isA<KitchenAdded>(),
+      );
+    }
+    await tester.pumpAndSettle();
+    expect(
+      kitchen.add(
+        const CustomIngredient('Bahan lebih'),
+        category: api.KitchenCategory.leftovers,
+      ),
+      isA<KitchenAddQueueFull>(),
+    );
+    // A tap that would add to the queue is refused and says why.
+    await tapKeyed(tester, 'kitchen.item.$id');
+    expect(toggleLabel(tester, id), startsWith('Tempe, ada.'));
+    expect(
+      find.text(
+        'Ada 50 perubahan yang belum terkirim, batasnya di HP ini. Perubahan '
+        'ini belum disimpan. Sambungkan internet supaya yang lain terkirim '
+        'dulu.',
+      ),
+      findsOneWidget,
+    );
+    expect(syncCaption(tester), 'Belum terkirim · 50 perubahan');
+    expect(
+      await phone.phone.db.select(phone.phone.db.kitchenOutbox).get(),
+      hasLength(50),
+    );
+
+    server.intercept = null;
+    phone.phone.sync.connectivity.goOnline();
+    await tester.pumpAndSettle();
+    expect(server.kitchenOf(phone.account), hasLength(51));
+  });
+
+  testWidgets('ACC-13 KIT-16 L7 the sign-out dialog says how many kitchen '
+      'changes are not sent and will be deleted', (tester) async {
+    final (phone, id) = await withTempe(tester);
+    Future<void> openDialog() async {
+      await tester.tap(find.byTooltip('Pengaturan'));
+      await tester.pumpAndSettle();
+      await tapKeyed(tester, 'settings.signOut');
+    }
+
+    await openDialog();
+    expect(
+      find.byKey(const Key('settings.signOut.pendingKitchen')),
+      findsNothing,
+    );
+    await tapKeyed(tester, 'settings.signOut.cancel');
+    await systemBack(tester);
+
+    goOffline(server);
+    await tapKeyed(tester, 'kitchen.item.$id');
+    await openDialog();
+    expect(
+      find.text(
+        '1 perubahan Dapur Saya belum terkirim. Jika Anda keluar sekarang, '
+        'perubahan itu dihapus dari HP ini dan tidak tersimpan di akun.',
+      ),
+      findsOneWidget,
+    );
+    await tapKeyed(tester, 'settings.signOut.confirm');
+    expect(
+      await phone.phone.db.select(phone.phone.db.kitchenOutbox).get(),
+      isEmpty,
+    );
   });
 }

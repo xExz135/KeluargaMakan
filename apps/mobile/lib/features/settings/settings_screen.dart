@@ -6,9 +6,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/widgets/section_scaffold.dart';
+import '../../core/api/api_client.dart' show currentAccountIdProvider;
 import '../../core/l10n/app_locale.dart';
 import '../../core/theme/theme_mode_controller.dart';
 import '../../core/theme/tokens.dart';
+import '../../data/local_cache.dart';
 import '../../l10n/generated/app_localizations.dart';
 import '../auth/app_entry.dart';
 import 'signed_in_account.dart';
@@ -25,14 +27,35 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   /// ACC-13: confirm, then sign out on this phone. The household stays in
   /// the account; the router moves to O1 once the session has ended.
+  /// Kitchen changes not sent yet are deleted with the phone's data, and
+  /// the dialog says how many (security review T-034 L7; whether to offer
+  /// sending first is QUESTIONS #75).
   Future<void> _signOut() async {
     final l10n = AppLocalizations.of(context);
+    final account = ref.read(currentAccountIdProvider);
+    final unsent = account == null
+        ? 0
+        : await ref.read(localCacheProvider).outboxCount(account);
+    if (!mounted) return;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
         scrollable: true,
         title: Text(l10n.settingsSignOutTitle),
-        content: Text(l10n.settingsSignOutBody),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(l10n.settingsSignOutBody),
+            if (unsent > 0) ...[
+              const SizedBox(height: SpacingTokens.m),
+              Text(
+                l10n.settingsSignOutPendingKitchen(unsent),
+                key: const Key('settings.signOut.pendingKitchen'),
+              ),
+            ],
+          ],
+        ),
         actions: [
           TextButton(
             key: const Key('settings.signOut.cancel'),

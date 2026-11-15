@@ -85,6 +85,11 @@ class _CustomItemScreenState extends ConsumerState<CustomItemScreen> {
           _saving = false;
           _message = l10n.kitchenLimitReached(maxItems);
         });
+      case KitchenAddQueueFull(:final maxChanges):
+        setState(() {
+          _saving = false;
+          _message = l10n.kitchenQueueFull(maxChanges);
+        });
       case KitchenAddUnavailable():
         setState(() {
           _saving = false;

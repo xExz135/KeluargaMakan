@@ -62,21 +62,21 @@ void main() {
 
   setUpAll(() => verifier = SchemaVerifier(GeneratedHelper()));
 
-  test('NFR-05 a new database matches the v3 schema dump', () async {
-    final connection = await verifier.startAt(3);
+  test('NFR-05 a new database matches the v4 schema dump', () async {
+    final connection = await verifier.startAt(4);
     final db = AppDatabase(connection);
-    await verifier.migrateAndValidate(db, 3);
+    await verifier.migrateAndValidate(db, 4);
     await db.close();
   });
 
-  test('NFR-05 KIT-01 a v1 database upgrades to v3 with the kitchen, '
+  test('NFR-05 KIT-01 a v1 database upgrades to v4 with the kitchen, '
       'catalog, set and outbox tables and keeps settings', () async {
     final v1 = await verifier.schemaAt(1);
     v1.rawDatabase.execute(
       "INSERT INTO settings (key, value) VALUES ('settings.locale', 'en')",
     );
     final db = AppDatabase(v1.newConnection());
-    await verifier.migrateAndValidate(db, 3);
+    await verifier.migrateAndValidate(db, 4);
     final settings = await db.select(db.settings).get();
     expect(settings.single.value, 'en');
     expect(await db.select(db.cachedKitchenItems).get(), isEmpty);
@@ -85,16 +85,32 @@ void main() {
     await db.close();
   });
 
-  test('NFR-05 KIT-16 a v2 database upgrades to v3: the outbox is added, the '
+  test('NFR-05 KIT-16 a v2 database upgrades to v4: the outbox is added, the '
       'caches start again and settings stay', () async {
     final v2 = await verifier.schemaAt(2);
     v2.rawDatabase.execute(
       "INSERT INTO settings (key, value) VALUES ('settings.locale', 'en')",
     );
     final db = AppDatabase(v2.newConnection());
-    await verifier.migrateAndValidate(db, 3);
+    await verifier.migrateAndValidate(db, 4);
     expect((await db.select(db.settings).get()).single.value, 'en');
     expect(await db.select(db.kitchenOutbox).get(), isEmpty);
+    await db.close();
+  });
+
+  test('NFR-05 KIT-16 L6 a v3 database upgrades to v4: queued changes stay, '
+      'counted as never sent', () async {
+    final v3 = await verifier.schemaAt(3);
+    v3.rawDatabase.execute(
+      'INSERT INTO kitchen_outbox (account_id, change_id, ingredient_id, '
+      'custom_name, operation, patch, timeline, elapsed_ms, wall_ms) VALUES '
+      "('acc-1', 'c-1', 'fx_kit_tempe', NULL, 'upsert', '{}', 'boot:1', 0, 0)",
+    );
+    final db = AppDatabase(v3.newConnection());
+    await verifier.migrateAndValidate(db, 4);
+    final row = (await db.select(db.kitchenOutbox).get()).single;
+    expect(row.changeId, 'c-1');
+    expect(row.sendAttempts, 0);
     await db.close();
   });
 
@@ -120,13 +136,13 @@ void main() {
         );
     await v3.close();
 
-    final v4 = _FutureVersion(NativeDatabase(File(path)), 4);
-    expect(await v4.select(v4.cachedHouseholds).get(), isEmpty);
+    final v5 = _FutureVersion(NativeDatabase(File(path)), 5);
+    expect(await v5.select(v5.cachedHouseholds).get(), isEmpty);
     expect(
-      (await v4.select(v4.kitchenOutbox).get()).single.ingredientId,
+      (await v5.select(v5.kitchenOutbox).get()).single.ingredientId,
       'fx_kit_tempe',
     );
-    await v4.close();
+    await v5.close();
   });
 
   test('NFR-05 a schema upgrade rebuilds cache tables and keeps '
@@ -137,14 +153,14 @@ void main() {
     await _seed(v1);
     await v1.close();
 
-    final v4 = _FutureVersion(NativeDatabase(File(path)), 4);
-    expect(await v4.select(v4.cachedHouseholds).get(), isEmpty);
-    expect(await v4.select(v4.cachedAllergens).get(), isEmpty);
-    expect(await v4.select(v4.cachedCatalogs).get(), isEmpty);
-    final settings = await v4.select(v4.settings).get();
+    final v5 = _FutureVersion(NativeDatabase(File(path)), 5);
+    expect(await v5.select(v5.cachedHouseholds).get(), isEmpty);
+    expect(await v5.select(v5.cachedAllergens).get(), isEmpty);
+    expect(await v5.select(v5.cachedCatalogs).get(), isEmpty);
+    final settings = await v5.select(v5.settings).get();
     expect(settings.single.key, 'settings.locale');
     expect(settings.single.value, 'en');
-    await v4.close();
+    await v5.close();
   });
 
   test('NFR-05 L5 a downgrade from an unknown newer schema starts again and '

@@ -206,6 +206,11 @@ class KitchenOutbox extends Table {
   TextColumn get timeline => text()();
   IntColumn get elapsedMs => integer()();
   IntColumn get wallMs => integer()();
+
+  /// How often the change was sent (v4, security review T-034 L6). A change
+  /// never sent cannot have reached the server, so removing an item that
+  /// only this phone ever had sends nothing.
+  IntColumn get sendAttempts => integer().withDefault(const Constant(0))();
 }
 
 /// The catalog's version and ETag (contract `ReferenceIngredientCatalog`),
@@ -265,7 +270,7 @@ class AppDatabase extends _$AppDatabase {
       AppDatabase(driftDatabase(name: 'keluargamakan'));
 
   @override
-  int get schemaVersion => 3;
+  int get schemaVersion => 4;
 
   /// Tables that copy server data and can be rebuilt from it.
   List<TableInfo<Table, Object?>> get cacheTables => [
@@ -304,7 +309,11 @@ class AppDatabase extends _$AppDatabase {
       // Step-by-step migrations for tables with data only this phone has
       // (settings, the kitchen outbox). v2 only added cache tables; v3 adds
       // the outbox (T-034).
-      if (from < 3) await m.createTable(kitchenOutbox);
+      if (from < 3) {
+        await m.createTable(kitchenOutbox);
+      } else if (from < 4) {
+        await m.addColumn(kitchenOutbox, kitchenOutbox.sendAttempts);
+      }
       for (final table in cacheTables) {
         await m.deleteTable(table.actualTableName);
         await m.createTable(table);
