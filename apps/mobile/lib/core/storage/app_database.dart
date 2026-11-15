@@ -207,9 +207,17 @@ class AppDatabase extends _$AppDatabase {
     onUpgrade: (m, from, to) async {
       if (from > to) {
         // A downgrade (sideloaded older build): the newer schema is unknown,
-        // so start again. Settings reset to their defaults.
-        for (final table in allTables.toList().reversed) {
-          await m.deleteTable(table.actualTableName);
+        // so start again. Settings reset to their defaults. Every table on
+        // disk goes, including ones only the newer build knows, so nothing
+        // it stored (names, offline changes) stays behind where
+        // clearUserData cannot reach it (security review T-033 L5).
+        final onDisk = await customSelect(
+          "SELECT name FROM sqlite_master WHERE type = 'table' "
+          "AND name NOT LIKE 'sqlite_%'",
+        ).get();
+        for (final row in onDisk) {
+          final name = row.read<String>('name').replaceAll('"', '""');
+          await customStatement('DROP TABLE IF EXISTS "$name"');
         }
         await m.createAll();
         return;
