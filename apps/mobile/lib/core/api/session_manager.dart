@@ -162,6 +162,9 @@ final class SessionManager {
   Future<void> start(SessionTokens tokens) async {
     _epoch++;
     _ending = false;
+    // A new session never joins a refresh still on its way for the old one
+    // (security review T-034 I1); that refresh's answer is dropped anyway.
+    _inFlight = null;
     _tokens = tokens;
     _accounts.add(tokens.accountId);
     await _store.write(tokens);
@@ -206,6 +209,7 @@ final class SessionManager {
   Future<bool> clearLocalData(SessionEndReason reason) async {
     _epoch++;
     _ending = true;
+    _inFlight = null;
     var cleared = true;
     for (final handler in _endHandlers) {
       if (!await _tryTwice(() => handler(reason))) cleared = false;
@@ -248,7 +252,11 @@ final class SessionManager {
     if (tokens.accessToken != rejectedAccessToken) {
       return Future.value(Refreshed(tokens));
     }
-    final future = _rotate(tokens).whenComplete(() => _inFlight = null);
+    late final Future<RefreshOutcome> future;
+    future = _rotate(tokens).whenComplete(() {
+      // Only its own: a newer session may have started a refresh since.
+      if (identical(_inFlight, future)) _inFlight = null;
+    });
     _inFlight = future;
     return future;
   }

@@ -152,4 +152,34 @@ void main() {
     expect(response.statusCode, 200);
     expect(seen, ['Bearer acc-A', 'Bearer acc-A2']);
   });
+
+  test('ACC-13 I1 a new session never joins a refresh still on its way for '
+      'the previous one', () async {
+    final aAnswer = Completer<http.Response>();
+    final asked = <String>[];
+    final session = SessionManager(
+      store: InMemoryTokenStore(_t('A', 'acc-A')),
+      refresh: (refreshToken) {
+        asked.add(refreshToken);
+        return refreshToken == 'r-acc-A'
+            ? aAnswer.future
+            : Future.value(_tokensBody('acc-B2'));
+      },
+    );
+    await session.load();
+    final forA = session.refreshAfterRejected('acc-A', accountId: 'A');
+    await session.end(SessionEndReason.signedOut);
+    await session.start(_t('B', 'acc-B'));
+
+    // B's first 401 gets its own refresh, not A's.
+    final forB = await session.refreshAfterRejected('acc-B', accountId: 'B');
+    expect((forB as Refreshed).tokens.accessToken, 'acc-B2');
+    expect(asked, ['r-acc-A', 'r-acc-B']);
+
+    // A's late answer changes nothing for B, and does not clear a refresh
+    // B starts afterwards.
+    aAnswer.complete(_tokensBody('acc-A2'));
+    expect(await forA, isA<RefreshEndedSession>());
+    expect(session.current?.accessToken, 'acc-B2');
+  });
 }
