@@ -78,3 +78,40 @@ String kitchenItemName(
   ]..sort(byName);
   return (frequent: frequent, other: other);
 }
+
+/// KIT-09 amount label.
+String kitchenAmountLabel(AppLocalizations l10n, KitchenAmount amount) =>
+    switch (amount) {
+      KitchenAmount.little => l10n.quantityLittle,
+      KitchenAmount.some => l10n.quantitySome,
+      KitchenAmount.plenty => l10n.quantityPlenty,
+    };
+
+/// The second line of an item (components.md 8.5): "Sedikit · {brand}", or
+/// null when neither is recorded. A brand is only a name here, never a
+/// safety mark.
+String? kitchenItemDetails(AppLocalizations l10n, KitchenEntry item) {
+  final parts = [
+    if (item.quantity case final amount?) kitchenAmountLabel(l10n, amount),
+    if (item.brand case final brand?) brand.name,
+  ];
+  return parts.isEmpty ? null : parts.join(' · ');
+}
+
+/// The name of [ingredient] when no item is left to name it (a refused or
+/// overwritten change): the custom name, or the catalog's name.
+String kitchenIngredientName(
+  BuildContext context,
+  IngredientKey ingredient, {
+  KitchenEntry? item,
+  IngredientCatalog? catalog,
+}) {
+  if (item != null) return kitchenItemName(context, item, catalog: catalog);
+  final language = Localizations.localeOf(context).languageCode;
+  return switch (ingredient) {
+    CustomIngredient(:final name) => name,
+    ReferenceIngredient(:final ingredientId) =>
+      catalog?.byId(ingredientId)?.displayName.forLanguage(language) ??
+          AppLocalizations.of(context).kitchenItemNameUnavailable,
+  };
+}

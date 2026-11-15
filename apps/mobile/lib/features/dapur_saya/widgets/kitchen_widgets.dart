@@ -1,5 +1,6 @@
-// Shared pieces of the Dapur Saya screens: failure messages, the category
-// picker and the info note. None of these shows a safety state.
+// Shared pieces of the Dapur Saya screens: failure and sync messages, the
+// sync caption (KIT-16), the category picker and the info note. None of
+// these shows a safety state.
 
 import 'package:flutter/material.dart';
 import 'package:keluargamakan_api/api.dart' as api;
@@ -9,42 +10,95 @@ import '../../../core/api/api_problem.dart';
 import '../../../core/api/api_result.dart';
 import '../../../core/theme/theme_extensions.dart';
 import '../../../core/theme/tokens.dart';
+import '../../../data/kitchen_state.dart';
 import '../../../data/models/kitchen.dart';
 import '../../../l10n/generated/app_localizations.dart';
 import '../labels.dart';
 
-/// What the user tried to do, for the message after a failure.
-enum KitchenWrite { toggle, add, remove }
+/// One line explaining why an online-only write (an ingredient set,
+/// KIT-08) did not go through. Text comes from the error code only
+/// (contract-alignment.md 5). Item changes never fail this way: they are
+/// queued (KIT-16) and explained by [kitchenNoticeText].
+String kitchenFailureText(AppLocalizations l10n, ApiFailure failure) {
+  if (failure is NetworkFailure) return l10n.kitchenSetsNeedInternet;
+  return switch (failure.problemCode) {
+    ApiErrorCode.notFound => l10n.errorApiNotFound,
+    ApiErrorCode.refreshTokenInvalid => l10n.errorApiSignedOut,
+    _ => ApiErrorText.of(l10n, failure).body,
+  };
+}
 
-/// One line explaining why a kitchen change did not go through. Text comes
-/// from the error code only (contract-alignment.md 5).
-String kitchenFailureText(
+/// The message for a sync event (KIT-16). [nameOf] names the ingredient.
+String kitchenNoticeText(
   AppLocalizations l10n,
-  ApiFailure failure, {
-  required KitchenWrite write,
-  String? name,
-  int? maxItems,
-}) {
-  if (failure is NetworkFailure) {
-    return switch (write) {
-      KitchenWrite.toggle => l10n.kitchenChangeNeedsInternet(name ?? ''),
-      KitchenWrite.add => l10n.kitchenAddOffline,
-      KitchenWrite.remove => l10n.kitchenRemoveOffline,
-    };
-  }
-  switch (failure.problemCode) {
-    case ApiErrorCode.kitchenItemLimitReached when maxItems != null:
-      return l10n.kitchenLimitReached(maxItems);
-    case ApiErrorCode.referenceDataUnavailable:
-      return l10n.kitchenSearchUnavailable;
-    case ApiErrorCode.notFound:
-      return l10n.errorApiNotFound;
-    case ApiErrorCode.refreshTokenInvalid:
-      return l10n.errorApiSignedOut;
-    case _ when write == KitchenWrite.toggle:
-      return l10n.kitchenChangeFailed(name ?? '');
-    case _:
-      return ApiErrorText.of(l10n, failure).body;
+  KitchenNotice notice, {
+  required String Function(IngredientKey ingredient, KitchenEntry? item) nameOf,
+}) => switch (notice) {
+  KitchenChangeRefused(:final ingredient, :final item) =>
+    l10n.kitchenChangeFailed(nameOf(ingredient, item)),
+  KitchenLimitReached(:final maxItems) => l10n.kitchenLimitReached(maxItems),
+  KitchenOverwritten(:final ingredient, :final item) =>
+    l10n.kitchenSyncOverwritten(nameOf(ingredient, item)),
+  KitchenChangesExpired(:final count, :final maxAgeHours) =>
+    l10n.kitchenChangesExpired(count, (maxAgeHours / 24).ceil()),
+};
+
+/// The sync caption under the Dapur Saya title (screens.md K1, components
+/// 8.9 "Sync pending"): "Tersimpan", "Mengirim perubahan…" or "Belum
+/// terkirim · {n} perubahan", in the neutral container. A polite live
+/// region, so TalkBack reads each change once.
+class KitchenSyncCaption extends StatelessWidget {
+  const KitchenSyncCaption({super.key, required this.status});
+
+  final KitchenSyncStatus status;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final app = AppColors.of(context);
+    final theme = Theme.of(context);
+    final (text, icon) = status.sending
+        ? (l10n.kitchenSyncSyncing, Icons.sync)
+        : status.pendingCount > 0
+        ? (
+            l10n.kitchenSyncPending(status.pendingCount),
+            Icons.cloud_upload_outlined,
+          )
+        : (l10n.kitchenSyncSaved, Icons.cloud_done_outlined);
+    return Semantics(
+      container: true,
+      liveRegion: true,
+      label: text,
+      excludeSemantics: true,
+      child: DecoratedBox(
+        key: const Key('kitchen.sync.caption'),
+        decoration: BoxDecoration(
+          color: app.neutralContainer,
+          borderRadius: BorderRadius.circular(RadiusTokens.full),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: SpacingTokens.s,
+            vertical: SpacingTokens.xs,
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 16, color: app.neutralIcon),
+              const SizedBox(width: SpacingTokens.xs),
+              Flexible(
+                child: Text(
+                  text,
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: app.onNeutralContainer,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
 

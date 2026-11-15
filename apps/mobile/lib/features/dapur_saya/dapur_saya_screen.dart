@@ -3,17 +3,20 @@
 // - Sections in the nine KIT-03 categories, labeled from the API codes;
 //   empty categories are hidden. Within a category the most used items
 //   come first (KIT-06, the server's rank; A to Z until T-032 records use).
-// - One tap toggles "Ada" and "Habis" from local state at once, then the
-//   server confirms; a failure puts the item back and says why (no offline
-//   queue until T-034, QUESTIONS #68).
+// - One tap toggles "Ada" and "Habis" from local state at once, with or
+//   without internet; the change is queued and synced (KIT-16). The app
+//   bar caption says "Tersimpan", "Mengirim perubahan…" or "Belum terkirim
+//   · {n} perubahan"; items with an unsent change carry a dot. A change the
+//   server refuses for good goes back with a message; a newer change from
+//   another phone wins and says so.
 // - Default staples (KIT-07) are items like any other.
 // - Custom items carry "Belum dikenal" (KIT-05); Cek Aman gives them "Cek
 //   label" (SAF-09). Nothing here is a safety state and nothing says
 //   "aman".
 // - Without internet the phone's copy is shown (household data, bound to
-//   the account) with a note that changes need internet.
-// Sets, amounts, brands and the sync caption (KIT-08, KIT-09, KIT-16) come
-// with T-034; photo setup with T-039.
+//   the account) with `state.offline.banner`, and everything still works.
+// - The sets row (KIT-08) with "Tandai semua ada"; amounts and brands
+//   (KIT-09) on the second line of an item. Photo setup comes with T-039.
 
 import 'dart:async';
 
@@ -23,14 +26,13 @@ import 'package:keluargamakan_api/api.dart' as api;
 
 import '../../app/widgets/section_scaffold.dart';
 import '../../core/api/api_error_text.dart';
-import '../../core/api/api_result.dart';
 import '../../core/config/app_config.dart';
 import '../../core/config/config_keys.dart';
 import '../../core/theme/theme_extensions.dart';
 import '../../core/theme/tokens.dart';
 import '../../data/kitchen_state.dart';
 import '../../data/models/kitchen.dart';
-import '../../data/models/sourced.dart';
+import '../../data/sets_state.dart';
 import '../../l10n/generated/app_localizations.dart';
 import '../auth/widgets/onboarding_scaffold.dart'
     show InlineMessage, InlineMessageKind;
@@ -40,6 +42,7 @@ import 'custom_item_screen.dart';
 import 'item_sheet.dart';
 import 'labels.dart';
 import 'search_sheet.dart';
+import 'sets_screen.dart';
 import 'widgets/kitchen_item_toggle.dart';
 import 'widgets/kitchen_widgets.dart';
 
@@ -72,23 +75,9 @@ class _DapurSayaScreenState extends ConsumerState<DapurSayaScreen> {
       action: SnackBarAction(
         key: const Key('kitchen.removed.undo'),
         label: l10n.commonUndo,
-        onPressed: () => unawaited(_undoRemove(removed)),
+        onPressed: () => ref.read(kitchenProvider.notifier).restore(removed),
       ),
     );
-  }
-
-  Future<void> _undoRemove(KitchenEntry removed) async {
-    final l10n = AppLocalizations.of(context);
-    final result = await ref
-        .read(kitchenProvider.notifier)
-        .add(removed.key, category: removed.category, state: removed.state);
-    if (!mounted) return;
-    if (result case Err(:final failure)) {
-      showKitchenSnack(
-        context,
-        kitchenFailureText(l10n, failure, write: KitchenWrite.add),
-      );
-    }
   }
 
   Future<void> _openMenu() async {
@@ -144,11 +133,15 @@ class _DapurSayaScreenState extends ConsumerState<DapurSayaScreen> {
       }
       showKitchenSnack(
         context,
-        kitchenFailureText(
+        kitchenNoticeText(
           l10n,
-          notice.failure,
-          write: KitchenWrite.toggle,
-          name: kitchenItemName(context, notice.entry, catalog: catalog),
+          notice,
+          nameOf: (ingredient, item) => kitchenIngredientName(
+            context,
+            ingredient,
+            item: item,
+            catalog: catalog,
+          ),
         ),
       );
     });
@@ -166,17 +159,28 @@ class _DapurSayaScreenState extends ConsumerState<DapurSayaScreen> {
           ),
         ],
       ),
-      KitchenLoaded(:final list, :final sending) => RefreshIndicator(
-        onRefresh: () => Future.wait([
-          kitchen.refresh(),
-          ref.read(catalogProvider.notifier).refresh(),
-        ]),
-        child: _list(context, list, sending, catalog),
-      ),
+      KitchenLoaded(:final list, :final pending, :final sync) =>
+        RefreshIndicator(
+          onRefresh: () => Future.wait([
+            kitchen.refresh(),
+            ref.read(catalogProvider.notifier).refresh(),
+            ref.read(setsProvider.notifier).reload(),
+          ]),
+          child: _list(context, list, pending, sync, catalog),
+        ),
     };
+    final sync = state is KitchenLoaded ? state.sync : null;
 
     return SectionScaffold(
       title: l10n.kitchenTitle,
+      subtitle: sync == null ? null : KitchenSyncCaption(status: sync),
+      subtitleText: sync == null
+          ? null
+          : sync.sending
+          ? l10n.kitchenSyncSyncing
+          : sync.pendingCount > 0
+          ? l10n.kitchenSyncPending(sync.pendingCount)
+          : l10n.kitchenSyncSaved,
       body: body,
       floatingActionButton: state is KitchenLoaded
           ? FloatingActionButton.extended(
@@ -192,7 +196,8 @@ class _DapurSayaScreenState extends ConsumerState<DapurSayaScreen> {
   Widget _list(
     BuildContext context,
     KitchenList list,
-    Set<String> sending,
+    Set<String> pending,
+    KitchenSyncStatus sync,
     IngredientCatalog? catalog,
   ) {
     final l10n = AppLocalizations.of(context);
@@ -214,7 +219,8 @@ class _DapurSayaScreenState extends ConsumerState<DapurSayaScreen> {
       name: nameOf(e),
       available: e.isAvailable,
       isCustom: e.isCustom,
-      sending: sending.contains(e.id),
+      pending: pending.contains(e.id),
+      details: kitchenItemDetails(l10n, e),
       minHeight: minHeight.toDouble(),
       onTap: () => ref.read(kitchenProvider.notifier).toggle(e.id),
       onLongPress: () =>
@@ -251,15 +257,38 @@ class _DapurSayaScreenState extends ConsumerState<DapurSayaScreen> {
 
     return _Scroll(
       children: [
-        if (list.source is FromCache) ...[
+        if (sync.problem == KitchenSyncProblem.offline) ...[
           InlineMessage(
             key: const Key('kitchen.offline'),
             kind: InlineMessageKind.info,
-            text: l10n.kitchenListOffline,
+            text: l10n.stateOfflineBanner,
+          ),
+          const SizedBox(height: SpacingTokens.m),
+        ],
+        if (sync.problem == KitchenSyncProblem.failed &&
+            sync.pendingCount > 0) ...[
+          InlineMessage(
+            key: const Key('kitchen.sync.failed'),
+            kind: InlineMessageKind.info,
+            text: l10n.kitchenSyncFailed,
+          ),
+          const SizedBox(height: SpacingTokens.s),
+        ],
+        if (sync.problem != null && sync.pendingCount > 0) ...[
+          Align(
+            alignment: AlignmentDirectional.centerStart,
+            child: TextButton.icon(
+              key: const Key('kitchen.sync.retry'),
+              onPressed: ref.read(kitchenProvider.notifier).syncNow,
+              icon: const Icon(Icons.sync),
+              label: Text(l10n.kitchenSyncRetryNow),
+            ),
           ),
           const SizedBox(height: SpacingTokens.m),
         ],
         _SearchField(onTap: () => openKitchenSearch(context)),
+        const SizedBox(height: SpacingTokens.l),
+        _SetsRow(list: list),
         const SizedBox(height: SpacingTokens.l),
         if (list.items.isEmpty)
           SectionCard(
@@ -305,6 +334,91 @@ class _DapurSayaScreenState extends ConsumerState<DapurSayaScreen> {
           ),
         // Room above the FAB.
         const SizedBox(height: 96),
+      ],
+    );
+  }
+}
+
+/// K1 sets row (KIT-08): title, "Kelola" and one card per set. Sideways at
+/// normal text, a vertical list from text scale 1.3 (screens.md K1).
+class _SetsRow extends ConsumerWidget {
+  const _SetsRow({required this.list});
+
+  final KitchenList list;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final l10n = AppLocalizations.of(context);
+    final theme = Theme.of(context);
+    final state = ref.watch(setsProvider);
+    final sets = state is SetsLoaded
+        ? state.sets.items
+        : const <IngredientSetInfo>[];
+    final vertical = MediaQuery.textScalerOf(context).scale(1) >= 1.3;
+    final cards = [
+      for (final set in sets)
+        SetCard(
+          set: set,
+          count: setItemsIn(set, list).length,
+          onMarkAll: () => markSetAvailable(context, ref, set),
+        ),
+    ];
+    return Column(
+      key: const Key('kitchen.sets.row'),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Semantics(
+                header: true,
+                child: Text(
+                  l10n.kitchenSetsTitle,
+                  style: theme.textTheme.titleLarge,
+                ),
+              ),
+            ),
+            TextButton(
+              key: const Key('kitchen.sets.manage'),
+              onPressed: () => openKitchenSets(context),
+              child: Text(l10n.kitchenSetsManage),
+            ),
+          ],
+        ),
+        if (state is SetsLoaded && sets.isEmpty)
+          Text(
+            l10n.kitchenSetsEmpty,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          )
+        else if (vertical)
+          for (final card in cards) ...[
+            card,
+            const SizedBox(height: SpacingTokens.s),
+          ]
+        else if (cards.isNotEmpty)
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                for (final card in cards)
+                  Padding(
+                    padding: const EdgeInsetsDirectional.only(
+                      end: SpacingTokens.s,
+                    ),
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(
+                        minWidth: 160,
+                        maxWidth: 240,
+                      ),
+                      child: card,
+                    ),
+                  ),
+              ],
+            ),
+          ),
       ],
     );
   }

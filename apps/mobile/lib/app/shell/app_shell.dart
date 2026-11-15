@@ -2,9 +2,11 @@
 // navigation rail with labels on medium and expanded windows.
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/theme/tokens.dart';
+import '../../data/kitchen_state.dart' show kitchenOutboxStarterProvider;
 import '../../l10n/generated/app_localizations.dart';
 import '../router.dart';
 import 'app_section.dart';
@@ -14,7 +16,7 @@ import 'bottom_navigation.dart';
 bool isCompactWindow(BuildContext context) =>
     MediaQuery.sizeOf(context).width <= LayoutTokens.compactMax;
 
-class AppShell extends StatelessWidget {
+class AppShell extends ConsumerWidget {
   const AppShell({
     super.key,
     required this.navigationShell,
@@ -31,7 +33,10 @@ class AppShell extends StatelessWidget {
   );
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    // Kitchen changes queued in an earlier run are sent without opening
+    // Dapur Saya first (KIT-16).
+    ref.watch(kitchenOutboxStarterProvider);
     final l10n = AppLocalizations.of(context);
     final index = navigationShell.currentIndex;
     final destinations = [

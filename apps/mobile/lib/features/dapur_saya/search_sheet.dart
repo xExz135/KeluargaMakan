@@ -7,7 +7,8 @@
 // - 503 `reference_data_unavailable` shows its own message, never "no
 //   results"; adding a new (custom) ingredient still works then (AI-08).
 // - "Tambah" adds the ingredient as "Ada" and keeps the sheet open; the row
-//   then shows its state, which a tap toggles.
+//   then shows its state, which a tap toggles. With or without internet:
+//   the add shows at once and is queued (KIT-16).
 // Checklist mode (from the photo checklist) comes with T-039.
 
 import 'dart:async';
@@ -17,6 +18,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api/api_problem.dart';
 import '../../core/api/api_result.dart';
+import '../../data/text_rules.dart' show kitchenTextMaxLength;
 import '../../core/config/app_config.dart';
 import '../../core/config/config_keys.dart';
 import '../../core/theme/tokens.dart';
@@ -91,7 +93,6 @@ class _KitchenSearchSheetState extends ConsumerState<KitchenSearchSheet> {
   int _generation = 0;
   _View _view = const _Idle();
   String _searched = '';
-  final Set<String> _adding = {};
 
   @override
   void dispose() {
@@ -148,38 +149,18 @@ class _KitchenSearchSheetState extends ConsumerState<KitchenSearchSheet> {
 
   Future<void> _add(CatalogEntry ingredient) async {
     final l10n = AppLocalizations.of(context);
-    final category = ingredient.category == null
-        ? await pickKitchenCategory(context)
-        : null;
-    if (ingredient.category == null && category == null) return;
-    if (!mounted) return;
-    setState(() => _adding.add(ingredient.ingredientId));
-    final ApiResult<KitchenEntry> result;
-    try {
-      result = await ref
-          .read(kitchenProvider.notifier)
-          .add(
-            ReferenceIngredient(ingredient.ingredientId),
-            category: category,
-          );
-    } finally {
-      // "Tambah" never stays disabled, whatever happened (T-033 M1).
-      if (mounted) setState(() => _adding.remove(ingredient.ingredientId));
-    }
-    if (!mounted) return;
-    if (result case Err(:final failure)) {
-      final maxItems = switch (ref.read(kitchenProvider)) {
-        KitchenLoaded(:final list) => list.maxItems,
-        _ => null,
-      };
-      _snack(
-        kitchenFailureText(
-          l10n,
-          failure,
-          write: KitchenWrite.add,
-          maxItems: maxItems,
-        ),
-      );
+    final category = ingredient.category ?? await pickKitchenCategory(context);
+    if (category == null || !mounted) return;
+    final result = ref
+        .read(kitchenProvider.notifier)
+        .add(ReferenceIngredient(ingredient.ingredientId), category: category);
+    switch (result) {
+      case KitchenAdded():
+        break;
+      case KitchenAddAtLimit(:final maxItems):
+        _snack(l10n.kitchenLimitReached(maxItems));
+      case KitchenAddUnavailable():
+        _snack(l10n.errorGenericBody);
     }
   }
 
@@ -206,11 +187,15 @@ class _KitchenSearchSheetState extends ConsumerState<KitchenSearchSheet> {
         return;
       }
       _snack(
-        kitchenFailureText(
+        kitchenNoticeText(
           l10n,
-          notice.failure,
-          write: KitchenWrite.toggle,
-          name: kitchenItemName(context, notice.entry, catalog: catalog),
+          notice,
+          nameOf: (ingredient, item) => kitchenIngredientName(
+            context,
+            ingredient,
+            item: item,
+            catalog: catalog,
+          ),
         ),
       );
     });
@@ -259,8 +244,7 @@ class _KitchenSearchSheetState extends ConsumerState<KitchenSearchSheet> {
                   ),
                   _ => null,
                 },
-                sending: kitchen is KitchenLoaded ? kitchen.sending : const {},
-                adding: _adding.contains(hit.ingredient.ingredientId),
+                pending: kitchen is KitchenLoaded ? kitchen.pending : const {},
                 onAdd: () => _add(hit.ingredient),
               ),
           ],
@@ -330,7 +314,7 @@ class _KitchenSearchSheetState extends ConsumerState<KitchenSearchSheet> {
                       key: const Key('kitchen.search.field'),
                       controller: _query,
                       autofocus: true,
-                      maxLength: customNameMaxLength,
+                      maxLength: kitchenTextMaxLength,
                       textInputAction: TextInputAction.search,
                       // What the user types stays out of the keyboard's
                       // memory, and is never autocorrected away from a
@@ -380,15 +364,13 @@ class _HitRow extends ConsumerWidget {
   const _HitRow({
     required this.hit,
     required this.inKitchen,
-    required this.sending,
-    required this.adding,
+    required this.pending,
     required this.onAdd,
   });
 
   final IngredientHit hit;
   final KitchenEntry? inKitchen;
-  final Set<String> sending;
-  final bool adding;
+  final Set<String> pending;
   final VoidCallback onAdd;
 
   @override
@@ -411,7 +393,7 @@ class _HitRow extends ConsumerWidget {
             key: Key('kitchen.search.state.$id'),
             name: name,
             available: item.isAvailable,
-            sending: sending.contains(item.id),
+            pending: pending.contains(item.id),
             stateOnly: true,
             minHeight: ref
                 .watch(appConfigProvider)
@@ -421,7 +403,7 @@ class _HitRow extends ConsumerWidget {
           )
         : FilledButton.tonal(
             key: Key('kitchen.search.add.$id'),
-            onPressed: adding ? null : onAdd,
+            onPressed: onAdd,
             child: Text(l10n.kitchenSearchAdd),
           );
 

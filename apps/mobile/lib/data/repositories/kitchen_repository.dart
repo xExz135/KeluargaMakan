@@ -9,10 +9,10 @@
 //   logged: ApiCaller logs the operation name only.
 // - `reference_data_unavailable` (503) is returned as a failure, never as
 //   an empty catalog or "no results".
-// - The sync (KIT-16): the queued changes and the cursor in, the outcome
-//   of each change and what changed since out. The request is bound to the
-//   account the changes belong to ([runAsAccount]). Ingredient sets
-//   (KIT-08) are written online only.
+// - Item changes go through the sync (KIT-16): the queued changes and the
+//   cursor in, the outcome of each change and what changed since out. The
+//   request is bound to the account the changes belong to
+//   ([runAsAccount]). Ingredient sets (KIT-08) are written online only.
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:keluargamakan_api/api.dart' as api;
@@ -107,58 +107,6 @@ final class KitchenRepository {
       ),
     );
   }
-
-  /// Adds a reference ingredient (KIT-04) or a custom one (KIT-05). A custom
-  /// one needs [category]; a reference one needs it only when the catalog
-  /// gives none. Reuse [idempotencyKey] when retrying after no answer.
-  Future<ApiResult<KitchenEntry>> addItem(
-    IngredientKey ingredient, {
-    required api.KitchenCategory? category,
-    required KitchenItemState state,
-    required String idempotencyKey,
-  }) {
-    final body = switch (ingredient) {
-      ReferenceIngredient(:final ingredientId) => api.KitchenItemCreate(
-        ingredientId: api.Optional.present(ingredientId),
-        category: category == null
-            ? const api.Optional.absent()
-            : api.Optional.present(category),
-        state: api.Optional.present(state.toApi()),
-      ),
-      CustomIngredient(:final name) => api.KitchenItemCreate(
-        customName: api.Optional.present(name),
-        category: api.Optional.present(category),
-        state: api.Optional.present(state.toApi()),
-      ),
-    };
-    return _caller.call(
-      'addKitchenItem',
-      () => _kitchen.addKitchenItemWithHttpInfo(
-        body,
-        idempotencyKey: idempotencyKey,
-      ),
-      decodeKitchenItem,
-    );
-  }
-
-  /// KIT-02: sets the item's state. Sending the same state again leaves the
-  /// same result (contract).
-  Future<ApiResult<KitchenEntry>> setState(
-    String itemId,
-    KitchenItemState state,
-  ) => _caller.call(
-    'updateKitchenItem',
-    () => _kitchen.updateKitchenItemWithHttpInfo(
-      itemId,
-      api.KitchenItemUpdate(state: api.Optional.present(state.toApi())),
-    ),
-    decodeKitchenItem,
-  );
-
-  Future<ApiResult<void>> removeItem(String itemId) => _caller.callNoContent(
-    'removeKitchenItem',
-    () => _kitchen.removeKitchenItemWithHttpInfo(itemId),
-  );
 
   // ------------------------------------------------------------ Sets
 
