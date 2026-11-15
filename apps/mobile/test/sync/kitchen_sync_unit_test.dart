@@ -68,8 +68,54 @@ void main() {
       expect(ageBetween(then, _at('boot:4', 5000, 1763100000000)), 5000);
     });
 
+    test('KIT-16 L2 elapsed time going back on the same timeline label is a '
+        'new timeline: the wall clock decides, never age 0', () {
+      // The label repeated after a restart (a boot counter that did not
+      // move): the change is ten days old, not new.
+      const then = ClockReading(
+        timeline: 'boot:5',
+        elapsedMs: 9000000,
+        wallMs: 1000,
+      );
+      const now = ClockReading(
+        timeline: 'boot:5',
+        elapsedMs: 60000,
+        wallMs: 1000 + 10 * 86400000,
+      );
+      expect(ageBetween(then, now), 10 * 86400000);
+      // Still never younger than the new timeline.
+      expect(
+        ageBetween(
+          then,
+          const ClockReading(timeline: 'boot:5', elapsedMs: 60000, wallMs: 0),
+        ),
+        60000,
+      );
+    });
+
+    test('KIT-16 L1 an unstamped change is marked so, and a stamped one is '
+        'not', () {
+      final draft = QueuedChange(
+        seq: 1,
+        changeId: 'd',
+        ingredient: const ReferenceIngredient('fx_kit_tempe'),
+        op: KitchenChangeOp.upsert,
+        patch: const KitchenPatch(state: KitchenItemState.out),
+        stamp: const ClockReading(
+          timeline: QueuedChange.pendingTimeline,
+          elapsedMs: 0,
+          wallMs: 0,
+        ),
+      );
+      expect(draft.isStamped, isFalse);
+      expect(_change(2, const ReferenceIngredient('x')).isStamped, isTrue);
+    });
+
     test('KIT-16 an age is never negative', () {
-      expect(ageBetween(_at('boot:1', 9000, 0), _at('boot:1', 1000, 0)), 0);
+      // The wall clock was set back: never below zero, and never below the
+      // time on the current timeline.
+      expect(ageBetween(_at('boot:1', 1000, 5000), _at('boot:2', 0, 0)), 0);
+      expect(ageBetween(_at('boot:1', 9000, 0), _at('boot:1', 1000, 0)), 1000);
     });
 
     test('KIT-16 without the Android channel the clock falls back to a '

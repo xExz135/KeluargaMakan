@@ -215,8 +215,15 @@ final class QueuedChange {
   /// Empty for a removal.
   final KitchenPatch patch;
 
-  /// When the edit was made.
+  /// When the edit was made. [pendingTimeline] until the device clock has
+  /// answered; such a change is never sent or expired.
   final ClockReading stamp;
+
+  /// The timeline of a change whose device clock reading has not arrived.
+  static const pendingTimeline = 'pending';
+
+  /// The device clock has stamped this change.
+  bool get isStamped => stamp.timeline != pendingTimeline;
 
   /// The key the latest change wins on ([ingredientKeyOf]).
   String get key => ingredientKeyOf(ingredient);

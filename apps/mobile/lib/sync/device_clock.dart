@@ -47,9 +47,14 @@ final class ClockReading {
 
 /// The age in milliseconds of an edit stamped [then], read at [now]. Never
 /// negative.
+///
+/// A timeline whose elapsed time went back is not the same timeline, even
+/// with the same label (a boot counter an OEM build does not increment, or
+/// a counter reset; security review T-034 L2): the wall-clock path is used
+/// then, so an old change never counts as new.
 int ageBetween(ClockReading then, ClockReading now) {
-  if (then.timeline == now.timeline) {
-    return max(0, now.elapsedMs - then.elapsedMs);
+  if (then.timeline == now.timeline && now.elapsedMs >= then.elapsedMs) {
+    return now.elapsedMs - then.elapsedMs;
   }
   // Another timeline: the edit happened before this one started.
   return max(now.elapsedMs, now.wallMs - then.wallMs);

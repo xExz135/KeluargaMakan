@@ -31,8 +31,27 @@ final class FakeDeviceClock implements DeviceClock {
     _bootStart = now().toUtc();
   }
 
+  /// The phone has been up this long (a new timeline that began then).
+  void setUptime(Duration uptime) =>
+      _bootStart = now().toUtc().subtract(uptime);
+
+  /// While true, every read waits until the test releases it ([releaseNext]).
+  bool hold = false;
+  final List<Completer<void>> _held = [];
+
+  /// Reads waiting to be released.
+  int get heldReads => _held.length;
+
+  /// Lets the oldest waiting read answer.
+  void releaseNext() => _held.removeAt(0).complete();
+
   @override
   Future<ClockReading> read() async {
+    if (hold) {
+      final gate = Completer<void>();
+      _held.add(gate);
+      await gate.future;
+    }
     final true_ = now().toUtc();
     return ClockReading(
       timeline: 'boot:$boot',

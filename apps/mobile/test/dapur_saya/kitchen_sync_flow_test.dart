@@ -429,4 +429,36 @@ void main() {
       isEmpty,
     );
   });
+
+  testWidgets('KIT-16 L1 a tap made while a sync reads the clock is neither '
+      'expired nor sent with the uptime as its age', (tester) async {
+    final (phone, id) = await withTempe(
+      tester,
+      config: {'kitchen.sync.maxChangeAgeHours': 24},
+    );
+    final clock = phone.phone.sync.clock;
+    // The phone has been on for 40 days.
+    clock.setUptime(const Duration(days: 40));
+    clock.hold = true;
+    final kitchen = phone.container.read(kitchenProvider.notifier);
+    final refresh = kitchen.refresh();
+    await tester.pump();
+    expect(clock.heldReads, 1, reason: 'the pass waits for the clock');
+    // The tap's own clock read waits too: the change is still unstamped.
+    await tester.tap(itemToggle(id));
+    await tester.pump();
+    expect(clock.heldReads, 2);
+    clock.releaseNext(); // the pass goes on with an unstamped change
+    await tester.pump();
+    clock.hold = false;
+    clock.releaseNext(); // the change gets its stamp
+    await refresh;
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('tidak terkirim dan dibatalkan'), findsNothing);
+    expect(server.kitchenOf(phone.account).single['state'], 'out');
+    final sent = sentChanges(server).single;
+    expect(sent['ageMs'], lessThan(60000));
+    expect(syncCaption(tester), 'Tersimpan');
+  });
 }
