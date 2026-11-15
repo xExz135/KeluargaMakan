@@ -3,9 +3,14 @@ import { withDbErrors } from "../db/errors.js";
 import type { SqlExecutor } from "../db/executor.js";
 
 /**
- * Kitchen item rows (SRS 18.1 Kitchen item, migrations 0002 and 0008). Every
- * query is scoped by the household from the session (NFR-09). Item text
- * (custom names) never goes into an error message or a log.
+ * Kitchen rows (SRS 18.1 Kitchen item and Ingredient set; migrations 0002,
+ * 0008 and 0009). Every query is scoped by the household from the session
+ * (NFR-09). Item text (custom names, typed brands, set names) never goes
+ * into an error message or a log.
+ *
+ * Every write to a household's kitchen runs under `lockHouseholdKitchen`
+ * and takes the next `kitchen_change_seq` value, so a household's writes
+ * commit in sequence order and a sync cursor never skips one (KIT-16).
  */
 
 export type KitchenItemState = "available" | "out";
@@ -15,6 +20,7 @@ export interface KitchenItemRow {
   readonly id: string;
   readonly ingredient_id: string | null;
   readonly custom_name: string | null;
+  readonly custom_key: string | null;
   readonly category: KitchenCategory;
   readonly state: KitchenItemState;
   readonly quantity: KitchenQuantity | null;
@@ -22,11 +28,16 @@ export interface KitchenItemRow {
   readonly brand_custom_name: string | null;
   readonly is_default_staple: boolean;
   readonly changed_at: Date;
+  readonly client_changed_at: Date | null;
+  readonly use_score: number;
+  readonly use_score_at: Date | null;
+  readonly change_seq: string;
   readonly created_at: Date;
 }
 
-const COLUMNS = `id, ingredient_id, custom_name, category, state, quantity, brand_id,
-  brand_custom_name, is_default_staple, changed_at, created_at`;
+const COLUMNS = `id, ingredient_id, custom_name, custom_key, category, state, quantity, brand_id,
+  brand_custom_name, is_default_staple, changed_at, client_changed_at, use_score, use_score_at,
+  change_seq::text AS change_seq, created_at`;
 
 /** The ingredient an item is for: a reference ID, or a custom name and its comparison key. */
 export type IngredientRef =
@@ -59,9 +70,27 @@ export async function readItem(
   return rows[0] ?? null;
 }
 
+/** The household's items with these IDs, locked (IDs of other households are left out). */
+export async function readItems(
+  tx: SqlExecutor,
+  householdId: string,
+  itemIds: readonly string[],
+): Promise<KitchenItemRow[]> {
+  if (itemIds.length === 0) return [];
+  const { rows } = await withDbErrors(() =>
+    tx.query<KitchenItemRow>(
+      `SELECT ${COLUMNS} FROM kitchen_item WHERE household_id = $1 AND id = ANY($2::uuid[])
+        FOR UPDATE`,
+      [householdId, [...itemIds]],
+    ),
+  );
+  return rows;
+}
+
 /**
- * Serializes kitchen creates for one household (the item limit and the
- * one-item-per-ingredient rule). Returns false when the household is gone.
+ * Serializes kitchen writes for one household: the item and set limits, the
+ * one-item-per-ingredient rule and the sync order. Returns false when the
+ * household is gone.
  */
 export async function lockHouseholdKitchen(tx: SqlExecutor, householdId: string): Promise<boolean> {
   const { rows } = await withDbErrors(() =>
@@ -105,12 +134,24 @@ export async function countItems(tx: SqlExecutor, householdId: string): Promise<
   return Number(rows[0]?.n ?? 0);
 }
 
+/** Every value of an item that a change can set. */
+export interface ItemValues {
+  readonly category: KitchenCategory;
+  readonly state: KitchenItemState;
+  readonly quantity: KitchenQuantity | null;
+  readonly brandId: string | null;
+  readonly brandCustomName: string | null;
+  readonly useScore: number;
+  readonly useScoreAt: Date | null;
+  /** When the edit was made, on the server's clock (KIT-16 latest change wins). */
+  readonly editedAt: Date;
+}
+
 export interface NewItem {
   readonly householdId: string;
   readonly accountId: string | null;
   readonly ref: IngredientRef;
-  readonly category: KitchenCategory;
-  readonly state: KitchenItemState;
+  readonly values: ItemValues;
   readonly isDefaultStaple: boolean;
   readonly now: Date;
 }
@@ -119,23 +160,31 @@ export async function insertItem(tx: SqlExecutor, item: NewItem): Promise<Kitche
   const reference = item.ref.kind === "reference" ? item.ref.ingredientId : null;
   const name = item.ref.kind === "custom" ? item.ref.name : null;
   const key = item.ref.kind === "custom" ? item.ref.key : null;
+  const v = item.values;
   const { rows } = await withDbErrors(() =>
     tx.query<KitchenItemRow>(
       `INSERT INTO kitchen_item
-         (household_id, ingredient_id, custom_name, custom_key, category, state,
-          is_default_staple, changed_by_account_id, changed_at, client_changed_at, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9, $9)
+         (household_id, ingredient_id, custom_name, custom_key, category, state, quantity,
+          brand_id, brand_custom_name, use_score, use_score_at, is_default_staple,
+          changed_by_account_id, changed_at, client_changed_at, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $14)
        RETURNING ${COLUMNS}`,
       [
         item.householdId,
         reference,
         name,
         key,
-        item.category,
-        item.state,
+        v.category,
+        v.state,
+        v.quantity,
+        v.brandId,
+        v.brandCustomName,
+        v.useScore,
+        v.useScoreAt,
         item.isDefaultStaple,
         item.accountId,
         item.now,
+        v.editedAt,
       ],
     ),
   );
@@ -144,51 +193,333 @@ export async function insertItem(tx: SqlExecutor, item: NewItem): Promise<Kitche
   return row;
 }
 
-export interface ItemChange {
-  readonly state?: KitchenItemState;
-  readonly category?: KitchenCategory;
-}
-
-/**
- * KIT-16: a change made now on the server's clock. It is the latest change
- * for the ingredient, so it wins; the same change sent again gives the same
- * item. T-032 adds changes dated in the past (offline sync).
- */
-export async function changeItem(
+/** Writes every changeable value of an item and gives it the next sync position. */
+export async function writeItem(
   tx: SqlExecutor,
   householdId: string,
   itemId: string,
-  change: ItemChange,
+  values: ItemValues,
   accountId: string,
   now: Date,
 ): Promise<KitchenItemRow | null> {
-  const sets = ["changed_by_account_id = $3", "changed_at = $4", "client_changed_at = $4"];
-  const params: unknown[] = [itemId, householdId, accountId, now];
-  if (change.state !== undefined) {
-    params.push(change.state);
-    sets.push(`state = $${params.length}`);
-  }
-  if (change.category !== undefined) {
-    params.push(change.category);
-    sets.push(`category = $${params.length}`);
-  }
   const { rows } = await withDbErrors(() =>
     tx.query<KitchenItemRow>(
-      `UPDATE kitchen_item SET ${sets.join(", ")}
-        WHERE id = $1 AND household_id = $2 RETURNING ${COLUMNS}`,
-      params,
+      `UPDATE kitchen_item
+          SET category = $3, state = $4, quantity = $5, brand_id = $6, brand_custom_name = $7,
+              use_score = $8, use_score_at = $9, client_changed_at = $10,
+              changed_by_account_id = $11, changed_at = $12,
+              change_seq = nextval('kitchen_change_seq')
+        WHERE id = $1 AND household_id = $2
+        RETURNING ${COLUMNS}`,
+      [
+        itemId,
+        householdId,
+        values.category,
+        values.state,
+        values.quantity,
+        values.brandId,
+        values.brandCustomName,
+        values.useScore,
+        values.useScoreAt,
+        values.editedAt,
+        accountId,
+        now,
+      ],
     ),
   );
   return rows[0] ?? null;
 }
 
-export async function deleteItem(
+/**
+ * Removes an item and records the removal (KIT-16), dated `removedAt` on
+ * the server's clock, so a sync reports it and an older change cannot bring
+ * the item back.
+ */
+export async function removeItem(
+  tx: SqlExecutor,
+  householdId: string,
+  row: KitchenItemRow,
+  removedAt: Date,
+  now: Date,
+): Promise<void> {
+  await withDbErrors(async () => {
+    await tx.query(`DELETE FROM kitchen_item WHERE id = $1 AND household_id = $2`, [
+      row.id,
+      householdId,
+    ]);
+    await tx.query(
+      `INSERT INTO kitchen_item_tombstone
+         (household_id, item_id, ingredient_id, custom_key, removed_at, recorded_at)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [householdId, row.id, row.ingredient_id, row.custom_key, removedAt, now],
+    );
+  });
+}
+
+/** A removal of an ingredient the household does not have (a later-arriving older add still loses to it). */
+export async function recordRemoval(
+  tx: SqlExecutor,
+  householdId: string,
+  ref: IngredientRef,
+  removedAt: Date,
+  now: Date,
+): Promise<void> {
+  await withDbErrors(() =>
+    tx.query(
+      `INSERT INTO kitchen_item_tombstone
+         (household_id, item_id, ingredient_id, custom_key, removed_at, recorded_at)
+       VALUES ($1, NULL, $2, $3, $4, $5)`,
+      [
+        householdId,
+        ref.kind === "reference" ? ref.ingredientId : null,
+        ref.kind === "custom" ? ref.key : null,
+        removedAt,
+        now,
+      ],
+    ),
+  );
+}
+
+/** When the ingredient was last removed, on the server's clock, or null. */
+export async function lastRemovalOf(
+  tx: SqlExecutor,
+  householdId: string,
+  ref: IngredientRef,
+): Promise<Date | null> {
+  const { rows } = await withDbErrors(() =>
+    ref.kind === "reference"
+      ? tx.query<{ at: Date | string | null }>(
+          `SELECT max(removed_at) AS at FROM kitchen_item_tombstone
+            WHERE household_id = $1 AND ingredient_id = $2`,
+          [householdId, ref.ingredientId],
+        )
+      : tx.query<{ at: Date | string | null }>(
+          `SELECT max(removed_at) AS at FROM kitchen_item_tombstone
+            WHERE household_id = $1 AND custom_key = $2`,
+          [householdId, ref.key],
+        ),
+  );
+  const at = rows[0]?.at ?? null;
+  return at === null ? null : new Date(at);
+}
+
+/** Items and removals after sync position `after` (all items when null), and the newest position. */
+export async function changesSince(
   db: SqlExecutor,
   householdId: string,
-  itemId: string,
+  after: bigint | null,
+): Promise<{ items: KitchenItemRow[]; removedItemIds: string[]; latest: bigint }> {
+  return withDbErrors(async () => {
+    const items =
+      after === null
+        ? await listItems(db, householdId)
+        : (
+            await db.query<KitchenItemRow>(
+              `SELECT ${COLUMNS} FROM kitchen_item WHERE household_id = $1 AND change_seq > $2`,
+              [householdId, after.toString()],
+            )
+          ).rows;
+    const removed =
+      after === null
+        ? []
+        : (
+            await db.query<{ item_id: string }>(
+              `SELECT item_id::text AS item_id FROM kitchen_item_tombstone
+                WHERE household_id = $1 AND change_seq > $2 AND item_id IS NOT NULL
+                ORDER BY change_seq`,
+              [householdId, after.toString()],
+            )
+          ).rows.map((row) => row.item_id);
+    const { rows } = await db.query<{ latest: string | null }>(
+      `SELECT greatest(
+         (SELECT max(change_seq) FROM kitchen_item WHERE household_id = $1),
+         (SELECT max(change_seq) FROM kitchen_item_tombstone WHERE household_id = $1)
+       )::text AS latest`,
+      [householdId],
+    );
+    const latest = BigInt(rows[0]?.latest ?? "0");
+    return { items, removedItemIds: [...new Set(removed)], latest };
+  });
+}
+
+// ---------------------------------------------------------------- sync change records
+
+export interface SyncChangeRecord {
+  readonly request_hash: Uint8Array;
+  readonly outcome: "applied" | "superseded" | "rejected";
+  readonly item_id: string | null;
+  readonly error_code: string | null;
+}
+
+export async function findSyncChange(
+  tx: SqlExecutor,
+  householdId: string,
+  changeId: string,
+  keptSince: Date,
+): Promise<SyncChangeRecord | null> {
+  const { rows } = await withDbErrors(() =>
+    tx.query<SyncChangeRecord>(
+      `SELECT request_hash, outcome, item_id::text AS item_id, error_code FROM kitchen_sync_change
+        WHERE household_id = $1 AND change_id = $2 AND created_at >= $3`,
+      [householdId, changeId, keptSince],
+    ),
+  );
+  return rows[0] ?? null;
+}
+
+export async function rememberSyncChange(
+  tx: SqlExecutor,
+  householdId: string,
+  changeId: string,
+  record: {
+    readonly requestHash: Buffer;
+    readonly outcome: SyncChangeRecord["outcome"];
+    readonly itemId: string | null;
+    readonly errorCode: string | null;
+  },
+  now: Date,
+): Promise<void> {
+  await withDbErrors(() =>
+    tx.query(
+      `INSERT INTO kitchen_sync_change
+         (household_id, change_id, request_hash, outcome, item_id, error_code, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       ON CONFLICT (household_id, change_id) DO UPDATE
+         SET request_hash = EXCLUDED.request_hash, outcome = EXCLUDED.outcome,
+             item_id = EXCLUDED.item_id, error_code = EXCLUDED.error_code,
+             created_at = EXCLUDED.created_at`,
+      [
+        householdId,
+        changeId,
+        record.requestHash,
+        record.outcome,
+        record.itemId,
+        record.errorCode,
+        now,
+      ],
+    ),
+  );
+}
+
+/**
+ * Deletes sync change records and removals older than `before` (configured
+ * retention; scheduled with the other purges in T-072). A cursor issued
+ * before `before` then leads to a full sync.
+ */
+export async function purgeKitchenSyncRecords(db: SqlExecutor, before: Date): Promise<void> {
+  await withDbErrors(async () => {
+    await db.query(`DELETE FROM kitchen_sync_change WHERE created_at < $1`, [before]);
+    await db.query(`DELETE FROM kitchen_item_tombstone WHERE recorded_at < $1`, [before]);
+  });
+}
+
+// ---------------------------------------------------------------- ingredient sets
+
+export interface IngredientSetRow {
+  readonly id: string;
+  readonly name: string;
+  readonly item_ids: string[];
+  readonly created_at: Date;
+  readonly updated_at: Date;
+}
+
+const SET_SELECT = `SELECT s.id, s.name, s.created_at, s.updated_at,
+    COALESCE(array_agg(i.kitchen_item_id::text ORDER BY i.kitchen_item_id)
+             FILTER (WHERE i.kitchen_item_id IS NOT NULL), '{}') AS item_ids
+  FROM ingredient_set s
+  LEFT JOIN ingredient_set_item i ON i.set_id = s.id AND i.household_id = s.household_id`;
+
+export async function listSets(db: SqlExecutor, householdId: string): Promise<IngredientSetRow[]> {
+  const { rows } = await withDbErrors(() =>
+    db.query<IngredientSetRow>(
+      `${SET_SELECT} WHERE s.household_id = $1 GROUP BY s.id ORDER BY s.created_at, s.id`,
+      [householdId],
+    ),
+  );
+  return rows;
+}
+
+export async function readSet(
+  db: SqlExecutor,
+  householdId: string,
+  setId: string,
+): Promise<IngredientSetRow | null> {
+  const { rows } = await withDbErrors(() =>
+    db.query<IngredientSetRow>(
+      `${SET_SELECT} WHERE s.household_id = $1 AND s.id = $2 GROUP BY s.id`,
+      [householdId, setId],
+    ),
+  );
+  return rows[0] ?? null;
+}
+
+export async function countSets(tx: SqlExecutor, householdId: string): Promise<number> {
+  const { rows } = await withDbErrors(() =>
+    tx.query<{ n: number | string }>(
+      `SELECT count(*) AS n FROM ingredient_set WHERE household_id = $1`,
+      [householdId],
+    ),
+  );
+  return Number(rows[0]?.n ?? 0);
+}
+
+export async function insertSet(
+  tx: SqlExecutor,
+  householdId: string,
+  name: string,
+  now: Date,
+): Promise<string> {
+  const { rows } = await withDbErrors(() =>
+    tx.query<{ id: string }>(
+      `INSERT INTO ingredient_set (household_id, name, created_at, updated_at)
+       VALUES ($1, $2, $3, $3) RETURNING id`,
+      [householdId, name, now],
+    ),
+  );
+  const id = rows[0]?.id;
+  if (id === undefined) throw new Error("ingredient set not stored");
+  return id;
+}
+
+/** Renames the set and replaces its items. Returns false when the set is not in the household. */
+export async function replaceSet(
+  tx: SqlExecutor,
+  householdId: string,
+  setId: string,
+  name: string,
+  itemIds: readonly string[],
+  now: Date,
+): Promise<boolean> {
+  return withDbErrors(async () => {
+    const { rowCount } = await tx.query(
+      `UPDATE ingredient_set SET name = $3, updated_at = $4 WHERE id = $1 AND household_id = $2`,
+      [setId, householdId, name, now],
+    );
+    if (rowCount !== 1) return false;
+    await tx.query(`DELETE FROM ingredient_set_item WHERE set_id = $1 AND household_id = $2`, [
+      setId,
+      householdId,
+    ]);
+    for (const itemId of itemIds) {
+      await tx.query(
+        `INSERT INTO ingredient_set_item (set_id, household_id, kitchen_item_id) VALUES ($1, $2, $3)`,
+        [setId, householdId, itemId],
+      );
+    }
+    return true;
+  });
+}
+
+export async function deleteSet(
+  tx: SqlExecutor,
+  householdId: string,
+  setId: string,
 ): Promise<boolean> {
   const { rowCount } = await withDbErrors(() =>
-    db.query(`DELETE FROM kitchen_item WHERE id = $1 AND household_id = $2`, [itemId, householdId]),
+    tx.query(`DELETE FROM ingredient_set WHERE id = $1 AND household_id = $2`, [
+      setId,
+      householdId,
+    ]),
   );
   return rowCount === 1;
 }
@@ -212,8 +543,16 @@ export async function insertDefaultStaples(
       householdId: input.householdId,
       accountId: input.accountId,
       ref: { kind: "reference", ingredientId: staple.ingredientId },
-      category: staple.category,
-      state: "available",
+      values: {
+        category: staple.category,
+        state: "available",
+        quantity: null,
+        brandId: null,
+        brandCustomName: null,
+        useScore: 0,
+        useScoreAt: null,
+        editedAt: input.now,
+      },
       isDefaultStaple: true,
       now: input.now,
     });
