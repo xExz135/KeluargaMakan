@@ -3,14 +3,32 @@
 // in a temporary folder; nothing is written to .local-dev/.
 
 import assert from "node:assert/strict";
+import { execFile, execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, describe, it } from "node:test";
+import { pathToFileURL } from "node:url";
 
-import { parseArgs as parseAppArgs, runningServerPort } from "./dev-app.mjs";
 import {
+  main as appMain,
+  parseArgs as parseAppArgs,
+  runningServerPort,
+  serverStatus,
+} from "./dev-app.mjs";
+import {
+  HELP,
+  MADE_UP_DATA_ONLY,
   SECRET_NAMES,
   appCommand,
   checkSecrets,
@@ -20,9 +38,14 @@ import {
   localPaths,
   parseArgs,
   parseEnvFile,
+  parseWhoamiSid,
+  readyBanner,
+  releaseLock,
+  restrictLocalDir,
   serializeSecrets,
   serverEnv,
   takeLock,
+  windowsRestrictArgs,
 } from "./dev-local.mjs";
 
 const work = mkdtempSync(join(tmpdir(), "km-dev-local-"));
@@ -190,15 +213,190 @@ describe("NFR-10 dev:local options and output", () => {
     assert.equal(formatLogLine("   "), null);
   });
 
-  it("refuses a second server on the same database folder", () => {
+  it("shows the made-up data warning in --help and when the server is up (review L2)", () => {
+    assert.equal(MADE_UP_DATA_ONLY.length, 2);
+    assert.match(MADE_UP_DATA_ONLY[1], /Use made-up family members only/);
+    assert.match(MADE_UP_DATA_ONLY[1], /Do not enter real health or children's data/);
+    assert.match(MADE_UP_DATA_ONLY[0], /Gunakan anggota keluarga rekaan saja/);
+    for (const line of MADE_UP_DATA_ONLY) {
+      assert.ok(HELP.includes(line));
+      assert.ok(readyBanner(3000).includes(line));
+    }
+  });
+});
+
+describe("NFR-10 dev:local single-instance lock (review L4)", () => {
+  it("creates the lock exclusively with this process and a unique token", () => {
+    const paths = freshPaths();
+    takeLock(paths);
+    const [pid, token] = readFileSync(paths.lock, "utf8").trim().split(" ");
+    assert.equal(pid, String(process.pid));
+    assert.match(token, /^[0-9a-f-]{36}$/);
+  });
+
+  it("refuses while the holder runs, and names the lock file", () => {
+    const paths = freshPaths();
+    takeLock(paths, { pid: 111 });
+    assert.throws(
+      () => takeLock(paths, { pid: 222, alive: () => true }),
+      /already running \(process 111\).*server\.lock/s,
+    );
+  });
+
+  it("takes over a lock whose process is gone, leaving no stale files", () => {
+    const paths = freshPaths();
+    takeLock(paths, { pid: 111 });
+    takeLock(paths, { pid: 222, alive: () => false });
+    assert.match(readFileSync(paths.lock, "utf8"), /^222 /);
+    assert.deepEqual(
+      readdirSync(paths.dir).filter((name) => name.includes("stale")),
+      [],
+    );
+  });
+
+  it("refuses a takeover while another launcher holds the takeover file", () => {
+    const paths = freshPaths();
+    takeLock(paths, { pid: 111 });
+    writeFileSync(`${paths.lock}.takeover`, "333 token\n");
+    assert.throws(
+      () => takeLock(paths, { pid: 222, alive: (pid) => pid === 333 }),
+      /another local test server is starting/,
+    );
+    assert.throws(
+      () => takeLock(paths, { pid: 222, alive: () => false }),
+      /delete \.local-dev\/server\.lock\.takeover/,
+    );
+    assert.match(readFileSync(paths.lock, "utf8"), /^111 /);
+  });
+
+  it("releases only its own lock", () => {
+    const paths = freshPaths();
+    takeLock(paths, { pid: 111 });
+    releaseLock(paths, 222);
+    assert.equal(existsSync(paths.lock), true);
+    releaseLock(paths, 111);
+    assert.equal(existsSync(paths.lock), false);
+  });
+
+  it("lets exactly one of several launchers take over the same stale lock", async () => {
+    const devLocal = pathToFileURL(join(import.meta.dirname, "dev-local.mjs")).href;
+    for (let round = 0; round < 3; round += 1) {
+      const paths = freshPaths();
+      mkdirSync(paths.dir, { recursive: true });
+      writeFileSync(paths.lock, "999999999 stale-token\n");
+      const contender = join(work, `contender-${round}.mjs`);
+      writeFileSync(
+        contender,
+        [
+          `import { localPaths, takeLock } from ${JSON.stringify(devLocal)};`,
+          `const paths = localPaths(${JSON.stringify(paths.dir)});`,
+          "const start = Number(process.argv[2]);",
+          "while (Date.now() < start) {}",
+          "let result = 'won';",
+          "try { takeLock(paths, { alive: (pid) => pid !== 999999999 }); }",
+          "catch (error) { result = `lost: ${error.message}`; }",
+          "console.log(result);",
+          // Hold the lock while the others try, like a running server.
+          "setTimeout(() => {}, 1500);",
+        ].join("\n"),
+      );
+      const start = Date.now() + 1500;
+      const results = await Promise.all(
+        Array.from(
+          { length: 6 },
+          () =>
+            new Promise((resolve, reject) => {
+              execFile(process.execPath, [contender, String(start)], (error, stdout) =>
+                error ? reject(error) : resolve(stdout.trim()),
+              );
+            }),
+        ),
+      );
+      assert.equal(results.filter((line) => line === "won").length, 1, results.join("\n"));
+      assert.equal(results.filter((line) => line.startsWith("lost")).length, 5);
+      assert.deepEqual(
+        readdirSync(paths.dir).filter((name) => name.includes("stale")),
+        [],
+      );
+    }
+  });
+});
+
+describe("NFR-10 dev:local folder permissions (review L1)", () => {
+  const sid = "S-1-5-21-1111111111-2222222222-3333333333-1001";
+
+  it("reads the SID from whoami and builds the icacls arguments", () => {
+    assert.equal(parseWhoamiSid(`"laptop\\owner","${sid}"\r\n`), sid);
+    assert.throws(() => parseWhoamiSid("Access is denied."), /SID/);
+    assert.deepEqual(windowsRestrictArgs("D:\\repo\\.local-dev", sid), [
+      "D:\\repo\\.local-dev",
+      "/inheritance:r",
+      "/grant:r",
+      `*${sid}:(OI)(CI)F`,
+    ]);
+    assert.throws(() => windowsRestrictArgs("D:\\x", "Everyone"), /SID/);
+  });
+
+  it("on Windows runs whoami then icacls from System32", () => {
+    const calls = [];
+    const paths = freshPaths();
+    restrictLocalDir(paths, {
+      platform: "win32",
+      run: (file, args) => {
+        calls.push([file, args]);
+        return file.endsWith("whoami.exe") ? `"laptop\\owner","${sid}"` : "";
+      },
+    });
+    assert.equal(calls.length, 2);
+    assert.match(calls[0][0], /System32[\\/]whoami\.exe$/i);
+    assert.match(calls[1][0], /System32[\\/]icacls\.exe$/i);
+    assert.deepEqual(calls[1][1], windowsRestrictArgs(paths.dir, sid));
+  });
+
+  it("refuses to start when the folder cannot be restricted", () => {
+    const failing = () => {
+      throw new Error("icacls failed\nmore detail");
+    };
+    assert.throws(
+      () => restrictLocalDir(freshPaths(), { platform: "win32", run: failing }),
+      /does not start \(icacls failed\)/,
+    );
+    assert.throws(
+      () => restrictLocalDir(freshPaths(), { platform: "linux", chmod: failing }),
+      /does not start/,
+    );
+  });
+
+  it("on macOS and Linux sets 0700 on the folder and 0600 on the keys", () => {
     const paths = freshPaths();
     mkdirSync(paths.dir, { recursive: true });
-    writeFileSync(paths.lock, `${process.ppid}\n`);
-    assert.throws(() => takeLock(paths), /already running/);
-    writeFileSync(paths.lock, "999999999\n");
-    takeLock(paths);
-    assert.equal(readFileSync(paths.lock, "utf8").trim(), String(process.pid));
+    writeFileSync(paths.secrets, "x");
+    const modes = [];
+    restrictLocalDir(paths, {
+      platform: "darwin",
+      chmod: (path, mode) => modes.push([path, mode]),
+    });
+    assert.deepEqual(modes, [
+      [paths.dir, 0o700],
+      [paths.secrets, 0o600],
+    ]);
   });
+
+  it(
+    "on this Windows machine leaves the folder to the current user alone",
+    { skip: process.platform !== "win32" && "Windows only" },
+    () => {
+      const paths = freshPaths();
+      mkdirSync(paths.dir, { recursive: true });
+      restrictLocalDir(paths);
+      const icacls = join(process.env["SystemRoot"] ?? "C:\\Windows", "System32", "icacls.exe");
+      const acl = execFileSync(icacls, [paths.dir], { encoding: "utf8" });
+      // One entry only (each entry is "<principal>:(flags)"), not inherited.
+      assert.equal((acl.match(/:\(/g) ?? []).length, 1, acl);
+      assert.doesNotMatch(acl, /\(I\)/);
+      assert.match(acl, /\(OI\)\(CI\)\(F\)/);
+    },
+  );
 });
 
 describe("NFR-10 dev:app", () => {
@@ -230,5 +428,40 @@ describe("NFR-10 dev:app", () => {
     assert.equal(runningServerPort(paths), 3002);
     writeFileSync(paths.state, JSON.stringify({ port: "3002; x" }));
     assert.equal(runningServerPort(paths), null);
+  });
+
+  it("checks /health/ready on loopback before starting Flutter (review I1)", async () => {
+    const asked = [];
+    const answer = (status) => (url) => {
+      asked.push(url);
+      return Promise.resolve({ status });
+    };
+    assert.equal(await serverStatus(3004, answer(200)), "ready");
+    assert.equal(await serverStatus(3004, answer(503)), "not_ready");
+    assert.equal(await serverStatus(3004, answer(404)), "down");
+    assert.equal(await serverStatus(3004, () => Promise.reject(new Error("ECONNREFUSED"))), "down");
+    assert.equal(asked[0], "http://127.0.0.1:3004/health/ready");
+  });
+
+  it("stops with a clear message when no server answers", async () => {
+    const errors = [];
+    const original = console.error;
+    console.error = (text) => errors.push(text);
+    try {
+      const code = await appMain(["--port", "3009"], { status: () => Promise.resolve("down") });
+      assert.equal(code, 1);
+    } finally {
+      console.error = original;
+    }
+    assert.match(errors.join("\n"), /No local test server answers on port 3009.*pnpm dev:local/s);
+  });
+
+  it("finds a real stopped port as down", async () => {
+    const server = createServer();
+    const port = await new Promise((resolve) =>
+      server.listen(0, "127.0.0.1", () => resolve(server.address().port)),
+    );
+    await new Promise((resolve) => server.close(resolve));
+    assert.equal(await serverStatus(port), "down");
   });
 });
