@@ -92,6 +92,26 @@ describe("SAF-13 DAT-06 reference data configuration", () => {
     expect(() => readReferenceDataConfig(inherited)).toThrow(/test fixtures folder in production/);
   });
 
+  it.each([" local", "local ", "LOCAL", "test\n", " test", "\tlocal"])(
+    "NFR-10 SAF-13 APP_ENV %j is not local or test: fixtures refused, pin required",
+    (APP_ENV) => {
+      // Security review 2026-11-15 I2: matching is exact, never trimmed.
+      const config = readReferenceDataConfig({
+        APP_ENV,
+        REFERENCE_DATA_PATH: realPath,
+        REFERENCE_DATA_SHA256: pin,
+      });
+      expect(config.environment).toBe("production");
+      expect(config.allowFixture).toBe(false);
+      expect(() =>
+        readReferenceDataConfig({ APP_ENV, REFERENCE_DATA_PATH: fixtureFolder }),
+      ).toThrow(/test fixtures folder in production/);
+      expect(() => readReferenceDataConfig({ APP_ENV, REFERENCE_DATA_PATH: realPath })).toThrow(
+        /REFERENCE_DATA_SHA256 is required in production/,
+      );
+    },
+  );
+
   it("SAF-13 production and staging configuration pointing at the fixtures folder is refused", () => {
     for (const APP_ENV of ["production", "staging", undefined]) {
       expect(() =>

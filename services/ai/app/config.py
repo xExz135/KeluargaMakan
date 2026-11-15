@@ -283,7 +283,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     """Build settings from environment variables (see services/ai/.env.example)."""
     source = os.environ if env is None else env
 
-    environment = _enum(source, "AI_ENV", Environment, default=None)
+    environment = _environment(source)
     tokens = tuple(
         value
         for value in (
@@ -378,6 +378,22 @@ def _slot(
         max_retries=_int(source, f"{prefix}_MAX_RETRIES", 1),
         max_output_tokens=_int(source, f"{prefix}_MAX_OUTPUT_TOKENS", 2048),
     )
+
+
+def _environment(source: Mapping[str, str]) -> Environment:
+    """AI_ENV, matched exactly (security review 2026-11-15 I2).
+
+    No trimming and no case folding: " local", "LOCAL" or "test\\n" is not a
+    known environment and stops startup, so a stray space in deploy config
+    can never unlock the mock provider or the API docs.
+    """
+    raw = source.get("AI_ENV", "")
+    if raw == "":
+        raise ConfigError("AI_ENV is required")
+    if raw not in {member.value for member in Environment}:
+        allowed = ", ".join(member.value for member in Environment)
+        raise ConfigError(f"AI_ENV must be exactly one of: {allowed}")
+    return Environment(raw)
 
 
 def _enum[E: StrEnum](

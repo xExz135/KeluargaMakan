@@ -31,6 +31,7 @@ const NOT_LOCAL: readonly (string | undefined)[] = [
   " local",
   "local ",
   "LOCAL",
+  "test\n",
 ];
 const NOT_DEVELOPMENT: readonly (string | undefined)[] = [
   "production",
@@ -38,6 +39,12 @@ const NOT_DEVELOPMENT: readonly (string | undefined)[] = [
   undefined,
   "",
   "prod",
+  // Security review 2026-11-15 I2: exact match, never trimmed or case-folded.
+  " local",
+  "local ",
+  "LOCAL",
+  "test\n",
+  " test",
 ];
 
 const work = mkdtempSync(join(tmpdir(), "km-local-server-"));
