@@ -597,13 +597,21 @@ for (const target of DATABASE_TARGETS) {
         const stale = await sync(home, { cursor: null, changes: [older] });
         expect(stale.results[0]).toMatchObject({ outcome: "superseded", itemId: null });
         expect((await list(home)).map((i) => i.ingredientId)).toEqual([]);
-        // The DELETE route records removals too.
+        // Added again, the ingredient gets its old item ID back (T-032 L4), so a
+        // phone that missed the cycle still matches it.
         const again = await add(home, { ingredientId: "fx_kit_kemangi" });
-        expect(again.id).not.toBe(item.id);
+        expect(again.id).toBe(item.id);
+        // The DELETE route records removals too.
         const cursor = (await sync(home, { cursor: null, changes: [] })).cursor;
         await api.request("DELETE", `${ITEMS}/${again.id}`, { token: home.token });
         expect((await sync(home, { cursor, changes: [] })).removedItemIds).toEqual([again.id]);
-        // Removing what is not there is applied and protects against older adds.
+        // One removal is kept per ingredient, however often it is removed.
+        const { rows } = await db.query<{ n: number | string }>(
+          `SELECT count(*) AS n FROM kitchen_item_tombstone WHERE household_id = $1`,
+          [home.householdId],
+        );
+        expect(Number(rows[0]?.n)).toBe(1);
+        // Removing what the household never had is applied and stores nothing.
         api.clock.advance(1);
         const none = await sync(home, {
           cursor: null,
@@ -612,14 +620,11 @@ for (const target of DATABASE_TARGETS) {
           ],
         });
         expect(none.results[0]).toMatchObject({ outcome: "applied", itemId: null });
-        const olderAdd = change({
-          ingredient: { customName: "tidak ada FIKTIF" },
-          category: "staples",
-          ageMs: 5_000,
-        });
-        expect((await sync(home, { cursor: null, changes: [olderAdd] })).results[0]?.outcome).toBe(
-          "superseded",
+        const after = await db.query<{ n: number | string }>(
+          `SELECT count(*) AS n FROM kitchen_item_tombstone WHERE household_id = $1`,
+          [home.householdId],
         );
+        expect(Number(after.rows[0]?.n)).toBe(1);
       });
 
       it("KIT-16 a replayed change returns its first result and is not applied twice; a reused ID is rejected", async () => {
@@ -916,7 +921,7 @@ for (const target of DATABASE_TARGETS) {
         const h = await another({
           kitchenConfig: {
             ...resolveKitchenConfig({}),
-            sync: { maxChangeAgeHours: 720, recordRetentionDays: 1 },
+            sync: { maxChangeAgeHours: 720, recordRetentionDays: 1, maxRemovalsPerHousehold: 1000 },
           },
         });
         const home = await signInWithHousehold(h);
@@ -1072,6 +1077,79 @@ for (const target of DATABASE_TARGETS) {
           [home.householdId],
         );
         expect(rows).toEqual([]);
+      });
+    });
+
+    describe("L4 removals are bounded and keep no custom names", () => {
+      it("L4 a custom removal is kept as a keyed hash, never the name", async () => {
+        const home = await signInWithHousehold(api);
+        const item = await add(home, { customName: "Obat Batuk Fiktif", category: "staples" });
+        await api.request("DELETE", `${ITEMS}/${item.id}`, { token: home.token });
+        const { rows } = await db.query<{
+          ingredient_id: string | null;
+          custom_key_hash: Uint8Array | null;
+          item_id: string;
+        }>(
+          `SELECT ingredient_id, custom_key_hash, item_id::text AS item_id
+             FROM kitchen_item_tombstone WHERE household_id = $1`,
+          [home.householdId],
+        );
+        expect(rows).toHaveLength(1);
+        expect(rows[0]?.ingredient_id).toBeNull();
+        expect(Buffer.from(rows[0]?.custom_key_hash ?? []).length).toBe(32);
+        const dump = JSON.stringify(
+          (
+            await db.query(`SELECT * FROM kitchen_item_tombstone WHERE household_id = $1`, [
+              home.householdId,
+            ])
+          ).rows,
+        );
+        expect(dump).not.toMatch(/obat|batuk/i);
+        // The same name in another spelling still matches the removal.
+        const older = change({
+          ingredient: { customName: "obat  BATUK fiktif" },
+          category: "staples",
+          ageMs: 60_000,
+        });
+        expect((await sync(home, { cursor: null, changes: [older] })).results[0]?.outcome).toBe(
+          "superseded",
+        );
+      });
+
+      it("L4 the removals per household are capped; older changes and cursors then fall back safely", async () => {
+        const capped = await another({
+          kitchenConfig: resolveKitchenConfig({ sync: { maxRemovalsPerHousehold: 100 } }),
+        });
+        const home = await signInWithHousehold(capped);
+        const firstCursor = (await sync(home, { cursor: null, changes: [] }, capped)).cursor;
+        const adds = Array.from({ length: 101 }, (_, i) =>
+          change({ ingredient: { customName: `Hilang fiktif ${i}` }, category: "staples" }),
+        );
+        await sync(home, { cursor: null, changes: adds.slice(0, 100) }, capped);
+        await sync(home, { cursor: null, changes: adds.slice(100) }, capped);
+        capped.clock.advance(1);
+        const removes = adds.map((a) => ({ ...a, changeId: randomUUID(), operation: "remove" }));
+        for (const batch of [removes.slice(0, 100), removes.slice(100)]) {
+          const removed = await sync(home, { cursor: null, changes: batch }, capped);
+          expect(removed.results.every((r) => r.outcome === "applied")).toBe(true);
+        }
+        const { rows } = await db.query<{ n: number | string }>(
+          `SELECT count(*) AS n FROM kitchen_item_tombstone WHERE household_id = $1`,
+          [home.householdId],
+        );
+        expect(Number(rows[0]?.n)).toBe(100);
+        // Whether or not its removal was the one evicted, a change from before
+        // the removals never adds the item back (floor or kept removal).
+        const evicted = change({
+          ingredient: { customName: "Hilang fiktif 0" },
+          category: "staples",
+          ageMs: 500,
+        });
+        expect(
+          (await sync(home, { cursor: null, changes: [evicted] }, capped)).results[0],
+        ).toMatchObject({ outcome: "superseded", itemId: null });
+        // A cursor from before the eviction resyncs in full.
+        expect((await sync(home, { cursor: firstCursor, changes: [] }, capped)).full).toBe(true);
       });
     });
 

@@ -31,14 +31,16 @@ import {
   findSyncChange,
   insertItem,
   insertSet,
-  lastRemovalOf,
   listItems,
   listSets,
   lockHouseholdKitchen,
   readItem,
   readItems,
   readSet,
-  recordRemoval,
+  readRemoval,
+  readSyncFloor,
+  upsertRemoval,
+  capRemovals,
   rememberSyncChange,
   removeItem,
   replaceSet,
@@ -47,6 +49,8 @@ import {
   type IngredientSetRow,
   type ItemValues,
   type KitchenItemRow,
+  type RemovalKey,
+  type SyncFloor,
 } from "./kitchen-store.js";
 import {
   AGE_MS_MAX,
@@ -282,7 +286,7 @@ export class KitchenService {
     await this.#locked(scope, async (tx) => {
       const row = await readItem(tx, scope.householdId, itemId, { forUpdate: true });
       if (row === null) throw new NotFoundError("kitchen item");
-      await removeItem(tx, scope.householdId, row, now, now);
+      await this.#remove(tx, scope, row, now, now);
     });
   }
 
@@ -404,11 +408,14 @@ export class KitchenService {
     const now = this.#clock.now();
     const retentionMs = this.#kitchen.sync.recordRetentionDays * 86_400_000;
     const keptSince = new Date(now.getTime() - retentionMs);
-    const after = decodeCursor(this.#hashKey, input.cursor, scope.householdId, keptSince);
     return this.#locked(scope, async (tx) => {
+      // Removals evicted at the cap move both limits up (security review T-032 L4).
+      const floor = await readSyncFloor(tx, scope.householdId);
+      const notBefore = floor !== null && floor.evictedAt > keptSince ? floor.evictedAt : keptSince;
+      const after = decodeCursor(this.#hashKey, input.cursor, scope.householdId, notBefore);
       const results: SyncResultView[] = [];
       for (const change of input.changes) {
-        results.push(await this.#syncChange(tx, scope, change, keptSince, now));
+        results.push(await this.#syncChange(tx, scope, change, keptSince, floor, now));
       }
       const changed = await changesSince(tx, scope.householdId, after);
       const all = after === null ? changed.items : await listItems(tx, scope.householdId);
@@ -430,6 +437,7 @@ export class KitchenService {
     scope: HouseholdScope,
     change: SyncChangeInput,
     keptSince: Date,
+    floor: SyncFloor | null,
     now: Date,
   ): Promise<SyncResultView> {
     // The age is left out: a replay is sent later, so its age has grown.
@@ -457,7 +465,7 @@ export class KitchenService {
     }
     let result: Omit<SyncResultView, "changeId">;
     try {
-      result = await this.#applySyncChange(tx, scope, change, now);
+      result = await this.#applySyncChange(tx, scope, change, floor, now);
     } catch (error) {
       if (!(error instanceof ApiError)) throw error;
       result = { outcome: "rejected", itemId: null, errorCode: error.code };
@@ -486,6 +494,7 @@ export class KitchenService {
     tx: SqlExecutor,
     scope: HouseholdScope,
     change: SyncChangeInput,
+    floor: SyncFloor | null,
     now: Date,
   ): Promise<Omit<SyncResultView, "changeId">> {
     const ref = ingredientRefOf(change.ingredient);
@@ -496,7 +505,8 @@ export class KitchenService {
     if (change.ageMs < 0 || change.ageMs > maxAgeMs) throw fieldError("/ageMs", "invalid_value");
     const editedAt = new Date(now.getTime() - change.ageMs);
     const existing = await findItemFor(tx, scope.householdId, ref);
-    const removedAt = await lastRemovalOf(tx, scope.householdId, ref);
+    const removal = await readRemoval(tx, scope.householdId, this.#removalKey(ref));
+    const removedAt = removal?.removedAt ?? null;
     const stored = existing === null ? null : (existing.client_changed_at ?? existing.changed_at);
     const latest = [stored, removedAt]
       .filter((at): at is Date => at !== null)
@@ -505,8 +515,12 @@ export class KitchenService {
       return { outcome: "superseded", itemId: existing?.id ?? null, errorCode: null };
     }
     if (change.operation === "remove") {
-      if (existing !== null) await removeItem(tx, scope.householdId, existing, editedAt, now);
-      else await recordRemoval(tx, scope.householdId, ref, editedAt, now);
+      if (existing !== null) await this.#remove(tx, scope, existing, editedAt, now);
+      // An ingredient the household never had needs no removal record (L4);
+      // one removed before keeps its newest removal time.
+      else if (removal !== null) {
+        await upsertRemoval(tx, scope.householdId, this.#removalKey(ref), null, editedAt, now);
+      }
       return { outcome: "applied", itemId: null, errorCode: null };
     }
     if (existing !== null) {
@@ -516,7 +530,10 @@ export class KitchenService {
     // Removals older than the retention may have been purged, so a change
     // from before then never adds an item: it could be one removed since
     // (fail toward "do not bring back").
-    const horizon = now.getTime() - this.#kitchen.sync.recordRetentionDays * 86_400_000;
+    const horizon = Math.max(
+      now.getTime() - this.#kitchen.sync.recordRetentionDays * 86_400_000,
+      floor?.removedBefore.getTime() ?? 0,
+    );
     if (editedAt.getTime() < horizon) {
       return { outcome: "superseded", itemId: null, errorCode: null };
     }
@@ -628,7 +645,17 @@ export class KitchenService {
     if ((await countItems(tx, scope.householdId)) >= this.#kitchen.maxItemsPerHousehold) {
       throw kitchenItemLimitReached();
     }
+    // An ingredient added again gets its old item ID back, so a phone that
+    // missed the removal and the new add still matches the item (L4).
+    const removal = await readRemoval(tx, scope.householdId, this.#removalKey(ref));
+    const reuse =
+      removal?.itemId !== null &&
+      removal?.itemId !== undefined &&
+      (await readItem(tx, scope.householdId, removal.itemId)) === null
+        ? removal.itemId
+        : undefined;
     return insertItem(tx, {
+      ...(reuse === undefined ? {} : { id: reuse }),
       householdId: scope.householdId,
       accountId: scope.accountId,
       ref,
@@ -636,6 +663,28 @@ export class KitchenService {
       isDefaultStaple: false,
       now,
     });
+  }
+
+  /** The key a removal of this ingredient is kept under (custom names only as a keyed hash). */
+  #removalKey(ref: IngredientRef): RemovalKey {
+    return ref.kind === "reference"
+      ? { kind: "reference", ingredientId: ref.ingredientId }
+      : { kind: "custom", keyHash: keyedHash(this.#hashKey, "kitchen_removal", ref.key) };
+  }
+
+  async #remove(
+    tx: SqlExecutor,
+    scope: HouseholdScope,
+    row: KitchenItemRow,
+    removedAt: Date,
+    now: Date,
+  ): Promise<void> {
+    const ref: IngredientRef =
+      row.ingredient_id !== null
+        ? { kind: "reference", ingredientId: row.ingredient_id }
+        : { kind: "custom", name: row.custom_name ?? "", key: row.custom_key ?? "" };
+    await removeItem(tx, scope.householdId, row, this.#removalKey(ref), removedAt, now);
+    await capRemovals(tx, scope.householdId, this.#kitchen.sync.maxRemovalsPerHousehold, now);
   }
 
   async #requireItems(

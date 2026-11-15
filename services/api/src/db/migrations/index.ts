@@ -7,6 +7,7 @@ import { migration0006 } from "./0006-ciphertext-padding.js";
 import { migration0007 } from "./0007-sign-in-sessions.js";
 import { migration0008 } from "./0008-kitchen-custom-key.js";
 import { migration0009 } from "./0009-kitchen-sync-usage.js";
+import { migration0010 } from "./0010-kitchen-removals.js";
 import type { Migration } from "./types.js";
 
 export type { Migration } from "./types.js";
@@ -22,4 +23,5 @@ export const MIGRATIONS: readonly Migration[] = Object.freeze([
   migration0007,
   migration0008,
   migration0009,
+  migration0010,
 ]);

@@ -216,10 +216,19 @@ export const SCHEMA_TRACE: Readonly<Record<string, TableTrace>> = {
       household_id: household,
       item_id: "removed kitchen item (KIT-16 sync)",
       ingredient_id: "Ingredient: reference ingredient removed (KIT-16)",
-      custom_key: "Ingredient: custom ingredient removed, name comparison key (KIT-16)",
+      custom_key_hash: "Ingredient: custom ingredient removed, keyed hash of its name key (KIT-16)",
       removed_at: "Last changed when: removal, on the server's clock (KIT-16)",
       recorded_at: "Last changed when: removal stored (KIT-16)",
       change_seq: "Last changed when: sync order (KIT-16)",
+    },
+  },
+  kitchen_sync_floor: {
+    entity: "Kitchen item",
+    sensitivity: "personal",
+    columns: {
+      household_id: household,
+      removed_before: "Last changed when: newest removal evicted at the removal cap (KIT-16)",
+      evicted_at: "Last changed when: removals evicted (KIT-16)",
     },
   },
   kitchen_sync_change: {
