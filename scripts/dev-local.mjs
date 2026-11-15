@@ -20,9 +20,17 @@
 // This file names the test fixtures folder; the fixture guard exempts it
 // because it is local development tooling (scripts/check-fixture-refs.mjs).
 
-import { spawn } from "node:child_process";
-import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync, spawn } from "node:child_process";
+import { randomBytes, randomUUID } from "node:crypto";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { createServer } from "node:net";
 import { join, relative } from "node:path";
 import { createInterface } from "node:readline";
@@ -53,7 +61,15 @@ export function localPaths(localDir = LOCAL_DIR) {
   };
 }
 
+/** Security review 2026-11-15 L2: shown in --help and when the server is up. */
+export const MADE_UP_DATA_ONLY = [
+  "Gunakan anggota keluarga rekaan saja. Jangan masukkan data kesehatan atau data anak yang asli.",
+  "Use made-up family members only. Do not enter real health or children's data.",
+];
+
 export const HELP = `KeluargaMakan local test server (private, on this computer only)
+
+${MADE_UP_DATA_ONLY.join("\n")}
 
 Usage (PowerShell, in the repository folder):
   pnpm dev:local                 start the API for the Android emulator
@@ -76,7 +92,9 @@ What runs:
     stays between runs until --reset. The API refuses all of this outside
     APP_ENV=local.
   - Random local keys in .local-dev/.env, made on the first run, never
-    printed and never committed (.local-dev/ is git-ignored).
+    printed and never committed (.local-dev/ is git-ignored). The folder is
+    restricted to your user account (Windows: icacls; macOS and Linux: 0700);
+    the server does not start if that fails.
   - The ingredient search uses the TEST FIXTURE kitchen catalog: fictional
     names, every safety value unverified, so Cek Aman can only answer
     "Check the label". It is not real safety or nutrition data.
@@ -174,6 +192,60 @@ export function checkSecrets(values) {
     throw new Error("the keys in .local-dev/.env must all be different");
   }
   return secrets;
+}
+
+// ---------- folder permissions ----------
+
+/**
+ * Security review 2026-11-15 L1: the keys sit next to the database they
+ * decrypt, so .local-dev/ must be readable by the current user only. On
+ * Windows `mode` bits do nothing and a new folder inherits the drive's ACL
+ * (often Authenticated Users: Modify), so inheritance is removed and only the
+ * current user's SID is granted full control. Fixed executables from
+ * System32 with fixed arguments; no shell.
+ */
+function system32(name, env = process.env) {
+  return join(env["SystemRoot"] ?? env["SYSTEMROOT"] ?? "C:\\Windows", "System32", name);
+}
+
+/** Parses `whoami /user /fo csv /nh` output: `"host\user","S-1-5-..."`. */
+export function parseWhoamiSid(output) {
+  const match = /"(S-1-[0-9-]+)"\s*$/m.exec(output.trim());
+  if (match === null) throw new Error("could not read the current Windows user's SID");
+  return match[1];
+}
+
+/** The icacls arguments that leave `dir` to the user with `sid` alone. */
+export function windowsRestrictArgs(dir, sid) {
+  if (!/^S-1-[0-9-]+$/.test(sid)) throw new Error("not a Windows SID");
+  return [dir, "/inheritance:r", "/grant:r", `*${sid}:(OI)(CI)F`];
+}
+
+/**
+ * Restricts the local folder to the current user, or throws so the server
+ * does not start. `run(file, args)` returns stdout and throws on failure.
+ */
+export function restrictLocalDir(paths, options = {}) {
+  const platform = options.platform ?? process.platform;
+  const run =
+    options.run ??
+    ((file, args) =>
+      execFileSync(file, args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
+  try {
+    if (platform === "win32") {
+      const sid = parseWhoamiSid(run(system32("whoami.exe"), ["/user", "/fo", "csv", "/nh"]));
+      run(system32("icacls.exe"), windowsRestrictArgs(paths.dir, sid));
+    } else {
+      (options.chmod ?? chmodSync)(paths.dir, 0o700);
+      if (existsSync(paths.secrets)) (options.chmod ?? chmodSync)(paths.secrets, 0o600);
+    }
+  } catch (error) {
+    throw new Error(
+      "could not restrict .local-dev/ to your user account, so the local test server " +
+        `does not start (${error instanceof Error ? error.message.split("\n")[0] : "unknown error"})`,
+      { cause: error },
+    );
+  }
 }
 
 /**
@@ -336,6 +408,7 @@ export function readyBanner(port) {
     `  ${app.command} ${app.args.join(" ")}`,
     "",
     `Sign in with a test phone number such as ${EXAMPLE_PHONE}; the code appears here.`,
+    ...MADE_UP_DATA_ONLY,
     "Data is kept in .local-dev/pgdata. Stop with Ctrl+C. `pnpm dev:local --help` for more.",
     "",
   ].join("\n");
@@ -352,19 +425,89 @@ function isRunning(pid) {
   }
 }
 
-/** Refuses a second server on the same database folder. */
-export function takeLock(paths) {
-  if (existsSync(paths.lock)) {
-    const pid = Number(readFileSync(paths.lock, "utf8").trim());
-    if (Number.isInteger(pid) && pid > 0 && pid !== process.pid && isRunning(pid)) {
+const STARTING = "another local test server is starting on this folder; wait for it, or try again";
+
+function readLock(path) {
+  try {
+    return readFileSync(path, "utf8");
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+/** Exclusive create; false when the file already exists. */
+function createExclusive(path, content) {
+  try {
+    writeFileSync(path, content, { encoding: "utf8", flag: "wx" });
+    return true;
+  } catch (error) {
+    if (error.code === "EEXIST") return false;
+    throw error;
+  }
+}
+
+function holderOf(content) {
+  const holder = Number(content.trim().split(/\s+/)[0]);
+  return Number.isInteger(holder) && holder > 0 ? holder : null;
+}
+
+/**
+ * Refuses a second server on the same database folder (security review
+ * 2026-11-15 L4).
+ *
+ * - The lock is created exclusively (`wx`), and each lock holds a unique
+ *   token next to the process ID.
+ * - A lock whose process is gone is taken over only while holding a second,
+ *   exclusively created file (`server.lock.takeover`). Under it the launcher
+ *   checks the lock still holds the same stale token, moves it aside with an
+ *   atomic rename, and creates its own lock exclusively again. Of several
+ *   launchers that see the same stale lock, only one wins; the others
+ *   refuse. A plain rename-and-check is not enough: a second launcher could
+ *   rename away the lock the first had just written (found by the race test).
+ */
+export function takeLock(paths, { alive = isRunning, pid = process.pid } = {}) {
+  mkdirSync(paths.dir, { recursive: true });
+  const content = `${pid} ${randomUUID()}\n`;
+  if (createExclusive(paths.lock, content)) return;
+
+  const seen = readLock(paths.lock);
+  if (seen === null) throw new Error(STARTING);
+  const holder = holderOf(seen);
+  if (holder !== null && holder !== pid && alive(holder)) {
+    throw new Error(
+      `a local test server is already running (process ${holder}); stop it with Ctrl+C in its ` +
+        "window first. If none is running, delete .local-dev/server.lock",
+    );
+  }
+
+  const takeover = `${paths.lock}.takeover`;
+  if (!createExclusive(takeover, content)) {
+    const other = holderOf(readLock(takeover) ?? "");
+    if (other !== null && !alive(other)) {
       throw new Error(
-        `a local test server is already running (process ${pid}); stop it with Ctrl+C in its window first`,
+        "an earlier start stopped while taking over the lock; delete .local-dev/server.lock.takeover",
       );
     }
+    throw new Error(STARTING);
+  }
+  try {
+    if (readLock(paths.lock) !== seen) throw new Error(STARTING);
+    const aside = `${paths.lock}.${pid}.stale`;
+    renameSync(paths.lock, aside);
+    rmSync(aside, { force: true });
+    if (!createExclusive(paths.lock, content)) throw new Error(STARTING);
+  } finally {
+    rmSync(takeover, { force: true });
+  }
+}
+
+/** Removes the lock only if it is still ours. */
+export function releaseLock(paths, pid = process.pid) {
+  const current = readLock(paths.lock);
+  if (current !== null && Number(current.trim().split(/\s+/)[0]) === pid) {
     rmSync(paths.lock, { force: true });
   }
-  mkdirSync(paths.dir, { recursive: true });
-  writeFileSync(paths.lock, `${process.pid}\n`, { encoding: "utf8", flag: "wx" });
 }
 
 async function confirmReset() {
@@ -492,6 +635,8 @@ export async function main(argv) {
   }
   const paths = localPaths();
   try {
+    mkdirSync(paths.dir, { recursive: true });
+    restrictLocalDir(paths);
     takeLock(paths);
   } catch (error) {
     console.error(error.message);
@@ -539,7 +684,7 @@ export async function main(argv) {
     return 1;
   } finally {
     rmSync(paths.state, { force: true });
-    rmSync(paths.lock, { force: true });
+    releaseLock(paths);
   }
 }
 

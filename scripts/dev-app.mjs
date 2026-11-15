@@ -70,29 +70,57 @@ export function runningServerPort(paths = localPaths()) {
   }
 }
 
-export function main(argv) {
+/**
+ * Security review 2026-11-15 I1: `server.json` can outlive a server that was
+ * killed, so check that something answers `GET /health/ready` on the port
+ * before starting Flutter. 200 (ready) and 503 (up, not ready) both mean the
+ * local server is there. Returns "ready", "not_ready" or "down".
+ */
+export async function serverStatus(port, fetchImpl = fetch, timeoutMs = 2000) {
+  try {
+    const response = await fetchImpl(`http://127.0.0.1:${port}/health/ready`, {
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (response.status === 200) return "ready";
+    if (response.status === 503) return "not_ready";
+    return "down";
+  } catch {
+    return "down";
+  }
+}
+
+export async function main(argv, { status = serverStatus } = {}) {
   let options;
   try {
     options = parseArgs(argv);
   } catch (error) {
     console.error(`${error.message}\n\n${HELP}`);
-    return Promise.resolve(2);
+    return 2;
   }
   if (options.help) {
     console.log(HELP);
-    return Promise.resolve(0);
+    return 0;
   }
-  const running = runningServerPort();
-  if (running === null && options.port === null) {
+  const port = options.port ?? runningServerPort() ?? DEFAULT_PORT;
+  const state = await status(port);
+  if (state === "down") {
+    console.error(
+      `No local test server answers on port ${port}. Start it with \`pnpm dev:local\` in ` +
+        'another PowerShell window first, wait for "is running", then run `pnpm dev:app` ' +
+        "again (add --port <n> if it printed another port).",
+    );
+    return 1;
+  }
+  if (state === "not_ready") {
     console.log(
-      `No running local test server found (start it with \`pnpm dev:local\`); using port ${DEFAULT_PORT}.`,
+      `The local test server on port ${port} is up but not ready (database or ingredient ` +
+        "catalog); see its window. Starting the app anyway.",
     );
   }
-  const port = options.port ?? running ?? DEFAULT_PORT;
   const app = appCommand({ port, device: options.device ?? DEFAULT_DEVICE });
   if (!existsSync(join(app.cwd, "pubspec.yaml"))) {
     console.error("apps/mobile/pubspec.yaml not found; run this from the repository");
-    return Promise.resolve(1);
+    return 1;
   }
   console.log(`> cd apps/mobile\n> ${app.command} ${app.args.join(" ")}\n`);
   return new Promise((resolve) => {
