@@ -130,6 +130,14 @@ const ADD_CREATED = "add_kitchen_item";
 const ADD_FOUND = "add_kitchen_item_found";
 const CREATE_SET = "create_ingredient_set";
 
+/** Rejections that can pass later (an outage, a full kitchen): never remembered. */
+const TEMPORARY_REJECTIONS: ReadonlySet<string> = new Set([
+  "reference_data_unavailable",
+  "kitchen_item_limit_reached",
+  "ingredient_set_limit_reached",
+  "service_unavailable",
+]);
+
 const CATEGORY_ORDER = new Map(KITCHEN_CATEGORIES.map((code, index) => [code, index]));
 
 export const kitchenItemLimitReached = () =>
@@ -453,6 +461,11 @@ export class KitchenService {
     } catch (error) {
       if (!(error instanceof ApiError)) throw error;
       result = { outcome: "rejected", itemId: null, errorCode: error.code };
+    }
+    // Security review T-032 L2: a rejection that can pass later is not the
+    // change's final result, so the same change ID can apply when resent.
+    if (result.outcome === "rejected" && TEMPORARY_REJECTIONS.has(result.errorCode ?? "")) {
+      return { changeId: change.changeId, ...result };
     }
     await rememberSyncChange(
       tx,

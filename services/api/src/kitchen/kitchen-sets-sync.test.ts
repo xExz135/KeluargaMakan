@@ -657,6 +657,58 @@ for (const target of DATABASE_TARGETS) {
         expect(elsewhere.items.map((i) => i.id)).not.toContain(item.id);
       });
 
+      it("L2 a temporary rejection is not remembered: the same change ID applies when sent again", async () => {
+        const home = await signInWithHousehold(api);
+        const down = await another({ reference: unavailableReference });
+        const queued = change({ ingredient: { ingredientId: "fx_kit_kemangi" } });
+        const outage = await sync(home, { cursor: null, changes: [queued] }, down);
+        expect(outage.results[0]).toMatchObject({
+          outcome: "rejected",
+          errorCode: "reference_data_unavailable",
+        });
+        const recovered = await sync(home, { cursor: null, changes: [queued] });
+        expect(recovered.results[0]?.outcome).toBe("applied");
+        expect((await list(home)).map((i) => i.ingredientId)).toEqual(["fx_kit_kemangi"]);
+
+        const limited = await another({
+          kitchenConfig: resolveKitchenConfig({ maxItemsPerHousehold: 30 }),
+        });
+        const small = await signInWithHousehold(limited);
+        const fill = Array.from({ length: 30 }, (_, i) =>
+          change({ ingredient: { customName: `Isi fiktif ${i}` }, category: "staples" }),
+        );
+        await sync(small, { cursor: null, changes: fill }, limited);
+        const extra = change({
+          ingredient: { customName: "Satu lagi fiktif" },
+          category: "staples",
+        });
+        const full = await sync(small, { cursor: null, changes: [extra] }, limited);
+        expect(full.results[0]).toMatchObject({
+          outcome: "rejected",
+          errorCode: "kitchen_item_limit_reached",
+        });
+        const first = (await list(small, limited))[0] as ItemBody;
+        await limited.request("DELETE", `${ITEMS}/${first.id}`, { token: small.token });
+        const retried = await sync(small, { cursor: null, changes: [extra] }, limited);
+        expect(retried.results[0]?.outcome).toBe("applied");
+        // A permanent rejection is remembered: the same ID keeps its first result.
+        const bad = change({ ingredient: { ingredientId: "fx_kit_tidak_ada" } });
+        await sync(home, { cursor: null, changes: [bad] });
+        const again = await sync(home, { cursor: null, changes: [bad] });
+        expect(again.results[0]).toMatchObject({
+          outcome: "rejected",
+          errorCode: "validation_failed",
+        });
+        const { rows } = await db.query(
+          `SELECT outcome, error_code FROM kitchen_sync_change WHERE household_id = $1 ORDER BY created_at`,
+          [home.householdId],
+        );
+        expect(rows).toEqual([
+          { outcome: "applied", error_code: null },
+          { outcome: "rejected", error_code: "validation_failed" },
+        ]);
+      });
+
       it("KIT-16 a bad change is rejected on its own; the rest still apply", async () => {
         const home = await signInWithHousehold(api);
         const changes = [
