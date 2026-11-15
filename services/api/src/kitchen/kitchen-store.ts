@@ -327,6 +327,12 @@ export interface SyncFloor {
   readonly removedBefore: Date;
   /** When removals were last evicted: older cursors resync in full. */
   readonly evictedAt: Date;
+  /**
+   * The highest sync position among evicted removals: a cursor below it may
+   * have missed one, so it resyncs in full (re-check N3). A cursor at or
+   * above it was issued after that removal was written, and had it reported.
+   */
+  readonly evictedSeq: bigint;
 }
 
 export async function readSyncFloor(
@@ -334,15 +340,20 @@ export async function readSyncFloor(
   householdId: string,
 ): Promise<SyncFloor | null> {
   const { rows } = await withDbErrors(() =>
-    tx.query<{ removed_before: Date | string; evicted_at: Date | string }>(
-      `SELECT removed_before, evicted_at FROM kitchen_sync_floor WHERE household_id = $1`,
+    tx.query<{ removed_before: Date | string; evicted_at: Date | string; evicted_seq: string }>(
+      `SELECT removed_before, evicted_at, evicted_seq::text AS evicted_seq
+         FROM kitchen_sync_floor WHERE household_id = $1`,
       [householdId],
     ),
   );
   const row = rows[0];
   return row === undefined
     ? null
-    : { removedBefore: new Date(row.removed_before), evictedAt: new Date(row.evicted_at) };
+    : {
+        removedBefore: new Date(row.removed_before),
+        evictedAt: new Date(row.evicted_at),
+        evictedSeq: BigInt(row.evicted_seq),
+      };
 }
 
 /**
@@ -357,25 +368,26 @@ export async function capRemovals(
   now: Date,
 ): Promise<void> {
   await withDbErrors(async () => {
-    const { rows } = await tx.query<{ newest: Date | string | null }>(
+    const { rows } = await tx.query<{ newest: Date | string | null; seq: string | null }>(
       `WITH evicted AS (
          DELETE FROM kitchen_item_tombstone
           WHERE id IN (
             SELECT id FROM kitchen_item_tombstone WHERE household_id = $1
              ORDER BY removed_at DESC, id DESC OFFSET $2)
-         RETURNING removed_at)
-       SELECT max(removed_at) AS newest FROM evicted`,
+         RETURNING removed_at, change_seq)
+       SELECT max(removed_at) AS newest, max(change_seq)::text AS seq FROM evicted`,
       [householdId, cap],
     );
     const newest = rows[0]?.newest ?? null;
     if (newest === null) return;
     await tx.query(
-      `INSERT INTO kitchen_sync_floor (household_id, removed_before, evicted_at)
-       VALUES ($1, $2, $3)
+      `INSERT INTO kitchen_sync_floor (household_id, removed_before, evicted_at, evicted_seq)
+       VALUES ($1, $2, $3, $4)
        ON CONFLICT (household_id) DO UPDATE
          SET removed_before = greatest(kitchen_sync_floor.removed_before, EXCLUDED.removed_before),
-             evicted_at = EXCLUDED.evicted_at`,
-      [householdId, newest, now],
+             evicted_at = EXCLUDED.evicted_at,
+             evicted_seq = greatest(kitchen_sync_floor.evicted_seq, EXCLUDED.evicted_seq)`,
+      [householdId, newest, now, rows[0]?.seq ?? "0"],
     );
   });
 }
@@ -408,9 +420,11 @@ export async function changesSince(
             )
           ).rows.map((row) => row.item_id);
     const { rows } = await db.query<{ latest: string | null }>(
+      // The floor's position counts too: an evicted removal may have been the newest write.
       `SELECT greatest(
          (SELECT max(change_seq) FROM kitchen_item WHERE household_id = $1),
-         (SELECT max(change_seq) FROM kitchen_item_tombstone WHERE household_id = $1)
+         (SELECT max(change_seq) FROM kitchen_item_tombstone WHERE household_id = $1),
+         (SELECT evicted_seq FROM kitchen_sync_floor WHERE household_id = $1)
        )::text AS latest`,
       [householdId],
     );

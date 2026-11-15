@@ -98,15 +98,25 @@ export async function remember(
 export async function findReplayOf(
   tx: SqlExecutor,
   requests: readonly IdempotentRequest[],
-): Promise<{ readonly operation: string; readonly resourceId: string } | null> {
+): Promise<{
+  readonly operation: string;
+  readonly resourceId: string;
+  /** When the first request was recorded. */
+  readonly recordedAt: Date;
+} | null> {
   const first = requests[0];
   if (first === undefined) throw new Error("no idempotent request given");
   for (const request of requests) {
     if (!OPERATION.test(request.operation)) throw new Error("invalid idempotency operation name");
   }
   const { rows } = await withDbErrors(() =>
-    tx.query<{ operation: string; request_hash: Uint8Array; resource_id: string }>(
-      `SELECT operation, request_hash, resource_id FROM idempotency_record
+    tx.query<{
+      operation: string;
+      request_hash: Uint8Array;
+      resource_id: string;
+      created_at: Date | string;
+    }>(
+      `SELECT operation, request_hash, resource_id, created_at FROM idempotency_record
         WHERE account_id = $1 AND idempotency_key = $2 AND created_at >= $3`,
       [first.accountId, first.key, first.keptSince],
     ),
@@ -119,5 +129,9 @@ export async function findReplayOf(
       Buffer.from(row.request_hash).equals(request.requestHash),
   );
   if (match === undefined) throw idempotencyKeyReused();
-  return { operation: match.operation, resourceId: row.resource_id };
+  return {
+    operation: match.operation,
+    resourceId: row.resource_id,
+    recordedAt: new Date(row.created_at),
+  };
 }

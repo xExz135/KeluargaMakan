@@ -229,6 +229,7 @@ export const SCHEMA_TRACE: Readonly<Record<string, TableTrace>> = {
       household_id: household,
       removed_before: "Last changed when: newest removal evicted at the removal cap (KIT-16)",
       evicted_at: "Last changed when: removals evicted (KIT-16)",
+      evicted_seq: "Last changed when: highest sync order among evicted removals (KIT-16)",
     },
   },
   kitchen_sync_change: {

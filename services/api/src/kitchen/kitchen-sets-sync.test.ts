@@ -1116,40 +1116,226 @@ for (const target of DATABASE_TARGETS) {
         );
       });
 
-      it("L4 the removals per household are capped; older changes and cursors then fall back safely", async () => {
+      /** Adds `count` custom items (made 1000 s ago) and removes them at distinct times. */
+      async function addAndRemove(
+        h: Harness,
+        home: HouseholdSession,
+        prefix: string,
+        count: number,
+        removedSecondsAgo: (index: number) => number,
+      ): Promise<string[]> {
+        const ids: string[] = [];
+        for (let start = 0; start < count; start += 100) {
+          const adds = Array.from({ length: Math.min(100, count - start) }, (_, i) =>
+            change({
+              ingredient: { customName: `${prefix} ${start + i}` },
+              category: "staples",
+              ageMs: 1_000_000,
+            }),
+          );
+          const added = await sync(home, { cursor: null, changes: adds }, h);
+          ids.push(...added.results.map((r) => r.itemId as string));
+        }
+        for (let start = 0; start < count; start += 100) {
+          const removes = Array.from({ length: Math.min(100, count - start) }, (_, i) =>
+            change({
+              ingredient: { customName: `${prefix} ${start + i}` },
+              operation: "remove",
+              ageMs: removedSecondsAgo(start + i) * 1000,
+            }),
+          );
+          const removed = await sync(home, { cursor: null, changes: removes }, h);
+          expect(removed.results.every((r) => r.outcome === "applied")).toBe(true);
+        }
+        return ids;
+      }
+
+      const keptRemovals = async (householdId: string) =>
+        (
+          await db.query<{ item_id: string }>(
+            `SELECT item_id::text AS item_id FROM kitchen_item_tombstone WHERE household_id = $1`,
+            [householdId],
+          )
+        ).rows.map((row) => row.item_id);
+
+      const floorOf = async (householdId: string) =>
+        (
+          await db.query<{ removed_before: Date; evicted_seq: string }>(
+            `SELECT removed_before, evicted_seq::text AS evicted_seq FROM kitchen_sync_floor
+              WHERE household_id = $1`,
+            [householdId],
+          )
+        ).rows[0];
+
+      it("N2 at the cap the oldest removal is evicted and the floor is exactly its time", async () => {
         const capped = await another({
           kitchenConfig: resolveKitchenConfig({ sync: { maxRemovalsPerHousehold: 100 } }),
         });
         const home = await signInWithHousehold(capped);
-        const firstCursor = (await sync(home, { cursor: null, changes: [] }, capped)).cursor;
-        const adds = Array.from({ length: 101 }, (_, i) =>
-          change({ ingredient: { customName: `Hilang fiktif ${i}` }, category: "staples" }),
+        // Item i is removed (200 - i) seconds ago: item 0 is the oldest removal.
+        const ids = await addAndRemove(capped, home, "Hilang fiktif", 101, (i) => 200 - i);
+        const kept = await keptRemovals(home.householdId);
+        expect(kept).toHaveLength(100);
+        expect(kept).not.toContain(ids[0]);
+        expect(kept.sort()).toEqual(ids.slice(1).sort());
+        const now = capped.clock.now().getTime();
+        expect((await floorOf(home.householdId))?.removed_before.toISOString()).toBe(
+          new Date(now - 200_000).toISOString(),
         );
-        await sync(home, { cursor: null, changes: adds.slice(0, 100) }, capped);
-        await sync(home, { cursor: null, changes: adds.slice(100) }, capped);
-        capped.clock.advance(1);
-        const removes = adds.map((a) => ({ ...a, changeId: randomUUID(), operation: "remove" }));
-        for (const batch of [removes.slice(0, 100), removes.slice(100)]) {
-          const removed = await sync(home, { cursor: null, changes: batch }, capped);
-          expect(removed.results.every((r) => r.outcome === "applied")).toBe(true);
-        }
-        const { rows } = await db.query<{ n: number | string }>(
-          `SELECT count(*) AS n FROM kitchen_item_tombstone WHERE household_id = $1`,
-          [home.householdId],
+        // For the evicted ingredient: a create from before its removal is superseded,
+        // one from after it is applied.
+        const before = await sync(
+          home,
+          {
+            cursor: null,
+            changes: [
+              change({
+                ingredient: { customName: "Hilang fiktif 0" },
+                category: "staples",
+                ageMs: 200_500,
+              }),
+            ],
+          },
+          capped,
         );
-        expect(Number(rows[0]?.n)).toBe(100);
-        // Whether or not its removal was the one evicted, a change from before
-        // the removals never adds the item back (floor or kept removal).
-        const evicted = change({
-          ingredient: { customName: "Hilang fiktif 0" },
-          category: "staples",
-          ageMs: 500,
+        expect(before.results[0]).toMatchObject({ outcome: "superseded", itemId: null });
+        const after = await sync(
+          home,
+          {
+            cursor: null,
+            changes: [
+              change({
+                ingredient: { customName: "Hilang fiktif 0" },
+                category: "staples",
+                ageMs: 199_500,
+              }),
+            ],
+          },
+          capped,
+        );
+        expect(after.results[0]?.outcome).toBe("applied");
+      });
+
+      it("N2 a lowered cap evicts several removals at once; the floor is the newest of them", async () => {
+        const roomy = await another({
+          kitchenConfig: resolveKitchenConfig({ sync: { maxRemovalsPerHousehold: 150 } }),
         });
-        expect(
-          (await sync(home, { cursor: null, changes: [evicted] }, capped)).results[0],
-        ).toMatchObject({ outcome: "superseded", itemId: null });
-        // A cursor from before the eviction resyncs in full.
-        expect((await sync(home, { cursor: firstCursor, changes: [] }, capped)).full).toBe(true);
+        const home = await signInWithHousehold(roomy);
+        // Item i is removed (300 - i) seconds ago.
+        const ids = await addAndRemove(roomy, home, "Banyak fiktif", 120, (i) => 300 - i);
+        expect(await keptRemovals(home.householdId)).toHaveLength(120);
+        // Deployed again with a cap of 100: the next removal evicts the 21 oldest.
+        const lowered = await another({
+          kitchenConfig: resolveKitchenConfig({ sync: { maxRemovalsPerHousehold: 100 } }),
+        });
+        lowered.clock.advance((roomy.clock.now().getTime() - lowered.clock.now().getTime()) / 1000);
+        const last = await add(
+          home,
+          { customName: "Terakhir fiktif", category: "staples" },
+          lowered,
+        );
+        await lowered.request("DELETE", `${ITEMS}/${last.id}`, { token: home.token });
+        const kept = await keptRemovals(home.householdId);
+        expect(kept).toHaveLength(100);
+        // Items 0..20 (removed 300 s to 280 s ago) are gone; 21..119 and the last one stay.
+        expect(kept.sort()).toEqual([...ids.slice(21), last.id].sort());
+        const now = lowered.clock.now().getTime();
+        // The newest evicted removal (item 20, 280 s ago), not the oldest (min).
+        expect((await floorOf(home.householdId))?.removed_before.toISOString()).toBe(
+          new Date(now - 280_000).toISOString(),
+        );
+      });
+
+      it("N3 a cursor issued in the same millisecond as an eviction still resyncs in full", async () => {
+        const capped = await another({
+          kitchenConfig: resolveKitchenConfig({ sync: { maxRemovalsPerHousehold: 100 } }),
+        });
+        const home = await signInWithHousehold(capped);
+        await addAndRemove(capped, home, "Penuh fiktif", 100, (i) => 100 - i);
+        // An item the phone knows about, added long ago.
+        const known = await sync(
+          home,
+          {
+            cursor: null,
+            changes: [
+              change({
+                ingredient: { customName: "Lama fiktif" },
+                category: "staples",
+                ageMs: 9_000_000,
+              }),
+            ],
+          },
+          capped,
+        );
+        const knownId = known.results[0]?.itemId as string;
+        const cursor = (await sync(home, { cursor: null, changes: [] }, capped)).cursor;
+        // In the same millisecond (the test clock does not move), a queued removal
+        // older than every kept one is recorded and evicted at once.
+        const removal = await sync(
+          home,
+          {
+            cursor: null,
+            changes: [
+              change({
+                ingredient: { customName: "Lama fiktif" },
+                operation: "remove",
+                ageMs: 8_000_000,
+              }),
+            ],
+          },
+          capped,
+        );
+        expect(removal.results[0]?.outcome).toBe("applied");
+        expect(await keptRemovals(home.householdId)).not.toContain(knownId);
+        const floor = await floorOf(home.householdId);
+        expect(BigInt(floor?.evicted_seq ?? "0")).toBeGreaterThan(0n);
+        // The cursor's time equals the eviction time, but its position is below the
+        // evicted removal: the phone gets the whole kitchen, without the item.
+        const resync = await sync(home, { cursor, changes: [] }, capped);
+        expect(resync.full).toBe(true);
+        expect(resync.items.map((i) => i.id)).not.toContain(knownId);
+        // A cursor issued after the eviction continues incrementally.
+        const next = await sync(home, { cursor: resync.cursor, changes: [] }, capped);
+        expect(next.full).toBe(false);
+      });
+
+      it("N1 replaying an add key after the item was removed and added again answers 200 created: false", async () => {
+        const home = await signInWithHousehold(api);
+        const key = randomUUID();
+        const first = await api.request("POST", ITEMS, {
+          token: home.token,
+          body: { ingredientId: "fx_kit_daun_salam" },
+          headers: { "idempotency-key": key },
+        });
+        expect(first.status).toBe(201);
+        const id = (first.body as ItemBody).id;
+        // Before anything else, a replay is the first result.
+        const same = await api.request("POST", ITEMS, {
+          token: home.token,
+          body: { ingredientId: "fx_kit_daun_salam" },
+          headers: { "idempotency-key": key },
+        });
+        expect(same.status).toBe(201);
+        api.clock.advance(60);
+        await api.request("DELETE", `${ITEMS}/${id}`, { token: home.token });
+        const gone = await api.request("POST", ITEMS, {
+          token: home.token,
+          body: { ingredientId: "fx_kit_daun_salam" },
+          headers: { "idempotency-key": key },
+        });
+        expectProblem(gone, 409, "idempotency_key_reused");
+        api.clock.advance(60);
+        const again = await add(home, { ingredientId: "fx_kit_daun_salam", state: "out" });
+        expect(again.id).toBe(id);
+        const replay = await api.request("POST", ITEMS, {
+          token: home.token,
+          body: { ingredientId: "fx_kit_daun_salam" },
+          headers: { "idempotency-key": key },
+        });
+        expect(replay.status, replay.raw).toBe(200);
+        expect(replay.body).toMatchObject({ id, state: "out" });
+        // Nothing was written by the replay.
+        expect((await list(home)).map((i) => [i.id, i.state])).toEqual([[id, "out"]]);
       });
     });
 
