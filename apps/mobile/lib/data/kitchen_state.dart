@@ -659,7 +659,7 @@ final class KitchenController extends Notifier<KitchenState> {
       op: op,
       patch: patch,
       stamp: ClockReading(
-        timeline: 'pending',
+        timeline: QueuedChange.pendingTimeline,
         elapsedMs: 0,
         wallMs: DateTime.now().millisecondsSinceEpoch,
       ),
@@ -768,7 +768,11 @@ final class KitchenController extends Notifier<KitchenState> {
     final size = _isolate > 0
         ? 1
         : min(100, max(1, _config.get(ConfigKeys.kitchenSyncBatchSize)));
-    final batch = _queue.take(size).toList();
+    // A change made while the clock was read has no stamp yet: it waits
+    // for the next pass instead of being sent or expired with the phone's
+    // uptime as its age (security review T-034 L1). Stamps arrive in queue
+    // order, so unstamped changes are always at the end.
+    final batch = _queue.takeWhile((c) => c.isStamped).take(size).toList();
     _inFlight = {for (final c in batch) c.changeId};
     _emit();
     final result = await _repo.sync(
@@ -964,7 +968,7 @@ final class KitchenController extends Notifier<KitchenState> {
     final maxAgeMs = hours * 3600000;
     final expired = {
       for (final c in _queue)
-        if (ageBetween(c.stamp, now) > maxAgeMs) c.changeId,
+        if (c.isStamped && ageBetween(c.stamp, now) > maxAgeMs) c.changeId,
     };
     if (expired.isEmpty) return;
     _unqueue(expired);
