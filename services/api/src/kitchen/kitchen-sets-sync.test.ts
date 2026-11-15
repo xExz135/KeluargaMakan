@@ -720,26 +720,43 @@ for (const target of DATABASE_TARGETS) {
         });
       });
 
-      it("KIT-16 ageMs is never in the future and is bounded in the past (configuration)", async () => {
+      it("L3 KIT-16 a change is dated now minus its age; an age out of range rejects only that change", async () => {
         const h = await another({
-          kitchenConfig: resolveKitchenConfig({ sync: { maxChangeAgeHours: 24 } }),
+          kitchenConfig: resolveKitchenConfig({
+            sync: { maxChangeAgeHours: 24, recordRetentionDays: 1 },
+          }),
         });
         const home = await signInWithHousehold(h);
+        const good = change({
+          ingredient: { ingredientId: "fx_kit_tempe" },
+          ageMs: 10 * HOUR * 1000,
+        });
         const result = await sync(
           home,
           {
             cursor: null,
             changes: [
-              change({ ingredient: { ingredientId: "fx_kit_tempe" }, ageMs: 2_592_000_000 }),
+              change({ ingredient: { ingredientId: "fx_kit_garam" }, ageMs: 25 * HOUR * 1000 }),
+              change({ ingredient: { ingredientId: "fx_kit_beras" }, ageMs: -1 }),
+              change({ ingredient: { ingredientId: "fx_kit_kemangi" }, ageMs: 2_592_000_001 }),
+              good,
             ],
           },
           h,
         );
-        const id = result.results[0]?.itemId as string;
+        expect(result.results.map((r) => [r.outcome, r.errorCode])).toEqual([
+          ["rejected", "validation_failed"],
+          ["rejected", "validation_failed"],
+          ["rejected", "validation_failed"],
+          ["applied", null],
+        ]);
+        expect(result.items.map((i) => i.ingredientId)).toEqual(["fx_kit_tempe"]);
+        const id = result.results[3]?.itemId as string;
         expect((await editedAtOf(id))?.toISOString()).toBe(
-          new Date(h.clock.now().getTime() - 24 * HOUR * 1000).toISOString(),
+          new Date(h.clock.now().getTime() - 10 * HOUR * 1000).toISOString(),
         );
-        for (const ageMs of [-1, 2_592_000_001, 1.5, "10", null]) {
+        // Only a value that is not a whole number breaks the request's shape.
+        for (const ageMs of [1.5, "10", null]) {
           expectProblem(
             await h.request("POST", SYNC, {
               token: home.token,
@@ -752,6 +769,132 @@ for (const target of DATABASE_TARGETS) {
             "validation_failed",
           );
         }
+      });
+
+      it("M1 an old queued change never beats a newer online removal or edit (review T-032 probe P1)", async () => {
+        const MIN = 60_000;
+        // (b) Removed online at T; 80 minutes later a change made at T - 40 min arrives.
+        const b = await signInWithHousehold(api);
+        const beras = await add(b, { ingredientId: "fx_kit_beras" });
+        await api.request("DELETE", `${ITEMS}/${beras.id}`, { token: b.token });
+        api.clock.advance(80 * 60);
+        const b2 = { ...b, token: await freshToken(api, b) };
+        const revived = await sync(b2, {
+          cursor: null,
+          changes: [
+            change({
+              ingredient: { ingredientId: "fx_kit_beras" },
+              state: "available",
+              ageMs: 120 * MIN,
+            }),
+          ],
+        });
+        expect(revived.results[0]).toMatchObject({ outcome: "superseded", itemId: null });
+        expect(await list(b2)).toEqual([]);
+        // (c) Marked out online at T; the same kind of older change says available.
+        const c = await signInWithHousehold(api);
+        const garam = await add(c, { ingredientId: "fx_kit_garam" });
+        await patch(c, garam.id, { state: "out" });
+        api.clock.advance(80 * 60);
+        const c2 = { ...c, token: await freshToken(api, c) };
+        const reverted = await sync(c2, {
+          cursor: null,
+          changes: [
+            change({
+              ingredient: { ingredientId: "fx_kit_garam" },
+              state: "available",
+              ageMs: 120 * MIN,
+            }),
+          ],
+        });
+        expect(reverted.results[0]).toMatchObject({ outcome: "superseded", itemId: garam.id });
+        expect((await list(c2)).map((i) => i.state)).toEqual(["out"]);
+        // (a) Both through the sync: added 3 hours ago, removed 80 minutes ago,
+        // then a change made 120 minutes ago arrives.
+        const a = await signInWithHousehold(api);
+        await add(a, { ingredientId: "fx_kit_tempe" });
+        api.clock.advance(3 * 60 * 60);
+        const a2 = { ...a, token: await freshToken(api, a) };
+        const removal = await sync(a2, {
+          cursor: null,
+          changes: [
+            change({
+              ingredient: { ingredientId: "fx_kit_tempe" },
+              operation: "remove",
+              ageMs: 80 * MIN,
+            }),
+          ],
+        });
+        expect(removal.results[0]?.outcome).toBe("applied");
+        const older = await sync(a2, {
+          cursor: null,
+          changes: [
+            change({
+              ingredient: { ingredientId: "fx_kit_tempe" },
+              state: "available",
+              ageMs: 120 * MIN,
+            }),
+          ],
+        });
+        expect(older.results[0]?.outcome).toBe("superseded");
+        expect(await list(a2)).toEqual([]);
+        // With a 1-hour limit the 2-hour-old change is not accepted at all.
+        const strict = await another({
+          kitchenConfig: resolveKitchenConfig({
+            sync: { maxChangeAgeHours: 1, recordRetentionDays: 1 },
+          }),
+        });
+        const d = await signInWithHousehold(strict);
+        const late = await sync(
+          d,
+          {
+            cursor: null,
+            changes: [change({ ingredient: { ingredientId: "fx_kit_tempe" }, ageMs: 120 * MIN })],
+          },
+          strict,
+        );
+        expect(late.results[0]).toMatchObject({
+          outcome: "rejected",
+          errorCode: "validation_failed",
+        });
+      });
+
+      it("M1 L1 a change older than the kept removals never adds an item, even when retention is misconfigured (probe P2)", async () => {
+        // Built directly, bypassing the startup check, to show the sync does not rely on it.
+        const h = await another({
+          kitchenConfig: {
+            ...resolveKitchenConfig({}),
+            sync: { maxChangeAgeHours: 720, recordRetentionDays: 1 },
+          },
+        });
+        const home = await signInWithHousehold(h);
+        const tempe = await add(home, { ingredientId: "fx_kit_tempe" }, h);
+        await h.request("DELETE", `${ITEMS}/${tempe.id}`, { token: home.token });
+        h.clock.advance(2 * DAY);
+        await purgeKitchenSyncRecords(db, new Date(h.clock.now().getTime() - DAY * 1000));
+        const session = { ...home, token: await freshToken(h, home) };
+        const old = await sync(
+          session,
+          {
+            cursor: null,
+            changes: [
+              change({ ingredient: { ingredientId: "fx_kit_tempe" }, ageMs: 3 * DAY * 1000 }),
+            ],
+          },
+          h,
+        );
+        expect(old.results[0]).toMatchObject({ outcome: "superseded", itemId: null });
+        expect(await list(session, h)).toEqual([]);
+        // A change from inside the kept window still adds the item.
+        const fresh = await sync(
+          session,
+          {
+            cursor: null,
+            changes: [change({ ingredient: { ingredientId: "fx_kit_tempe" }, ageMs: HOUR * 1000 })],
+          },
+          h,
+        );
+        expect(fresh.results[0]?.outcome).toBe("applied");
       });
 
       it("KIT-16 a request with the wrong shape is refused whole and applies nothing", async () => {

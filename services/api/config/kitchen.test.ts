@@ -43,9 +43,25 @@ describe("kitchen config (T-031)", () => {
     [{ usageHalfLifeDays: 0 }, /usageHalfLifeDays/],
     [{ sync: { maxChangeAgeHours: 721 } }, /maxChangeAgeHours/],
     [{ sync: { recordRetentionDays: 0 } }, /recordRetentionDays/],
+    // T-032 L1: removals kept for less time than the oldest accepted change.
+    [{ sync: { recordRetentionDays: 1 } }, /must cover sync.maxChangeAgeHours/],
+    [{ sync: { maxChangeAgeHours: 49, recordRetentionDays: 2 } }, /must cover/],
     [{ sync: { other: 1 } }, /Unknown kitchen config: sync.other/],
   ])("refuses %j", (overrides, message) => {
     expect(() => resolveKitchenConfig(overrides)).toThrow(message);
+  });
+
+  it("T-032 L1 accepts sync settings where removals outlive the oldest accepted change", () => {
+    expect(
+      resolveKitchenConfig({ sync: { maxChangeAgeHours: 48, recordRetentionDays: 2 } }).sync,
+    ).toEqual({
+      maxChangeAgeHours: 48,
+      recordRetentionDays: 2,
+    });
+    expect(resolveKitchenConfig({}).sync).toEqual({
+      maxChangeAgeHours: 720,
+      recordRetentionDays: 30,
+    });
   });
 
   it("refuses invalid JSON and keys from the prototype chain", () => {
