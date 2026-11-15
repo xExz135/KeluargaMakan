@@ -69,6 +69,12 @@ export interface KitchenConfig {
      * compared with the removals made since (T-032 L1).
      */
     readonly recordRetentionDays: number;
+    /**
+     * Removals kept per household (T-032 L4). Beyond it the oldest are
+     * evicted; older changes then never add an item, and older cursors
+     * resync in full.
+     */
+    readonly maxRemovalsPerHousehold: number;
   };
 }
 
@@ -82,7 +88,11 @@ export const defaultKitchenConfig: KitchenConfig = Object.freeze({
   search: Object.freeze({ defaultResults: 20, maxResults: 50 }),
   maxSetsPerHousehold: 20,
   usageHalfLifeDays: 30,
-  sync: Object.freeze({ maxChangeAgeHours: 30 * 24, recordRetentionDays: 30 }),
+  sync: Object.freeze({
+    maxChangeAgeHours: 30 * 24,
+    recordRetentionDays: 30,
+    maxRemovalsPerHousehold: 1000,
+  }),
 });
 
 const REFERENCE_ID = new RegExp(ID_PATTERN);
@@ -146,7 +156,7 @@ export function resolveKitchenConfig(overrides: unknown = {}): KitchenConfig {
   );
   const sync = overrides["sync"] ?? {};
   if (!isRecord(sync)) throw new Error("kitchen config sync must be an object");
-  onlyKeys(sync, ["maxChangeAgeHours", "recordRetentionDays"], "sync.");
+  onlyKeys(sync, ["maxChangeAgeHours", "recordRetentionDays", "maxRemovalsPerHousehold"], "sync.");
   const search = overrides["search"] ?? {};
   if (!isRecord(search)) throw new Error("kitchen config search must be an object");
   onlyKeys(search, ["defaultResults", "maxResults"], "search.");
@@ -200,6 +210,12 @@ export function resolveKitchenConfig(overrides: unknown = {}): KitchenConfig {
         1,
         90,
         "sync.recordRetentionDays",
+      ),
+      maxRemovalsPerHousehold: wholeNumber(
+        sync["maxRemovalsPerHousehold"] ?? defaultKitchenConfig.sync.maxRemovalsPerHousehold,
+        100,
+        10_000,
+        "sync.maxRemovalsPerHousehold",
       ),
     }),
   });

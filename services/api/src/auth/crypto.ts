@@ -8,7 +8,8 @@ export type HashPurpose =
   | "refresh_token"
   | "idempotent_request"
   | "kitchen_sync_cursor"
-  | "kitchen_sync_change";
+  | "kitchen_sync_change"
+  | "kitchen_removal";
 
 /**
  * HMAC-SHA256 under the server's hash key, over the purpose and each part

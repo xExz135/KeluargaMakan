@@ -43,6 +43,7 @@ describe("kitchen config (T-031)", () => {
     [{ usageHalfLifeDays: 0 }, /usageHalfLifeDays/],
     [{ sync: { maxChangeAgeHours: 721 } }, /maxChangeAgeHours/],
     [{ sync: { recordRetentionDays: 0 } }, /recordRetentionDays/],
+    [{ sync: { maxRemovalsPerHousehold: 99 } }, /maxRemovalsPerHousehold/],
     // T-032 L1: removals kept for less time than the oldest accepted change.
     [{ sync: { recordRetentionDays: 1 } }, /must cover sync.maxChangeAgeHours/],
     [{ sync: { maxChangeAgeHours: 49, recordRetentionDays: 2 } }, /must cover/],
@@ -57,10 +58,12 @@ describe("kitchen config (T-031)", () => {
     ).toEqual({
       maxChangeAgeHours: 48,
       recordRetentionDays: 2,
+      maxRemovalsPerHousehold: 1000,
     });
     expect(resolveKitchenConfig({}).sync).toEqual({
       maxChangeAgeHours: 720,
       recordRetentionDays: 30,
+      maxRemovalsPerHousehold: 1000,
     });
   });
 

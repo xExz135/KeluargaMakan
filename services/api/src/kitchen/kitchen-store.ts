@@ -148,6 +148,8 @@ export interface ItemValues {
 }
 
 export interface NewItem {
+  /** Reuse this ID (a removed item added again); a new one otherwise. */
+  readonly id?: string;
   readonly householdId: string;
   readonly accountId: string | null;
   readonly ref: IngredientRef;
@@ -164,10 +166,11 @@ export async function insertItem(tx: SqlExecutor, item: NewItem): Promise<Kitche
   const { rows } = await withDbErrors(() =>
     tx.query<KitchenItemRow>(
       `INSERT INTO kitchen_item
-         (household_id, ingredient_id, custom_name, custom_key, category, state, quantity,
+         (id, household_id, ingredient_id, custom_name, custom_key, category, state, quantity,
           brand_id, brand_custom_name, use_score, use_score_at, is_default_staple,
           changed_by_account_id, changed_at, client_changed_at, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $14)
+       VALUES (COALESCE($16::uuid, gen_random_uuid()), $1, $2, $3, $4, $5, $6, $7, $8, $9,
+               $10, $11, $12, $13, $14, $15, $14)
        RETURNING ${COLUMNS}`,
       [
         item.householdId,
@@ -185,6 +188,7 @@ export async function insertItem(tx: SqlExecutor, item: NewItem): Promise<Kitche
         item.accountId,
         item.now,
         v.editedAt,
+        item.id ?? null,
       ],
     ),
   );
@@ -231,76 +235,149 @@ export async function writeItem(
 }
 
 /**
- * Removes an item and records the removal (KIT-16), dated `removedAt` on
- * the server's clock, so a sync reports it and an older change cannot bring
- * the item back.
+ * The key a removal is kept under: the reference ingredient ID, or for a
+ * custom ingredient an HMAC of its name key under the server's hash key
+ * (security review T-032 L4), never the name itself.
  */
+export type RemovalKey =
+  | { readonly kind: "reference"; readonly ingredientId: string }
+  | { readonly kind: "custom"; readonly keyHash: Buffer };
+
+export interface Removal {
+  readonly removedAt: Date;
+  readonly itemId: string | null;
+}
+
+export async function readRemoval(
+  tx: SqlExecutor,
+  householdId: string,
+  key: RemovalKey,
+): Promise<Removal | null> {
+  const { rows } = await withDbErrors(() =>
+    key.kind === "reference"
+      ? tx.query<{ removed_at: Date | string; item_id: string | null }>(
+          `SELECT removed_at, item_id::text AS item_id FROM kitchen_item_tombstone
+            WHERE household_id = $1 AND ingredient_id = $2`,
+          [householdId, key.ingredientId],
+        )
+      : tx.query<{ removed_at: Date | string; item_id: string | null }>(
+          `SELECT removed_at, item_id::text AS item_id FROM kitchen_item_tombstone
+            WHERE household_id = $1 AND custom_key_hash = $2`,
+          [householdId, key.keyHash],
+        ),
+  );
+  const row = rows[0];
+  return row === undefined ? null : { removedAt: new Date(row.removed_at), itemId: row.item_id };
+}
+
+/**
+ * Records a removal, keeping one per ingredient: the newest removal time
+ * wins, the latest removed item ID is kept, and the removal takes the next
+ * sync position.
+ */
+export async function upsertRemoval(
+  tx: SqlExecutor,
+  householdId: string,
+  key: RemovalKey,
+  itemId: string | null,
+  removedAt: Date,
+  now: Date,
+): Promise<void> {
+  const update = `DO UPDATE SET
+      removed_at = greatest(kitchen_item_tombstone.removed_at, EXCLUDED.removed_at),
+      item_id = COALESCE(EXCLUDED.item_id, kitchen_item_tombstone.item_id),
+      recorded_at = EXCLUDED.recorded_at,
+      change_seq = nextval('kitchen_change_seq')`;
+  await withDbErrors(() =>
+    key.kind === "reference"
+      ? tx.query(
+          `INSERT INTO kitchen_item_tombstone
+             (household_id, item_id, ingredient_id, removed_at, recorded_at)
+           VALUES ($1, $2, $3, $4, $5)
+           ON CONFLICT (household_id, ingredient_id) WHERE ingredient_id IS NOT NULL ${update}`,
+          [householdId, itemId, key.ingredientId, removedAt, now],
+        )
+      : tx.query(
+          `INSERT INTO kitchen_item_tombstone
+             (household_id, item_id, custom_key_hash, removed_at, recorded_at)
+           VALUES ($1, $2, $3, $4, $5)
+           ON CONFLICT (household_id, custom_key_hash) WHERE custom_key_hash IS NOT NULL ${update}`,
+          [householdId, itemId, key.keyHash, removedAt, now],
+        ),
+  );
+}
+
+/** Removes an item and records the removal (KIT-16), dated `removedAt` on the server's clock. */
 export async function removeItem(
   tx: SqlExecutor,
   householdId: string,
   row: KitchenItemRow,
-  removedAt: Date,
-  now: Date,
-): Promise<void> {
-  await withDbErrors(async () => {
-    await tx.query(`DELETE FROM kitchen_item WHERE id = $1 AND household_id = $2`, [
-      row.id,
-      householdId,
-    ]);
-    await tx.query(
-      `INSERT INTO kitchen_item_tombstone
-         (household_id, item_id, ingredient_id, custom_key, removed_at, recorded_at)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
-      [householdId, row.id, row.ingredient_id, row.custom_key, removedAt, now],
-    );
-  });
-}
-
-/** A removal of an ingredient the household does not have (a later-arriving older add still loses to it). */
-export async function recordRemoval(
-  tx: SqlExecutor,
-  householdId: string,
-  ref: IngredientRef,
+  key: RemovalKey,
   removedAt: Date,
   now: Date,
 ): Promise<void> {
   await withDbErrors(() =>
-    tx.query(
-      `INSERT INTO kitchen_item_tombstone
-         (household_id, item_id, ingredient_id, custom_key, removed_at, recorded_at)
-       VALUES ($1, NULL, $2, $3, $4, $5)`,
-      [
-        householdId,
-        ref.kind === "reference" ? ref.ingredientId : null,
-        ref.kind === "custom" ? ref.key : null,
-        removedAt,
-        now,
-      ],
-    ),
+    tx.query(`DELETE FROM kitchen_item WHERE id = $1 AND household_id = $2`, [row.id, householdId]),
   );
+  await upsertRemoval(tx, householdId, key, row.id, removedAt, now);
 }
 
-/** When the ingredient was last removed, on the server's clock, or null. */
-export async function lastRemovalOf(
+export interface SyncFloor {
+  /** The newest removal time evicted at the cap: older changes never add an item. */
+  readonly removedBefore: Date;
+  /** When removals were last evicted: older cursors resync in full. */
+  readonly evictedAt: Date;
+}
+
+export async function readSyncFloor(
   tx: SqlExecutor,
   householdId: string,
-  ref: IngredientRef,
-): Promise<Date | null> {
+): Promise<SyncFloor | null> {
   const { rows } = await withDbErrors(() =>
-    ref.kind === "reference"
-      ? tx.query<{ at: Date | string | null }>(
-          `SELECT max(removed_at) AS at FROM kitchen_item_tombstone
-            WHERE household_id = $1 AND ingredient_id = $2`,
-          [householdId, ref.ingredientId],
-        )
-      : tx.query<{ at: Date | string | null }>(
-          `SELECT max(removed_at) AS at FROM kitchen_item_tombstone
-            WHERE household_id = $1 AND custom_key = $2`,
-          [householdId, ref.key],
-        ),
+    tx.query<{ removed_before: Date | string; evicted_at: Date | string }>(
+      `SELECT removed_before, evicted_at FROM kitchen_sync_floor WHERE household_id = $1`,
+      [householdId],
+    ),
   );
-  const at = rows[0]?.at ?? null;
-  return at === null ? null : new Date(at);
+  const row = rows[0];
+  return row === undefined
+    ? null
+    : { removedBefore: new Date(row.removed_before), evictedAt: new Date(row.evicted_at) };
+}
+
+/**
+ * Keeps at most `cap` removals for the household (security review T-032
+ * L4): the oldest beyond it are deleted and the household's floor moves up
+ * to the newest of them.
+ */
+export async function capRemovals(
+  tx: SqlExecutor,
+  householdId: string,
+  cap: number,
+  now: Date,
+): Promise<void> {
+  await withDbErrors(async () => {
+    const { rows } = await tx.query<{ newest: Date | string | null }>(
+      `WITH evicted AS (
+         DELETE FROM kitchen_item_tombstone
+          WHERE id IN (
+            SELECT id FROM kitchen_item_tombstone WHERE household_id = $1
+             ORDER BY removed_at DESC, id DESC OFFSET $2)
+         RETURNING removed_at)
+       SELECT max(removed_at) AS newest FROM evicted`,
+      [householdId, cap],
+    );
+    const newest = rows[0]?.newest ?? null;
+    if (newest === null) return;
+    await tx.query(
+      `INSERT INTO kitchen_sync_floor (household_id, removed_before, evicted_at)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (household_id) DO UPDATE
+         SET removed_before = greatest(kitchen_sync_floor.removed_before, EXCLUDED.removed_before),
+             evicted_at = EXCLUDED.evicted_at`,
+      [householdId, newest, now],
+    );
+  });
 }
 
 /** Items and removals after sync position `after` (all items when null), and the newest position. */
