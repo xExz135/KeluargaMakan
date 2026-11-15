@@ -41,6 +41,13 @@ BilingualName _name(Object? json, String what) {
   );
 }
 
+void _unique(Iterable<String> ids, String what) {
+  final seen = <String>{};
+  for (final id in ids) {
+    if (!seen.add(id)) _bad('repeated $what');
+  }
+}
+
 /// A category code, or null when this app version does not know it.
 api.KitchenCategory? kitchenCategoryFromWire(Object? value) =>
     api.KitchenCategory.fromJson(value);
@@ -96,8 +103,12 @@ KitchenList decodeKitchenList(Object? json) {
   if (version != null && version is! String) {
     _bad('kitchen list referenceVersion');
   }
+  final decoded = [for (final item in items) decodeKitchenItem(item)];
+  // One item per ID: a repeated ID would show twice and fail the phone's
+  // copy (security review T-033 L1).
+  _unique(decoded.map((i) => i.id), 'kitchen item id');
   return KitchenList(
-    items: [for (final item in items) decodeKitchenItem(item)],
+    items: decoded,
     maxItems: maxItems,
     referenceVersion: version as String?,
     source: const FromNetwork(),
@@ -123,10 +134,12 @@ CatalogEntry decodeCatalogIngredient(Object? json) {
 IngredientCatalog decodeCatalog(Object? json, {required String? etag}) {
   final raw = _object(json, 'catalog');
   final items = _list(raw['items'], 'catalog items');
+  final decoded = [for (final item in items) decodeCatalogIngredient(item)];
+  _unique(decoded.map((i) => i.ingredientId), 'catalog ingredientId');
   return IngredientCatalog(
     referenceVersion: _string(raw['referenceVersion'], 'catalog version'),
     etag: etag,
-    items: [for (final item in items) decodeCatalogIngredient(item)],
+    items: decoded,
     source: const FromNetwork(),
   );
 }
