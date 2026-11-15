@@ -24,7 +24,6 @@ import '../helpers/pump_app.dart';
 import 'kitchen_test_helpers.dart';
 
 const _secret = 'Obat herbal Nenek Rahasia';
-const _items = '/v1/household/kitchen/items';
 
 /// Makes every insert into [table] fail, as a full disk or a constraint
 /// would. SQLite's error text then holds the statement's parameters.
@@ -163,69 +162,56 @@ void main() {
     expect(await cache.catalog(), isNull);
   });
 
-  testWidgets('L3 a toggle answered with another state stops, accepts the '
-      'server\'s state and sends nothing more', (tester) async {
+  testWidgets('L3 KIT-02 a state this app does not know shows as Habis, '
+      'never Ada, and is not sent back', (tester) async {
     late String id;
-    await openKitchen(
+    final phone = await openKitchen(
       tester,
       server,
       seed: (a) => id =
-          server.seedKitchenItem(
-                a,
-                ingredientId: 'fx_kit_tempe',
-                state: 'out',
-              )['id']!
+          server.seedKitchenItem(a, ingredientId: 'fx_kit_tempe')['id']!
               as String,
     );
-    // The server answers a state this app does not know (read as out).
-    server.intercept = (r) {
-      if (r.method != 'PATCH') return null;
-      final item = server.kitchenOf(server.accountFor(kitchenContact)!).single;
-      return FakeServer.json({...item, 'state': 'hampir_habis'});
-    };
-    await tester.tap(itemToggle(id));
-    await tester.pump(const Duration(seconds: 5));
-    await tester.pumpAndSettle();
-    expect(requestsTo(server, 'PATCH', id), hasLength(1));
-    expect(toggleLabel(tester, id), 'Tempe, habis. Ketuk untuk tandai ada.');
-    expect(find.byKey(const Key('kitchen.item.pendingDot')), findsNothing);
-  });
-
-  testWidgets('L4 an add without an answer, then a refresh that shows it, a '
-      'removal and Undo: Undo uses a new Idempotency-Key', (tester) async {
-    final phone = await openKitchen(tester, server);
-    var lose = true;
-    server.intercept = (r) {
-      if (!lose || r.method != 'POST' || r.url.path != _items) return null;
-      lose = false;
-      // The server stored it, but the answer never arrived.
-      server.seedKitchenItem(
-        server.accountFor(kitchenContact)!,
-        ingredientId: 'fx_kit_tempe',
-      );
-      throw http.ClientException('connection reset');
-    };
-    await search(tester, 'tempe');
-    await tapKeyed(tester, 'kitchen.search.add.fx_kit_tempe');
-    await tapKeyed(tester, 'kitchen.search.close');
+    final sent = sentChanges(server).length;
+    server.editKitchenItemElsewhere(phone.account, id, state: 'hampir_habis');
     await phone.container.read(kitchenProvider.notifier).refresh();
     await tester.pumpAndSettle();
-    final id = server.kitchenOf(phone.account).single['id']! as String;
-    expect(itemToggle(id), findsOneWidget);
+    expect(toggleLabel(tester, id), 'Tempe, habis. Ketuk untuk tandai ada.');
+    expect(find.byKey(const Key('kitchen.item.pendingDot')), findsNothing);
+    expect(sentChanges(server), hasLength(sent));
+  });
 
-    await tester.longPress(itemToggle(id));
+  testWidgets('L4 KIT-16 a sync whose answer is lost is sent again with the '
+      'same change IDs, and the server applies it once', (tester) async {
+    late String id;
+    final phone = await openKitchen(
+      tester,
+      server,
+      seed: (a) => id =
+          server.seedKitchenItem(a, ingredientId: 'fx_kit_tempe')['id']!
+              as String,
+    );
+    server.kitchen.loseNextSyncAnswer = true;
+    await tester.tap(itemToggle(id));
     await tester.pumpAndSettle();
-    await tapKeyed(tester, 'kitchen.sheet.remove');
-    await tester.tap(find.byKey(const Key('kitchen.removed.undo')));
+    // The server applied it, but the phone never heard.
+    expect(server.kitchenOf(phone.account).single['state'], 'out');
+    expect(syncCaption(tester), 'Belum terkirim · 1 perubahan');
+
+    // Another phone changes it back in the meantime.
+    await tester.pump(const Duration(seconds: 1));
+    server.editKitchenItemElsewhere(phone.account, id, state: 'available');
+    phone.phone.sync.timers.fireAll();
     await tester.pumpAndSettle();
 
-    final keys = [
-      for (final r in requestsTo(server, 'POST', _items))
-        r.headers['idempotency-key'],
-    ];
-    expect(keys, hasLength(2));
-    expect(keys.first, isNot(keys.last));
-    expect(find.text('Tempe'), findsOneWidget);
+    final ids = [for (final c in sentChanges(server)) c['changeId']];
+    expect(ids, hasLength(2));
+    expect(ids.toSet(), hasLength(1));
+    // The replay returned the first result and was not applied again: the
+    // other phone's later change stays.
+    expect(server.kitchenOf(phone.account).single['state'], 'available');
+    expect(toggleLabel(tester, id), 'Tempe, ada. Ketuk untuk tandai habis.');
+    expect(syncCaption(tester), 'Tersimpan');
   });
 
   test('ACC-13 a save that started before sign-out began is dropped, even '

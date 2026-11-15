@@ -7,7 +7,10 @@
 // - Custom item (KIT-05): a small `help` icon and "Belum dikenal". It is not
 //   a safety badge; Cek Aman gives such items "Cek label" (SAF-09) on its
 //   own surfaces.
-// - Change on its way: a 6 dp dot, read as "Belum terkirim".
+// - A change not confirmed by the server yet (queued or on its way,
+//   KIT-16): a 6 dp dot, read as "Belum terkirim".
+// - Amount or brand (KIT-09): a second line, "Sedikit · {brand}", read
+//   after the name. A brand is a name only, never a safety mark.
 // One tap toggles; long press opens the item sheet. Height at least
 // `kitchen.toggleMinHeightDp`; names wrap and never truncate.
 
@@ -28,7 +31,8 @@ class KitchenItemToggle extends StatelessWidget {
     required this.minHeight,
     required this.onTap,
     this.isCustom = false,
-    this.sending = false,
+    this.pending = false,
+    this.details,
     this.onLongPress,
     this.stateOnly = false,
   });
@@ -37,7 +41,12 @@ class KitchenItemToggle extends StatelessWidget {
   final String name;
   final bool available;
   final bool isCustom;
-  final bool sending;
+
+  /// A change the server has not confirmed yet.
+  final bool pending;
+
+  /// The amount and brand line, or null.
+  final String? details;
   final double minHeight;
   final VoidCallback onTap;
   final VoidCallback? onLongPress;
@@ -71,8 +80,9 @@ class KitchenItemToggle extends StatelessWidget {
       available
           ? l10n.kitchenItemA11yAvailable(name)
           : l10n.kitchenItemA11yOut(name),
+      if (details != null && !stateOnly) '$details.',
       if (isCustom) l10n.kitchenItemA11yCustom,
-      if (sending) l10n.kitchenItemA11yPending,
+      if (pending) l10n.kitchenItemA11yPending,
     ].join(' ');
 
     final Widget text = stateOnly
@@ -144,6 +154,14 @@ class KitchenItemToggle extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         text,
+                        if (details case final line? when !stateOnly)
+                          Text(
+                            line,
+                            key: const Key('kitchen.item.details'),
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: foreground,
+                            ),
+                          ),
                         if (isCustom && !stateOnly)
                           Row(
                             mainAxisSize: MainAxisSize.min,
@@ -165,7 +183,7 @@ class KitchenItemToggle extends StatelessWidget {
                       ],
                     ),
                   ),
-                  if (sending) ...[
+                  if (pending) ...[
                     const SizedBox(width: SpacingTokens.s),
                     Container(
                       key: const Key('kitchen.item.pendingDot'),

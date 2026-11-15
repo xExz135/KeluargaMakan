@@ -4,6 +4,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
 import 'package:keluargamakan/core/api/token_store.dart';
 import 'package:keluargamakan/core/storage/key_value_store.dart';
 
@@ -46,6 +47,8 @@ Future<KitchenPhone> openKitchen(
   Map<String, Object?> config = const {},
   bool openTab = true,
 }) async {
+  // The server dates seeded items on the test's clock, like the phone.
+  server.now ??= () => tester.binding.clock.now();
   final tokens = server.seedSignedIn(contact);
   seed?.call(tokens.accountId);
   final usedPhone =
@@ -83,4 +86,44 @@ Future<void> search(WidgetTester tester, String query) async {
   await tester.enterText(find.byKey(const Key('kitchen.search.field')), query);
   await tester.pump(const Duration(milliseconds: 400));
   await tester.pumpAndSettle();
+}
+
+/// The kitchen sync endpoint (KIT-16).
+const syncPath = '/v1/household/kitchen/sync';
+
+/// Every queued change the phone sent, in order (contract `KitchenChange`).
+List<Map<String, Object?>> sentChanges(FakeServer server) => [
+  for (final body in server.kitchen.syncBodies)
+    for (final change in body['changes']! as List)
+      change as Map<String, Object?>,
+];
+
+/// A sent change without its random ID and its age, for comparing.
+Map<String, Object?> withoutIdAndAge(Map<String, Object?> change) => {
+  for (final e in change.entries)
+    if (e.key != 'changeId' && e.key != 'ageMs') e.key: e.value,
+};
+
+/// No answer from the kitchen sync and the reference endpoints.
+void goOffline(FakeServer server) =>
+    server.intercept = (r) =>
+        r.url.path == syncPath || r.url.path.startsWith('/v1/reference')
+        ? throw http.ClientException('offline')
+        : null;
+
+/// The sync caption under the Dapur Saya title.
+String syncCaption(WidgetTester tester) =>
+    tester.getSemantics(find.byKey(const Key('kitchen.sync.caption'))).label;
+
+/// Opens K4 for the item [id]: centres it on screen (clear of the FAB),
+/// then long-presses it.
+Future<void> openItemSheet(WidgetTester tester, String id) async {
+  await Scrollable.ensureVisible(
+    tester.element(itemToggle(id)),
+    alignment: 0.4,
+  );
+  await tester.pumpAndSettle();
+  await tester.longPress(itemToggle(id));
+  await tester.pumpAndSettle();
+  expect(find.byKey(const Key('kitchen.sheet')), findsOneWidget);
 }

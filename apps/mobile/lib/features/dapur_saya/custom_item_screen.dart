@@ -8,9 +8,11 @@
 // it; it is never forced.
 //
 // A full page rather than a sheet, like the T-028 forms, so it fits at
-// 200% text with the keyboard open. Without internet the input is kept
-// and the page says that adding needs internet (no offline queue until
-// T-034, QUESTIONS #68).
+// 200% text with the keyboard open. With or without internet the item is
+// added at once and queued (KIT-16). The name is checked here against the
+// server's rules first (text_rules.dart), so a name the server would refuse
+// is never queued; if the server still refuses it, Dapur Saya says so and
+// the item goes away.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -19,17 +21,17 @@ import 'package:keluargamakan_api/api.dart' as api;
 import '../../app/widgets/section_scaffold.dart';
 import '../../core/api/api_error_text.dart';
 import '../../core/api/api_problem.dart';
-import '../../core/api/api_result.dart';
 import '../../core/theme/tokens.dart';
 import '../../data/ingredient_search.dart';
 import '../../data/kitchen_state.dart';
 import '../../data/models/kitchen.dart';
+import '../../data/text_rules.dart';
 import '../../l10n/generated/app_localizations.dart';
 import '../auth/widgets/onboarding_scaffold.dart' show InlineMessage;
 import 'widgets/kitchen_widgets.dart';
 
 /// The contract's `KitchenCustomName` limit.
-const customNameMaxLength = 60;
+const customNameMaxLength = kitchenTextMaxLength;
 
 /// Opens K3 above the navigation. True when an ingredient was added.
 Future<bool> openCustomItem(BuildContext context, {String initialName = ''}) =>
@@ -73,66 +75,58 @@ class _CustomItemScreenState extends ConsumerState<CustomItemScreen> {
     super.dispose();
   }
 
-  int? get _maxItems => switch (ref.read(kitchenProvider)) {
-    KitchenLoaded(:final list) => list.maxItems,
-    _ => null,
-  };
-
-  void _fail(ApiFailure failure) {
+  void _done(KitchenAddResult result) {
     final l10n = AppLocalizations.of(context);
-    final fieldError = switch (failure) {
-      ProblemFailure(:final problem)
-          when problem.code == ApiErrorCode.validationFailed =>
-        problem.fieldErrors
-            .where((e) => e.pointer == '/customName')
-            .firstOrNull,
-      _ => null,
-    };
-    setState(() {
-      _saving = false;
-      if (fieldError != null) {
-        _nameError = ApiErrorText.field(
-          l10n,
-          fieldError.kind,
-          maxLength: customNameMaxLength,
-        );
-        _message = null;
-      } else {
-        _message = kitchenFailureText(
-          l10n,
-          failure,
-          write: KitchenWrite.add,
-          maxItems: _maxItems,
-        );
-      }
-    });
-  }
-
-  Future<void> _add() async {
-    final l10n = AppLocalizations.of(context);
-    final name = _name.text.trim();
-    setState(() {
-      _nameError = name.isEmpty ? l10n.errorFieldRequired : null;
-      _categoryMissing = _category == null;
-      _message = null;
-    });
-    if (name.isEmpty || _category == null) return;
-    setState(() => _saving = true);
-    final result = await ref
-        .read(kitchenProvider.notifier)
-        .add(CustomIngredient(name), category: _category);
-    if (!mounted) return;
     switch (result) {
-      case Ok():
+      case KitchenAdded():
         Navigator.of(context).pop(true);
-      case Err(:final failure):
-        _fail(failure);
+      case KitchenAddAtLimit(:final maxItems):
+        setState(() {
+          _saving = false;
+          _message = l10n.kitchenLimitReached(maxItems);
+        });
+      case KitchenAddUnavailable():
+        setState(() {
+          _saving = false;
+          _message = l10n.errorGenericBody;
+        });
     }
   }
 
+  void _add() {
+    final l10n = AppLocalizations.of(context);
+    final name = _name.text.trim();
+    final problem = textProblem(name, maxLength: customNameMaxLength);
+    setState(() {
+      _nameError = switch (problem) {
+        null => null,
+        TextProblem.empty => l10n.errorFieldRequired,
+        TextProblem.tooLong => ApiErrorText.field(
+          l10n,
+          FieldErrorKind.tooLong,
+          maxLength: customNameMaxLength,
+        ),
+        TextProblem.hiddenCharacters => ApiErrorText.field(
+          l10n,
+          FieldErrorKind.invalid,
+          maxLength: customNameMaxLength,
+        ),
+      };
+      _categoryMissing = _category == null;
+      _message = null;
+    });
+    if (problem != null || _category == null) return;
+    setState(() => _saving = true);
+    _done(
+      ref
+          .read(kitchenProvider.notifier)
+          .add(CustomIngredient(name), category: _category),
+    );
+  }
+
   Future<void> _useKnown(CatalogEntry known) async {
-    var category = known.category == null ? _category : null;
-    if (known.category == null && category == null) {
+    var category = known.category ?? _category;
+    if (category == null) {
       category = await pickKitchenCategory(context);
       if (category == null || !mounted) return;
     }
@@ -140,16 +134,11 @@ class _CustomItemScreenState extends ConsumerState<CustomItemScreen> {
       _saving = true;
       _message = null;
     });
-    final result = await ref
-        .read(kitchenProvider.notifier)
-        .add(ReferenceIngredient(known.ingredientId), category: category);
-    if (!mounted) return;
-    switch (result) {
-      case Ok():
-        Navigator.of(context).pop(true);
-      case Err(:final failure):
-        _fail(failure);
-    }
+    _done(
+      ref
+          .read(kitchenProvider.notifier)
+          .add(ReferenceIngredient(known.ingredientId), category: category),
+    );
   }
 
   @override

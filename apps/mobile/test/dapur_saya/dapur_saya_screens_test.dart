@@ -18,7 +18,7 @@ void main() {
   testWidgets('KIT-01 the first open shows skeleton chips, then the list', (
     tester,
   ) async {
-    server.delays['/v1/household/kitchen/items'] = const Duration(seconds: 1);
+    server.delays[syncPath] = const Duration(seconds: 1);
     await openKitchen(
       tester,
       server,

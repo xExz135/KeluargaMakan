@@ -11,7 +11,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:keluargamakan/core/api/api_client.dart';
-import 'package:keluargamakan/core/api/api_result.dart';
 import 'package:keluargamakan/core/api/session_manager.dart';
 import 'package:keluargamakan/core/api/token_store.dart';
 import 'package:keluargamakan/data/kitchen_state.dart';
@@ -172,9 +171,7 @@ void main() {
           server.seedKitchenItem(account, ingredientId: 'fx_kit_tempe')['id']!
               as String,
     );
-    server.delays['/v1/household/kitchen/items/$id'] = const Duration(
-      seconds: 2,
-    );
+    server.delays[syncPath] = const Duration(seconds: 2);
     await tester.tap(itemToggle(id));
     await tester.pump();
     // The session ends while the change is on its way.
@@ -210,6 +207,7 @@ void main() {
       ),
       _ => null,
     };
+    final before = requestsTo(server, 'POST', syncPath).length;
     await tester.tap(itemToggle(id));
     await tester.pumpAndSettle();
     expect(find.text('Silakan masuk lagi'), findsOneWidget);
@@ -219,9 +217,11 @@ void main() {
       await a.phone.db.select(a.phone.db.cachedKitchenItems).get(),
       isEmpty,
     );
-    final patches = requestsTo(server, 'PATCH', id);
+    final syncs = requestsTo(server, 'POST', syncPath).length - before;
     // The first try and its one retry after the refresh attempt, no more.
-    expect(patches.length, lessThanOrEqualTo(2));
+    expect(syncs, lessThanOrEqualTo(2));
+    // The ended session took the queue with it.
+    expect(await a.phone.db.select(a.phone.db.kitchenOutbox).get(), isEmpty);
   });
 
   testWidgets('DAT-08 KIT-04 no custom names or search queries reach the logs '
@@ -249,7 +249,9 @@ void main() {
       );
       await tapKeyed(tester, 'kitchen.custom.category.leftovers');
       await tapKeyed(tester, 'kitchen.custom.add');
-      expect(find.byKey(const Key('kitchen.custom.error')), findsOneWidget);
+      // Queued; the sync answer cannot be read, so it waits for a retry.
+      expect(syncCaption(tester), 'Belum terkirim · 1 perubahan');
+      expect(find.byKey(const Key('kitchen.sync.failed')), findsOneWidget);
 
       expect(logs, isNotEmpty, reason: 'the decode failures are logged');
       for (final line in logs) {
@@ -285,7 +287,10 @@ void main() {
       '$entry',
       '${entry.key}',
       '${entry.displayName}',
-      '${KitchenNotice(entry, const NetworkFailure())}',
+      '${KitchenChangeRefused(entry.key, entry, 'validation_failed')}',
+      '${KitchenOverwritten(entry.key, entry)}',
+      '${const TypedBrand('Rahasia')}',
+      '${entry.copyWith(brand: () => const TypedBrand('Rahasia'))}',
     ]) {
       expect(text, isNot(contains('Sambal')));
       expect(text, isNot(contains('Rahasia')));

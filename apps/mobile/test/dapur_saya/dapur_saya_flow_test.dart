@@ -1,7 +1,7 @@
-// KIT-01 to KIT-07 Dapur Saya flows against the fake API: one-tap toggles
-// from local state, search and add, custom items, default staples, the
-// catalog download with ETag / 304, reference data unavailable and the
-// item limit.
+// KIT-01 to KIT-07 and KIT-16 Dapur Saya flows against the fake API:
+// one-tap toggles from local state through the sync, search and add,
+// custom items, default staples, the catalog download with ETag / 304,
+// reference data unavailable and the item limit.
 // TEST FIXTURE: not real safety or nutrition data. Names are invented.
 
 import 'package:flutter/material.dart';
@@ -14,7 +14,6 @@ import '../helpers/fake_server.dart';
 import '../helpers/pump_app.dart';
 import 'kitchen_test_helpers.dart';
 
-const _items = '/v1/household/kitchen/items';
 const _catalog = '/v1/reference/ingredients';
 const _search = '/v1/reference/ingredients/search';
 
@@ -25,8 +24,8 @@ void main() {
   setUp(() => server = FakeServer());
 
   group('KIT-02 one tap toggles from local state', () {
-    testWidgets('KIT-02 NFR-02 the tap shows the new state before the server '
-        'answers, then the server confirms', (tester) async {
+    testWidgets('KIT-02 NFR-02 KIT-16 the tap shows the new state before the '
+        'server answers, then the sync confirms it', (tester) async {
       late String id;
       await openKitchen(
         tester,
@@ -36,7 +35,8 @@ void main() {
                 as String,
       );
       expect(toggleLabel(tester, id), 'Tempe, ada. Ketuk untuk tandai habis.');
-      server.delays['$_items/$id'] = const Duration(seconds: 2);
+      expect(syncCaption(tester), 'Tersimpan');
+      server.delays[syncPath] = const Duration(seconds: 2);
 
       await tester.tap(itemToggle(id));
       await tester.pump();
@@ -44,12 +44,18 @@ void main() {
       expect(toggleLabel(tester, id), contains('Tempe, habis.'));
       expect(toggleLabel(tester, id), contains('Belum terkirim.'));
       expect(find.text('Tempe · Habis'), findsOneWidget);
+      expect(syncCaption(tester), 'Mengirim perubahan…');
 
       await tester.pump(const Duration(seconds: 3));
       await tester.pumpAndSettle();
       expect(toggleLabel(tester, id), 'Tempe, habis. Ketuk untuk tandai ada.');
-      expect(bodiesOf(server, 'PATCH', id), [
-        {'state': 'out'},
+      expect(syncCaption(tester), 'Tersimpan');
+      expect(sentChanges(server).map(withoutIdAndAge), [
+        {
+          'ingredient': {'ingredientId': 'fx_kit_tempe'},
+          'operation': 'upsert',
+          'state': 'out',
+        },
       ]);
       expect(
         server.kitchenOf(server.accountFor(kitchenContact)!).single['state'],
@@ -57,8 +63,10 @@ void main() {
       );
     });
 
-    testWidgets('KIT-02 taps while a change is on its way end on the last '
-        'tap, one request at a time', (tester) async {
+    testWidgets('KIT-02 KIT-16 taps while a sync is on its way end on the '
+        'last tap, one sync at a time, collapsed per ingredient', (
+      tester,
+    ) async {
       late String id;
       await openKitchen(
         tester,
@@ -67,30 +75,26 @@ void main() {
             server.seedKitchenItem(a, ingredientId: 'fx_kit_tempe')['id']!
                 as String,
       );
-      server.delays['$_items/$id'] = const Duration(milliseconds: 500);
-      await tester.tap(itemToggle(id));
-      await tester.pump();
-      await tester.tap(itemToggle(id));
-      await tester.pump();
-      await tester.tap(itemToggle(id));
-      await tester.pump();
+      server.delays[syncPath] = const Duration(milliseconds: 500);
+      final before = server.kitchen.syncBodies.length;
+      for (var i = 0; i < 3; i++) {
+        await tester.tap(itemToggle(id));
+        await tester.pump();
+      }
       expect(toggleLabel(tester, id), contains('Tempe, habis.'));
       await tester.pump(const Duration(seconds: 2));
       await tester.pumpAndSettle();
 
-      // out, then the latest wish (out) is already confirmed: no extra call
-      // for the intermediate "available".
-      final states = [
-        for (final b in bodiesOf(server, 'PATCH', id)) b['state'],
-      ];
-      expect(states.last, 'out');
-      expect(states.length, lessThanOrEqualTo(3));
+      // The first tap went out; the second and third were collapsed into
+      // one change while it was on its way.
+      final states = [for (final c in sentChanges(server)) c['state']];
+      expect(states, ['out', 'out']);
+      expect(server.kitchen.syncBodies.length - before, 2);
       expect(toggleLabel(tester, id), 'Tempe, habis. Ketuk untuk tandai ada.');
     });
 
-    testWidgets('KIT-02 a refused change goes back with a clear message', (
-      tester,
-    ) async {
+    testWidgets('KIT-16 a change the server refuses for good goes back with '
+        'a clear message', (tester) async {
       late String id;
       await openKitchen(
         tester,
@@ -99,62 +103,67 @@ void main() {
             server.seedKitchenItem(a, ingredientId: 'fx_kit_tempe')['id']!
                 as String,
       );
-      server.intercept = (r) => r.method == 'PATCH'
-          ? FakeServer.problem('internal_error', 500)
-          : null;
+      server.kitchen.syncRejections['r:fx_kit_tempe'] = 'validation_failed';
       await tester.tap(itemToggle(id));
       await tester.pumpAndSettle();
       expect(toggleLabel(tester, id), 'Tempe, ada. Ketuk untuk tandai habis.');
-      expect(find.text('Tempe belum berubah. Coba lagi.'), findsOneWidget);
-    });
-
-    testWidgets('KIT-02 QUESTIONS #68 without internet the change goes back '
-        'and says internet is needed (no offline queue until T-034)', (
-      tester,
-    ) async {
-      late String id;
-      await openKitchen(
-        tester,
-        server,
-        seed: (a) => id =
-            server.seedKitchenItem(a, ingredientId: 'fx_kit_tempe')['id']!
-                as String,
-      );
-      server.intercept = (r) =>
-          r.method == 'PATCH' ? throw http.ClientException('offline') : null;
-      await tester.tap(itemToggle(id));
-      await tester.pumpAndSettle();
-      expect(toggleLabel(tester, id), 'Tempe, ada. Ketuk untuk tandai habis.');
-      expect(
-        find.text('Tempe belum berubah. Perubahan butuh internet.'),
-        findsOneWidget,
-      );
-    });
-
-    testWidgets('KIT-02 an item removed on another phone disappears with '
-        'error.api.notFound', (tester) async {
-      late String id;
-      late String account;
-      await openKitchen(
-        tester,
-        server,
-        seed: (a) {
-          account = a;
-          id =
-              server.seedKitchenItem(a, ingredientId: 'fx_kit_tempe')['id']!
-                  as String;
-        },
-      );
-      server.kitchenOf(account).clear();
-      await tester.tap(itemToggle(id));
-      await tester.pumpAndSettle();
-      expect(itemToggle(id), findsNothing);
       expect(
         find.text(
-          'Data ini sudah tidak ada. Mungkin sudah dihapus dari HP lain.',
+          'Tempe: perubahan ini tidak bisa disimpan, jadi dikembalikan seperti '
+          'semula.',
         ),
         findsOneWidget,
       );
+      expect(syncCaption(tester), 'Tersimpan');
+    });
+
+    testWidgets('KIT-16 NFR-02 without internet the tap stays, is queued, '
+        'says "Belum terkirim" and is sent when the connection returns', (
+      tester,
+    ) async {
+      late String id;
+      final phone = await openKitchen(
+        tester,
+        server,
+        seed: (a) => id =
+            server.seedKitchenItem(a, ingredientId: 'fx_kit_tempe')['id']!
+                as String,
+      );
+      goOffline(server);
+      await tester.tap(itemToggle(id));
+      await tester.pumpAndSettle();
+      expect(toggleLabel(tester, id), contains('Tempe, habis.'));
+      expect(toggleLabel(tester, id), contains('Belum terkirim.'));
+      expect(syncCaption(tester), 'Belum terkirim · 1 perubahan');
+      expect(find.byKey(const Key('kitchen.offline')), findsOneWidget);
+      expect(find.byKey(const Key('kitchen.sync.retry')), findsOneWidget);
+      // Nothing reverted and no "needs internet" message.
+      expect(find.byType(SnackBar), findsNothing);
+      expect(phone.phone.sync.timers.pending, hasLength(1));
+
+      server.intercept = null;
+      phone.phone.sync.connectivity.goOnline();
+      await tester.pumpAndSettle();
+      expect(syncCaption(tester), 'Tersimpan');
+      expect(find.byKey(const Key('kitchen.offline')), findsNothing);
+      expect(toggleLabel(tester, id), 'Tempe, habis. Ketuk untuk tandai ada.');
+      expect(server.kitchenOf(phone.account).single['state'], 'out');
+    });
+
+    testWidgets('KIT-16 an item removed on another phone disappears at the '
+        'next sync', (tester) async {
+      late String id;
+      final phone = await openKitchen(
+        tester,
+        server,
+        seed: (a) => id =
+            server.seedKitchenItem(a, ingredientId: 'fx_kit_tempe')['id']!
+                as String,
+      );
+      server.removeKitchenItemElsewhere(phone.account, id);
+      await phone.container.read(kitchenProvider.notifier).refresh();
+      await tester.pumpAndSettle();
+      expect(itemToggle(id), findsNothing);
     });
   });
 
@@ -250,8 +259,8 @@ void main() {
     );
   });
 
-  testWidgets('KIT-04 KIT-02 KIT-01 search, add, toggle in the sheet, then '
-      'remove with Undo', (tester) async {
+  testWidgets('KIT-04 KIT-02 KIT-01 KIT-16 search, add, toggle in the '
+      'sheet, then remove with Undo', (tester) async {
     await openKitchen(tester, server);
     expect(find.byKey(const Key('kitchen.empty')), findsOneWidget);
 
@@ -260,14 +269,12 @@ void main() {
     expect(find.text('Kemangi · selasih'), findsOneWidget);
     expect(find.text('Bumbu dan rempah'), findsOneWidget);
     await tapKeyed(tester, 'kitchen.search.add.fx_kit_kemangi');
-    expect(bodiesOf(server, 'POST', _items).single, {
-      'ingredientId': 'fx_kit_kemangi',
+    expect(withoutIdAndAge(sentChanges(server).single), {
+      'ingredient': {'ingredientId': 'fx_kit_kemangi'},
+      'operation': 'upsert',
+      'category': 'spices_aromatics',
       'state': 'available',
     });
-    expect(
-      requestsTo(server, 'POST', _items).single.headers['idempotency-key'],
-      isNotNull,
-    );
     // The sheet stays open and the row shows the state; a tap toggles.
     final state = find.byKey(const Key('kitchen.search.state.fx_kit_kemangi'));
     expect(state, findsOneWidget);
@@ -292,18 +299,26 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('kitchen.sheet')), findsOneWidget);
     await tapKeyed(tester, 'kitchen.sheet.remove');
-    expect(requestsTo(server, 'DELETE', id), hasLength(1));
+    expect(withoutIdAndAge(sentChanges(server).last), {
+      'ingredient': {'ingredientId': 'fx_kit_kemangi'},
+      'operation': 'remove',
+    });
     expect(itemToggle(id), findsNothing);
+    expect(server.kitchenOf(account), isEmpty);
     expect(find.text('Kemangi dihapus dari Dapur Saya.'), findsOneWidget);
     await tester.tap(find.byKey(const Key('kitchen.removed.undo')));
     await tester.pumpAndSettle();
     expect(find.text('Kemangi · Habis'), findsOneWidget);
-    // Undo adds it back as it was: same category and state.
-    expect(bodiesOf(server, 'POST', _items).last, {
-      'ingredientId': 'fx_kit_kemangi',
+    // Undo puts it back as it was: category, state, amount and brand.
+    expect(withoutIdAndAge(sentChanges(server).last), {
+      'ingredient': {'ingredientId': 'fx_kit_kemangi'},
+      'operation': 'upsert',
       'category': 'spices_aromatics',
       'state': 'out',
+      'quantity': null,
+      'brand': null,
     });
+    expect(server.kitchenOf(account).single['state'], 'out');
     expectNoSafetyVerdict(tester);
   });
 
@@ -315,8 +330,9 @@ void main() {
     await tapKeyed(tester, 'kitchen.search.add.fx_kit_kluwek');
     expect(find.text('Masuk kategori apa?'), findsOneWidget);
     await tapKeyed(tester, 'kitchen.category.pick.spices_aromatics');
-    expect(bodiesOf(server, 'POST', _items).single, {
-      'ingredientId': 'fx_kit_kluwek',
+    expect(withoutIdAndAge(sentChanges(server).single), {
+      'ingredient': {'ingredientId': 'fx_kit_kluwek'},
+      'operation': 'upsert',
       'category': 'spices_aromatics',
       'state': 'available',
     });
@@ -350,12 +366,13 @@ void main() {
       find.byKey(const Key('kitchen.custom.categoryMissing')),
       findsOneWidget,
     );
-    expect(requestsTo(server, 'POST', _items), isEmpty);
+    expect(sentChanges(server), isEmpty);
     await tapKeyed(tester, 'kitchen.custom.category.sauces_condiments');
     await tapKeyed(tester, 'kitchen.custom.add');
 
-    expect(bodiesOf(server, 'POST', _items).single, {
-      'customName': 'sambal roa',
+    expect(withoutIdAndAge(sentChanges(server).single), {
+      'ingredient': {'customName': 'sambal roa'},
+      'operation': 'upsert',
       'category': 'sauces_condiments',
       'state': 'available',
     });
@@ -375,8 +392,24 @@ void main() {
     expectNoSafetyVerdict(tester);
   });
 
-  testWidgets('KIT-05 a refused custom name shows the field error and keeps '
-      'the input', (tester) async {
+  testWidgets('KIT-05 a name with hidden characters shows the field error, '
+      'keeps the input and queues nothing', (tester) async {
+    await openKitchen(tester, server);
+    await tapKeyed(tester, 'kitchen.fab');
+    await tapKeyed(tester, 'kitchen.menu.custom');
+    await tester.enterText(
+      find.byKey(const Key('kitchen.custom.name')),
+      'Tanda\u200baneh',
+    );
+    await tapKeyed(tester, 'kitchen.custom.category.leftovers');
+    await tapKeyed(tester, 'kitchen.custom.add');
+    expect(find.text('Isinya belum benar.'), findsOneWidget);
+    expect(find.byKey(const Key('kitchen.custom.name')), findsOneWidget);
+    expect(sentChanges(server), isEmpty);
+  });
+
+  testWidgets('KIT-05 KIT-16 a custom name the server refuses is taken back '
+      'with a message on Dapur Saya', (tester) async {
     server.kitchen.refusedCustomNames = {'Tanda aneh'};
     await openKitchen(tester, server);
     await tapKeyed(tester, 'kitchen.fab');
@@ -387,8 +420,15 @@ void main() {
     );
     await tapKeyed(tester, 'kitchen.custom.category.leftovers');
     await tapKeyed(tester, 'kitchen.custom.add');
-    expect(find.text('Isinya belum benar.'), findsOneWidget);
-    expect(find.text('Tanda aneh'), findsOneWidget);
+    expect(
+      find.text(
+        'Tanda aneh: perubahan ini tidak bisa disimpan, jadi dikembalikan '
+        'seperti semula.',
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('Belum dikenal'), findsNothing);
+    expect(find.byKey(const Key('kitchen.empty')), findsOneWidget);
   });
 
   testWidgets('KIT-05 "did you mean" offers the known ingredient first, so '
@@ -408,8 +448,10 @@ void main() {
       findsOneWidget,
     );
     await tapKeyed(tester, 'kitchen.custom.useKnown');
-    expect(bodiesOf(server, 'POST', _items).single, {
-      'ingredientId': 'fx_kit_tempe',
+    expect(withoutIdAndAge(sentChanges(server).single), {
+      'ingredient': {'ingredientId': 'fx_kit_tempe'},
+      'operation': 'upsert',
+      'category': 'protein',
       'state': 'available',
     });
     expect(find.text('Tempe'), findsOneWidget);
@@ -428,8 +470,7 @@ void main() {
         .kitchenOf(account)
         .firstWhere((i) => i['ingredientId'] == 'fx_kit_beras');
     expect(beras['isDefaultStaple'], isTrue);
-    await tester.tap(itemToggle(beras['id']! as String));
-    await tester.pumpAndSettle();
+    await tapKeyed(tester, 'kitchen.item.${beras['id']}');
     expect(beras['state'], 'out');
     expect(find.text('Beras · Habis'), findsOneWidget);
   });
@@ -528,30 +569,42 @@ void main() {
       find.byKey(const Key('kitchen.search.state.fx_kit_tempe')),
       findsNothing,
     );
+    expect(sentChanges(server), isEmpty);
   });
 
-  testWidgets('KIT-04 an add without an answer is retried with the same '
-      'Idempotency-Key', (tester) async {
-    await openKitchen(tester, server);
+  testWidgets('KIT-16 an add without internet shows at once and is sent '
+      'later with the same change ID', (tester) async {
+    final phone = await openKitchen(tester, server);
     var offline = true;
-    server.intercept = (r) =>
-        offline && r.method == 'POST' && r.url.path == _items
+    server.intercept = (r) => offline && r.url.path == syncPath
         ? throw http.ClientException('offline')
         : null;
     await search(tester, 'tempe');
     await tapKeyed(tester, 'kitchen.search.add.fx_kit_tempe');
     expect(
-      find.text('Menambah bahan butuh internet. Coba lagi saat tersambung.'),
+      find.byKey(const Key('kitchen.search.state.fx_kit_tempe')),
       findsOneWidget,
     );
+    await tapKeyed(tester, 'kitchen.search.close');
+    expect(find.text('Tempe'), findsOneWidget);
+    expect(syncCaption(tester), 'Belum terkirim · 1 perubahan');
+    final tried = server.kitchen.syncBodies.length;
+
     offline = false;
-    await tapKeyed(tester, 'kitchen.search.add.fx_kit_tempe');
-    final keys = [
-      for (final r in requestsTo(server, 'POST', _items))
-        r.headers['idempotency-key'],
-    ];
-    expect(keys, hasLength(2));
-    expect(keys.toSet(), hasLength(1));
+    phone.phone.sync.timers.fireAll();
+    await tester.pumpAndSettle();
+    expect(syncCaption(tester), 'Tersimpan');
+    final ids = {
+      for (final body in server.kitchen.syncBodies.skip(1))
+        for (final c in body['changes']! as List)
+          (c as Map<String, Object?>)['changeId'],
+    };
+    expect(server.kitchen.syncBodies.length, greaterThan(tried));
+    expect(ids, hasLength(1));
+    expect(
+      server.kitchenOf(phone.account).single['ingredientId'],
+      'fx_kit_tempe',
+    );
   });
 
   testWidgets('KIT-01 NFR-05 without internet the phone\'s copy of the '
@@ -562,11 +615,7 @@ void main() {
       seed: (a) => server.seedKitchenItem(a, ingredientId: 'fx_kit_tempe'),
     );
     await closeApp(tester);
-    server.intercept = (r) =>
-        r.url.path.startsWith('/v1/household/kitchen') ||
-            r.url.path.startsWith('/v1/reference')
-        ? throw http.ClientException('offline')
-        : null;
+    goOffline(server);
     final container = await pumpPhone(
       tester,
       server: server,
@@ -582,7 +631,7 @@ void main() {
   testWidgets('KIT-01 a load failure shows the error with retry, never an '
       'empty kitchen', (tester) async {
     var fail = true;
-    server.intercept = (r) => fail && r.url.path == _items && r.method == 'GET'
+    server.intercept = (r) => fail && r.url.path == syncPath
         ? FakeServer.problem('internal_error', 500)
         : null;
     await openKitchen(tester, server);

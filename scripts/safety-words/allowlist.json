@@ -121,6 +121,26 @@
       },
       "locales": ["en"],
       "reason": "Copy deck 8 (final): K3 tells the manager that a custom ingredient is not known to Cek Aman, so recipes using it get the Cek label state for members with hard rules (KIT-05, SAF-09). It names the real badge state, not a verdict of its own; listed in QUESTIONS #60; mobile-engineer T-033, for qa-engineer and ux-designer review."
+    },
+    {
+      "key": "kitchenBrandUnknownNote",
+      "rule": "state-word-outside-cek-aman",
+      "terms": ["cek"],
+      "values": {
+        "id": "Merek ini belum ada di daftar kami. Cek Aman akan memberi tanda Cek label untuk bahan ini."
+      },
+      "locales": ["id"],
+      "reason": "Copy deck 8 (kitchen.brand.unknownNote, reworded in T-034 per QUESTIONS #60: \"tetap\" replaced by \"akan memberi\"): K4 tells the manager that a typed brand is not in the verified list, so Cek Aman marks the ingredient Cek label (KIT-09, SAF-07). It names the real badge state, not a verdict of its own; mobile-engineer T-034, for qa-engineer and ux-designer review."
+    },
+    {
+      "key": "kitchenBrandUnknownNote",
+      "rule": "state-word-outside-cek-aman",
+      "terms": ["check the label"],
+      "values": {
+        "en": "This brand isn't in our list yet. Cek Aman will mark this ingredient Check the label."
+      },
+      "locales": ["en"],
+      "reason": "Copy deck 8 (kitchen.brand.unknownNote, reworded in T-034 per QUESTIONS #60: \"tetap\" replaced by \"akan memberi\"): K4 tells the manager that a typed brand is not in the verified list, so Cek Aman marks the ingredient Cek label (KIT-09, SAF-07). It names the real badge state, not a verdict of its own; mobile-engineer T-034, for qa-engineer and ux-designer review."
     }
   ]
 }

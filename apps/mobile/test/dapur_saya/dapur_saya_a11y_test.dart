@@ -164,8 +164,7 @@ void main() {
         '($language)', (tester) async {
       final server = FakeServer();
       var fail = true;
-      server.intercept = (r) =>
-          fail && r.url.path == '/v1/household/kitchen/items'
+      server.intercept = (r) => fail && r.url.path == syncPath
           ? FakeServer.problem('internal_error', 500)
           : null;
       await openKitchen(tester, server, textScale: 2.0, language: language);

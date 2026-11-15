@@ -24,6 +24,8 @@ class SectionScaffold extends StatelessWidget {
     this.isTabRoot = true,
     this.titleStyle,
     this.floatingActionButton,
+    this.subtitle,
+    this.subtitleText,
   });
 
   final String title;
@@ -38,6 +40,12 @@ class SectionScaffold extends StatelessWidget {
 
   /// For example "Tambah anggota" on medium and expanded windows.
   final Widget? floatingActionButton;
+
+  /// A small line under the title, for example the Dapur Saya sync caption
+  /// (KIT-16). [subtitleText] is its text, used to size the bar so the line
+  /// fits at any text scale.
+  final Widget? subtitle;
+  final String? subtitleText;
 
   // AppBar layout constants: leading slot and icon button widths, and the
   // NavigationToolbar title spacing on each side.
@@ -71,11 +79,24 @@ class SectionScaffold extends StatelessWidget {
           textDirection: Directionality.of(context),
           textScaler: mediaQuery.textScaler,
         )..layout(maxWidth: available);
+        var titleHeight = painter.height;
+        painter.dispose();
+        if (subtitle != null) {
+          final small = TextPainter(
+            text: TextSpan(
+              text: subtitleText ?? ' ',
+              style: theme.textTheme.labelMedium,
+            ),
+            textDirection: Directionality.of(context),
+            textScaler: mediaQuery.textScaler,
+          )..layout(maxWidth: math.max(0.0, available - 40));
+          titleHeight += small.height + 2 * SpacingTokens.xs + SpacingTokens.xs;
+          small.dispose();
+        }
         final toolbarHeight = math.max(
           kToolbarHeight,
-          painter.height + 2 * SpacingTokens.m,
+          titleHeight + 2 * SpacingTokens.m,
         );
-        painter.dispose();
 
         return Scaffold(
           appBar: AppBar(
@@ -83,7 +104,17 @@ class SectionScaffold extends StatelessWidget {
             titleTextStyle: style,
             title: MediaQuery(
               data: mediaQuery,
-              child: Semantics(header: true, child: Text(title)),
+              child: subtitle == null
+                  ? Semantics(header: true, child: Text(title))
+                  : Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Semantics(header: true, child: Text(title)),
+                        const SizedBox(height: SpacingTokens.xs),
+                        subtitle!,
+                      ],
+                    ),
             ),
             actions: [
               if (showSettings)
