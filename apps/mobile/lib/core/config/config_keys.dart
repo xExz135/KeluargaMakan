@@ -156,6 +156,57 @@ abstract final class ConfigKeys {
     min: 1,
   );
 
+  /// First wait before the kitchen sync is tried again after a failure
+  /// (SRS 19.4 "retry with backoff"; engineering value, no SRS figure).
+  static const syncRetryBaseMs = ConfigKey<int>(
+    'sync.retryBaseMs',
+    2000,
+    requirementIds: ['KIT-16'],
+    status: ConfigStatus.decided,
+    min: 250,
+  );
+
+  /// Longest wait between kitchen sync retries.
+  static const syncRetryMaxMs = ConfigKey<int>(
+    'sync.retryMaxMs',
+    300000,
+    requirementIds: ['KIT-16'],
+    status: ConfigStatus.decided,
+    min: 1000,
+  );
+
+  /// How much of each retry wait may be taken off at random (0 to 100), so
+  /// phones do not all retry at the same moment.
+  static const syncRetryJitterPercent = ConfigKey<int>(
+    'sync.retryJitterPercent',
+    50,
+    requirementIds: ['KIT-16'],
+    status: ConfigStatus.decided,
+    min: 0,
+  );
+
+  /// Oldest queued kitchen change the app still sends. Mirrors the server's
+  /// `kitchen.sync.maxChangeAgeHours` (30 days, the contract's limit); an
+  /// older change is dropped with a message instead of being sent forever.
+  /// Values above 720 are treated as 720.
+  static const kitchenSyncMaxChangeAgeHours = ConfigKey<int>(
+    'kitchen.sync.maxChangeAgeHours',
+    720,
+    requirementIds: ['KIT-16'],
+    status: ConfigStatus.decided,
+    min: 1,
+  );
+
+  /// Queued kitchen changes per sync request (contract `KitchenSyncRequest`
+  /// allows at most 100; larger values are treated as 100).
+  static const kitchenSyncBatchSize = ConfigKey<int>(
+    'kitchen.sync.batchSize',
+    100,
+    requirementIds: ['KIT-16'],
+    status: ConfigStatus.decided,
+    min: 1,
+  );
+
   static const List<ConfigKey<Object>> all = [
     minTouchTargetDp,
     cookMinTouchTargetDp,
@@ -173,6 +224,11 @@ abstract final class ConfigKeys {
     googleSignInEnabled,
     maxRetryWaitSeconds,
     consentWithdrawalDeletionDays,
+    syncRetryBaseMs,
+    syncRetryMaxMs,
+    syncRetryJitterPercent,
+    kitchenSyncMaxChangeAgeHours,
+    kitchenSyncBatchSize,
   ];
 }
 

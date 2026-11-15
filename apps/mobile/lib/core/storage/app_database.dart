@@ -4,10 +4,14 @@
 // - Settings the app keeps on this phone (language, theme, installation ID).
 // - A cache of the household, the family profiles and the standard allergen
 //   list, so screens can show names offline.
-// - A cache of the saved kitchen (Dapur Saya, T-033): household data, not
-//   health data, bound to the account like the profiles. In T-033 it is a
-//   copy of the server's list only; changes made offline (T-034) will live
-//   in a table of their own with step-by-step migrations.
+// - A cache of the saved kitchen (Dapur Saya, T-033) and its ingredient
+//   sets, with the sync cursor (T-034): household data, not health data,
+//   bound to the account like the profiles. It is a copy of what the server
+//   confirmed.
+// - The kitchen outbox (T-034, KIT-16): changes made on this phone that the
+//   server has not confirmed yet. Data only this phone has: kept across
+//   schema upgrades with step-by-step migrations, bound to the account and
+//   removed with the rest of the household's data.
 // - The reference ingredient catalog (public reference data, KIT-04) with
 //   its ETag, for offline search. Not personal: kept across accounts.
 // - NO health data. Hard rules and the health-data consent state are never
@@ -106,6 +110,10 @@ class CachedKitchens extends Table {
   TextColumn get referenceVersion => text().nullable()();
   DateTimeColumn get cachedAt => dateTime()();
 
+  /// The cursor of the sync that gave this copy (KIT-16). Kept with the copy
+  /// it belongs to: without the copy, the next sync starts in full.
+  TextColumn get syncCursor => text().nullable()();
+
   @override
   Set<Column<Object>> get primaryKey => {id};
 }
@@ -133,8 +141,71 @@ class CachedKitchenItems extends Table {
   DateTimeColumn get changedAt => dateTime()();
   DateTimeColumn get createdAt => dateTime()();
 
+  /// Contract `KitchenQuantity` wire value, or null (KIT-09).
+  TextColumn get quantity => text().nullable()();
+
+  /// Reference brand ID; null for a typed brand or no brand (KIT-09).
+  TextColumn get brandId => text().nullable()();
+
+  /// The brand's name or the typed text; null when no brand is recorded.
+  TextColumn get brandName => text().nullable()();
+
   @override
   Set<Column<Object>> get primaryKey => {id};
+}
+
+/// KIT-08 ingredient sets as the server last confirmed them.
+class CachedIngredientSets extends Table {
+  TextColumn get id => text()();
+  IntColumn get position => integer()();
+  TextColumn get name => text()();
+
+  /// JSON array of server item IDs.
+  TextColumn get itemIds => text()();
+  DateTimeColumn get updatedAt => dateTime()();
+
+  @override
+  Set<Column<Object>> get primaryKey => {id};
+}
+
+/// The set list's limit (contract `IngredientSetList.maxSets`), at most one
+/// row. Its presence tells "cached, no sets" apart from "no copy".
+class CachedIngredientSetLists extends Table {
+  IntColumn get id => integer()();
+  IntColumn get maxSets => integer()();
+  DateTimeColumn get cachedAt => dateTime()();
+
+  @override
+  Set<Column<Object>> get primaryKey => {id};
+}
+
+/// KIT-16: kitchen changes made on this phone, oldest first, until the
+/// server answered them. No health data.
+class KitchenOutbox extends Table {
+  IntColumn get seq => integer().autoIncrement()();
+
+  /// The account whose kitchen this change is for. Only that account's
+  /// session reads or sends it.
+  TextColumn get accountId => text()();
+
+  /// Random UUID made with the change (contract `KitchenChange.changeId`).
+  TextColumn get changeId => text().unique()();
+
+  /// Exactly one of the two is set.
+  TextColumn get ingredientId => text().nullable()();
+  TextColumn get customName => text().nullable()();
+
+  /// `upsert` or `remove`.
+  TextColumn get operation => text()();
+
+  /// The fields an upsert sets, as JSON (KitchenPatch).
+  TextColumn get patch => text()();
+
+  /// When the edit was made: the monotonic timeline, the milliseconds on it
+  /// and the wall clock (DeviceClock).
+  TextColumn get timeline => text()();
+  IntColumn get elapsedMs => integer()();
+  IntColumn get wallMs => integer()();
 }
 
 /// The catalog's version and ETag (contract `ReferenceIngredientCatalog`),
@@ -164,6 +235,9 @@ class CachedCatalogIngredients extends Table {
   TextColumn get category => text().nullable()();
   BoolColumn get brandVaries => boolean()();
 
+  /// JSON array of `{brandId, name}` (contract `CatalogBrand`).
+  TextColumn get brands => text().withDefault(const Constant('[]'))();
+
   @override
   Set<Column<Object>> get primaryKey => {ingredientId};
 }
@@ -178,6 +252,9 @@ class CachedCatalogIngredients extends Table {
     CachedKitchenItems,
     CachedCatalogs,
     CachedCatalogIngredients,
+    CachedIngredientSets,
+    CachedIngredientSetLists,
+    KitchenOutbox,
   ],
 )
 class AppDatabase extends _$AppDatabase {
@@ -188,7 +265,7 @@ class AppDatabase extends _$AppDatabase {
       AppDatabase(driftDatabase(name: 'keluargamakan'));
 
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
 
   /// Tables that copy server data and can be rebuilt from it.
   List<TableInfo<Table, Object?>> get cacheTables => [
@@ -199,6 +276,8 @@ class AppDatabase extends _$AppDatabase {
     cachedKitchenItems,
     cachedCatalogs,
     cachedCatalogIngredients,
+    cachedIngredientSets,
+    cachedIngredientSetLists,
   ];
 
   @override
@@ -222,9 +301,10 @@ class AppDatabase extends _$AppDatabase {
         await m.createAll();
         return;
       }
-      // Step-by-step migrations for settings (and later the kitchen's
-      // offline changes, T-034) go here, generated by `drift_dev
-      // make-migrations`. None yet: v2 only added cache tables.
+      // Step-by-step migrations for tables with data only this phone has
+      // (settings, the kitchen outbox). v2 only added cache tables; v3 adds
+      // the outbox (T-034).
+      if (from < 3) await m.createTable(kitchenOutbox);
       for (final table in cacheTables) {
         await m.deleteTable(table.actualTableName);
         await m.createTable(table);
@@ -237,7 +317,8 @@ class AppDatabase extends _$AppDatabase {
   static const cacheOwnerKey = 'cache.ownerAccountId';
 
   /// Removes everything that belongs to the signed-in household: the
-  /// household, profile and kitchen caches and their owner. Settings and public
+  /// household, profile, kitchen and set caches, the kitchen changes not
+  /// sent yet, and their owner. Settings and public
   /// reference data stay. Runs when the session ends (sign-out, or the server
   /// ended the session on a shared phone), at startup without a session, and
   /// when a different account signs in.
@@ -245,6 +326,9 @@ class AppDatabase extends _$AppDatabase {
     await delete(cachedProfiles).go();
     await delete(cachedKitchenItems).go();
     await delete(cachedKitchens).go();
+    await delete(cachedIngredientSets).go();
+    await delete(cachedIngredientSetLists).go();
+    await delete(kitchenOutbox).go();
     await delete(cachedHouseholds).go();
     await (delete(settings)..where((t) => t.key.equals(cacheOwnerKey))).go();
   });

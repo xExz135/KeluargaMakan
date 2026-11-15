@@ -12,6 +12,16 @@ import 'package:http/http.dart' as http;
 import 'api_problem.dart';
 import 'session_manager.dart';
 
+/// Runs [call] so that every request it makes is sent only with the
+/// session of [accountId] (KIT-16, T-034). If another account is signed in
+/// by the time a request goes out, the request is not sent and fails like a
+/// lost connection, so one account's queued changes never reach another
+/// account's household.
+Future<T> runAsAccount<T>(String accountId, Future<T> Function() call) =>
+    runZoned(call, zoneValues: {_boundAccount: accountId});
+
+final _boundAccount = Object();
+
 /// Endpoints with `security: []` in the contract. No bearer token is sent.
 const _publicPaths = {
   '/v1/auth/code/request',
@@ -61,6 +71,10 @@ final class AuthenticatingClient extends http.BaseClient {
   @override
   Future<http.StreamedResponse> send(http.BaseRequest request) async {
     final tokens = _session.current;
+    final bound = Zone.current[_boundAccount];
+    if (bound is String && tokens?.accountId != bound) {
+      throw http.ClientException('Session changed', request.url);
+    }
     if (isPublic(request.url) || tokens == null) {
       request.headers.remove('authorization');
       return _inner.send(request);

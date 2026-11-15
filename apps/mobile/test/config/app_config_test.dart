@@ -46,6 +46,11 @@ void main() {
         'auth.googleSignInEnabled',
         'auth.maxRetryWaitSeconds',
         'consent.withdrawalDeletionDays',
+        'sync.retryBaseMs',
+        'sync.retryMaxMs',
+        'sync.retryJitterPercent',
+        'kitchen.sync.maxChangeAgeHours',
+        'kitchen.sync.batchSize',
       ]);
     });
 

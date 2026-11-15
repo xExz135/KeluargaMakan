@@ -19,6 +19,8 @@ import 'package:keluargamakan/core/config/app_config.dart';
 import 'package:keluargamakan/core/storage/app_database.dart';
 import 'package:keluargamakan/core/storage/key_value_store.dart';
 
+import 'sync_fakes.dart';
+
 const testBaseUrl = 'https://api.test';
 
 /// The failure of a result that must have failed.
@@ -68,6 +70,7 @@ ProviderContainer testContainer({
       appConfigProvider.overrideWithValue(
         AppConfig([MapConfigSource(config), const LocalDefaultsConfigSource()]),
       ),
+      ...SyncFakes(DateTime.now).overrides,
     ],
   );
   return container;

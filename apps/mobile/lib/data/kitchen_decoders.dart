@@ -1,4 +1,4 @@
-// Strict decoding of the Dapur Saya payloads (contract 0.2.1).
+// Strict decoding of the Dapur Saya payloads (contract 0.2.3).
 //
 // Hand-written like ApiProblem: the generated `KitchenItem.fromJson` throws
 // on a state this app version does not know, but the contract says such a
@@ -70,6 +70,8 @@ KitchenEntry decodeKitchenItem(Object? json) {
   final rank = raw['usageRank'];
   if (rank != null && rank is! int) _bad('kitchen item usageRank');
   if (!raw.containsKey('state')) _bad('kitchen item state');
+  final brand = _brand(raw['brand']);
+  if (brand is ReferenceBrand && isCustom) _bad('reference brand on custom');
   return KitchenEntry(
     id: _string(raw['id'], 'kitchen item id'),
     ingredientId: ingredientId,
@@ -90,7 +92,23 @@ KitchenEntry decodeKitchenItem(Object? json) {
     usageRank: rank is int && rank >= 1 ? rank : null,
     changedAt: _dateTime(raw['changedAt'], 'kitchen item changedAt'),
     createdAt: _dateTime(raw['createdAt'], 'kitchen item createdAt'),
+    // An amount this app version does not know is not shown; it says
+    // nothing about safety.
+    quantity: KitchenAmount.fromWire(raw['quantity']),
+    brand: brand,
   );
+}
+
+/// Contract `KitchenBrand`, or null.
+KitchenBrand? _brand(Object? json) {
+  if (json == null) return null;
+  final raw = _object(json, 'kitchen brand');
+  final name = _string(raw['name'], 'kitchen brand name');
+  return switch (_optionalString(raw['brandId'], 'kitchen brand id')) {
+    final id? => ReferenceBrand(id, name),
+    // A typed brand is text only: never a recorded brand (SAF-07).
+    null => TypedBrand(name),
+  };
 }
 
 /// Contract `KitchenItemList`.
@@ -119,7 +137,17 @@ KitchenList decodeKitchenList(Object? json) {
 CatalogEntry decodeCatalogIngredient(Object? json) {
   final raw = _object(json, 'catalog ingredient');
   final localNames = _list(raw['localNames'], 'catalog localNames');
-  _list(raw['brands'], 'catalog brands');
+  final brands = [
+    for (final b in _list(raw['brands'], 'catalog brands'))
+      () {
+        final brand = _object(b, 'catalog brand');
+        return CatalogBrand(
+          brandId: _string(brand['brandId'], 'catalog brandId'),
+          name: _string(brand['name'], 'catalog brand name'),
+        );
+      }(),
+  ];
+  _unique(brands.map((b) => b.brandId), 'catalog brandId');
   return CatalogEntry(
     ingredientId: _string(raw['ingredientId'], 'catalog ingredientId'),
     displayName: _name(raw['displayName'], 'catalog displayName'),
@@ -127,6 +155,7 @@ CatalogEntry decodeCatalogIngredient(Object? json) {
     // Null (or a code this app does not know): the app asks for one.
     category: kitchenCategoryFromWire(raw['category']),
     brandVaries: _bool(raw['brandVaries'], 'catalog brandVaries'),
+    brands: brands,
   );
 }
 
@@ -168,4 +197,99 @@ List<IngredientHit> decodeSearchResult(Object? json) {
 String? acceptableEtag(String? value) {
   if (value == null || value.length > 200) return null;
   return RegExp(r'^(W/)?"[\x21\x23-\x7E]*"$').hasMatch(value) ? value : null;
+}
+
+/// Contract `IngredientSet`.
+IngredientSetInfo decodeIngredientSet(Object? json) {
+  final raw = _object(json, 'ingredient set');
+  final ids = [
+    for (final id in _list(raw['itemIds'], 'set itemIds'))
+      _string(id, 'set item id'),
+  ];
+  _unique(ids, 'set item id');
+  return IngredientSetInfo(
+    id: _string(raw['id'], 'set id'),
+    name: _string(raw['name'], 'set name'),
+    itemIds: ids,
+    updatedAt: _dateTime(raw['updatedAt'], 'set updatedAt'),
+  );
+}
+
+/// Contract `IngredientSetList`.
+IngredientSets decodeIngredientSets(Object? json) {
+  final raw = _object(json, 'ingredient set list');
+  final maxSets = raw['maxSets'];
+  if (maxSets is! int || maxSets < 1) _bad('set list maxSets');
+  final items = [
+    for (final s in _list(raw['items'], 'set list items'))
+      decodeIngredientSet(s),
+  ];
+  _unique(items.map((s) => s.id), 'set id');
+  return IngredientSets(
+    items: items,
+    maxSets: maxSets,
+    source: const FromNetwork(),
+  );
+}
+
+/// Contract `KitchenSyncResponse`. [sent] are the change IDs in the order
+/// they were sent: the answer must have one result per change in the same
+/// order, or it is not trusted at all.
+KitchenSyncAnswer decodeSyncAnswer(Object? json, {required List<String> sent}) {
+  final raw = _object(json, 'sync answer');
+  final cursor = _string(raw['cursor'], 'sync cursor');
+  if (cursor.length > 512) _bad('sync cursor');
+  final full = _bool(raw['full'], 'sync full');
+  final items = [
+    for (final item in _list(raw['items'], 'sync items'))
+      decodeKitchenItem(item),
+  ];
+  _unique(items.map((i) => i.id), 'sync item id');
+  final removed = [
+    for (final id in _list(raw['removedItemIds'], 'sync removedItemIds'))
+      _string(id, 'sync removed id'),
+  ];
+  final results = [
+    for (final r in _list(raw['results'], 'sync results'))
+      () {
+        final result = _object(r, 'sync result');
+        // A response enum: a value this app version does not know fails
+        // the whole answer closed (contract versioning, QUESTIONS #58).
+        final outcome = switch (result['outcome']) {
+          'applied' => KitchenSyncOutcome.applied,
+          'superseded' => KitchenSyncOutcome.superseded,
+          'rejected' => KitchenSyncOutcome.rejected,
+          _ => _bad('sync outcome'),
+        };
+        final errorCode = _optionalString(result['errorCode'], 'errorCode');
+        if (outcome == KitchenSyncOutcome.rejected && errorCode == null) {
+          _bad('rejection without a code');
+        }
+        return KitchenChangeAnswer(
+          changeId: _string(result['changeId'], 'sync changeId'),
+          outcome: outcome,
+          itemId: _optionalString(result['itemId'], 'sync itemId'),
+          errorCode: errorCode,
+        );
+      }(),
+  ];
+  if (results.length != sent.length) _bad('sync result count');
+  for (final (i, result) in results.indexed) {
+    if (result.changeId.toLowerCase() != sent[i].toLowerCase()) {
+      _bad('sync result order');
+    }
+  }
+  final maxItems = raw['maxItems'];
+  if (maxItems is! int || maxItems < 1) _bad('sync maxItems');
+  final version = raw['referenceVersion'];
+  if (version != null && version is! String) _bad('sync referenceVersion');
+  return KitchenSyncAnswer(
+    cursor: cursor,
+    full: full,
+    items: items,
+    removedItemIds: removed,
+    results: results,
+    maxItems: maxItems,
+    referenceVersion: version as String?,
+  );
 }
