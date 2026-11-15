@@ -1,10 +1,11 @@
 // TEST FIXTURE: not real safety or nutrition data. Test-only database targets.
 import { randomBytes } from "node:crypto";
 
-import { PGlite, type Transaction } from "@electric-sql/pglite";
+import { PGlite } from "@electric-sql/pglite";
 import pg from "pg";
 
 import { pgExecutor, type SqlExecutor } from "../executor.js";
+import { pgliteExecutor } from "../pglite-executor.js";
 
 /**
  * The database suite runs against every available target:
@@ -36,25 +37,6 @@ export interface DatabaseTarget {
   /** Null when available; otherwise why the target is skipped. */
   readonly skipReason: string | null;
   open(): Promise<TestDatabase>;
-}
-
-type PgliteQueryable = Pick<PGlite, "query" | "exec"> | Transaction;
-
-function pgliteExecutor(db: PgliteQueryable, inTransaction: boolean, root: PGlite): SqlExecutor {
-  const self: SqlExecutor = {
-    async query<R extends object>(text: string, params: readonly unknown[] = []) {
-      const result = await db.query<R>(text, [...params]);
-      return { rows: result.rows, rowCount: result.affectedRows ?? result.rows.length };
-    },
-    async execScript(sql: string) {
-      await db.exec(sql);
-    },
-    transaction<T>(fn: (tx: SqlExecutor) => Promise<T>): Promise<T> {
-      if (inTransaction) return fn(self);
-      return root.transaction((tx) => fn(pgliteExecutor(tx, true, root)));
-    },
-  };
-  return self;
 }
 
 export const pgliteTarget: DatabaseTarget = {
