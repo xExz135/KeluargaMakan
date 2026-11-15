@@ -39,6 +39,11 @@ describe("kitchen config (T-031)", () => {
     [{ maxItemsPerHousehold: "500" }, /maxItemsPerHousehold/],
     [{ search: { maxResults: 51 } }, /maxResults/],
     [{ search: { maxResults: 10, defaultResults: 11 } }, /defaultResults/],
+    [{ maxSetsPerHousehold: 0 }, /maxSetsPerHousehold/],
+    [{ usageHalfLifeDays: 0 }, /usageHalfLifeDays/],
+    [{ sync: { maxChangeAgeHours: 721 } }, /maxChangeAgeHours/],
+    [{ sync: { recordRetentionDays: 0 } }, /recordRetentionDays/],
+    [{ sync: { other: 1 } }, /Unknown kitchen config: sync.other/],
   ])("refuses %j", (overrides, message) => {
     expect(() => resolveKitchenConfig(overrides)).toThrow(message);
   });

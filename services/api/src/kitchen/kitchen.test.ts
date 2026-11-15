@@ -683,16 +683,11 @@ for (const target of DATABASE_TARGETS) {
         expect((await list(home.token)).items).toHaveLength(1);
       });
 
-      it("KIT-09 quantity and brand are not accepted before T-032; an empty change is refused", async () => {
+      it("KIT-02 an empty or invalid change is refused", async () => {
         const home = await signInWithHousehold(api);
         const created = (await add(home, { ingredientId: "fx_kit_kecap_manis" })).body as ItemBody;
         const url = `${ITEMS}/${created.id}`;
-        for (const body of [
-          {},
-          { quantity: "some" },
-          { brand: { brandId: "fx_kit_merek_a" } },
-          { state: "ada" },
-        ]) {
+        for (const body of [{}, { state: "ada" }, { quantity: "banyak" }, { brand: {} }]) {
           expectProblem(
             await api.request("PATCH", url, { token: home.token, body }),
             400,
@@ -795,8 +790,16 @@ for (const target of DATABASE_TARGETS) {
             householdId: home.householdId,
             accountId: home.accountId,
             ref: { kind: "reference", ingredientId: "fx_kit_tempe" },
-            category: "protein",
-            state: "available",
+            values: {
+              category: "protein",
+              state: "available",
+              quantity: null,
+              brandId: null,
+              brandCustomName: null,
+              useScore: 0,
+              useScoreAt: null,
+              editedAt: new Date(),
+            },
             isDefaultStaple: false,
             now: new Date(),
           });

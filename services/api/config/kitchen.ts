@@ -47,6 +47,24 @@ export interface KitchenConfig {
     readonly defaultResults: number;
     readonly maxResults: number;
   };
+  /** KIT-08: ingredient sets per household. */
+  readonly maxSetsPerHousehold: number;
+  /**
+   * KIT-06: how fast a use counts less. A use (an item running out, or coming
+   * back after being out) adds 1 to the item's score, and the score halves
+   * every this many days, so what the household uses now comes first.
+   */
+  readonly usageHalfLifeDays: number;
+  /** KIT-16 offline sync (T-032). */
+  readonly sync: {
+    /**
+     * Oldest a queued change may be dated: an older `ageMs` is treated as
+     * this old, so it loses to anything changed since (bounded past).
+     */
+    readonly maxChangeAgeHours: number;
+    /** How long a change ID is remembered for replays, and removals for cursors. */
+    readonly recordRetentionDays: number;
+  };
 }
 
 const MAX_STAPLES = 30;
@@ -57,6 +75,9 @@ export const defaultKitchenConfig: KitchenConfig = Object.freeze({
   pendingContentReview: true,
   maxItemsPerHousehold: 500,
   search: Object.freeze({ defaultResults: 20, maxResults: 50 }),
+  maxSetsPerHousehold: 20,
+  usageHalfLifeDays: 30,
+  sync: Object.freeze({ maxChangeAgeHours: 7 * 24, recordRetentionDays: 30 }),
 });
 
 const REFERENCE_ID = new RegExp(ID_PATTERN);
@@ -106,7 +127,21 @@ function staples(value: unknown): readonly DefaultStaple[] {
 /** Defaults with the given values replaced. */
 export function resolveKitchenConfig(overrides: unknown = {}): KitchenConfig {
   if (!isRecord(overrides)) throw new Error("kitchen config must be an object");
-  onlyKeys(overrides, ["defaultStaples", "maxItemsPerHousehold", "search"], "");
+  onlyKeys(
+    overrides,
+    [
+      "defaultStaples",
+      "maxItemsPerHousehold",
+      "search",
+      "maxSetsPerHousehold",
+      "usageHalfLifeDays",
+      "sync",
+    ],
+    "",
+  );
+  const sync = overrides["sync"] ?? {};
+  if (!isRecord(sync)) throw new Error("kitchen config sync must be an object");
+  onlyKeys(sync, ["maxChangeAgeHours", "recordRetentionDays"], "sync.");
   const search = overrides["search"] ?? {};
   if (!isRecord(search)) throw new Error("kitchen config search must be an object");
   onlyKeys(search, ["defaultResults", "maxResults"], "search.");
@@ -135,6 +170,33 @@ export function resolveKitchenConfig(overrides: unknown = {}): KitchenConfig {
       "maxItemsPerHousehold",
     ),
     search: Object.freeze({ defaultResults, maxResults }),
+    maxSetsPerHousehold: wholeNumber(
+      overrides["maxSetsPerHousehold"] ?? defaultKitchenConfig.maxSetsPerHousehold,
+      1,
+      100,
+      "maxSetsPerHousehold",
+    ),
+    usageHalfLifeDays: wholeNumber(
+      overrides["usageHalfLifeDays"] ?? defaultKitchenConfig.usageHalfLifeDays,
+      1,
+      365,
+      "usageHalfLifeDays",
+    ),
+    sync: Object.freeze({
+      // The contract's ageMs allows 30 days.
+      maxChangeAgeHours: wholeNumber(
+        sync["maxChangeAgeHours"] ?? defaultKitchenConfig.sync.maxChangeAgeHours,
+        1,
+        30 * 24,
+        "sync.maxChangeAgeHours",
+      ),
+      recordRetentionDays: wholeNumber(
+        sync["recordRetentionDays"] ?? defaultKitchenConfig.sync.recordRetentionDays,
+        1,
+        90,
+        "sync.recordRetentionDays",
+      ),
+    }),
   });
 }
 

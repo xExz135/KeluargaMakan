@@ -1,0 +1,87 @@
+{
+  "$comment": "TEST FIXTURE: not real safety or nutrition data. One fictional brand-varying ingredient for the SAF-07 kitchen brand tests (T-032). The generic record and the brand variants are invented; IDs use the fx_kbr_ prefix.",
+  "schema": "keluargamakan.reference.ingredients/1",
+  "version": "TEST-FIXTURE-kitchen-brands-1",
+  "ingredients": [
+    {
+      "id": "fx_kbr_kaldu",
+      "displayName": {
+        "id": "Kaldu bubuk fiksi",
+        "en": "Fiction bouillon powder"
+      },
+      "localNames": [],
+      "category": "sauces_condiments",
+      "components": {
+        "verification": "verified",
+        "ingredientIds": []
+      },
+      "allergens": {
+        "verification": "verified",
+        "contains": [],
+        "mayContain": ["milk"]
+      },
+      "halal": {
+        "verification": "verified",
+        "value": "halal",
+        "nonHalalSources": []
+      },
+      "diet": {
+        "verification": "verified",
+        "vegetarian": "suitable",
+        "vegan": "not_suitable"
+      },
+      "brandVaries": true,
+      "brandVariants": [
+        {
+          "brandId": "fx_kbr_merek_terperiksa",
+          "brandName": "Merek terperiksa fiksi",
+          "verified": true,
+          "components": {
+            "verification": "verified",
+            "ingredientIds": []
+          },
+          "allergens": {
+            "verification": "verified",
+            "contains": [],
+            "mayContain": []
+          },
+          "halal": {
+            "verification": "verified",
+            "value": "halal",
+            "nonHalalSources": []
+          },
+          "diet": {
+            "verification": "verified",
+            "vegetarian": "suitable",
+            "vegan": "not_suitable"
+          }
+        },
+        {
+          "brandId": "fx_kbr_merek_belum",
+          "brandName": "Merek belum fiksi",
+          "verified": false,
+          "components": {
+            "verification": "verified",
+            "ingredientIds": []
+          },
+          "allergens": {
+            "verification": "verified",
+            "contains": [],
+            "mayContain": []
+          },
+          "halal": {
+            "verification": "verified",
+            "value": "halal",
+            "nonHalalSources": []
+          },
+          "diet": {
+            "verification": "verified",
+            "vegetarian": "suitable",
+            "vegan": "not_suitable"
+          }
+        }
+      ],
+      "tkpiCode": null
+    }
+  ]
+}

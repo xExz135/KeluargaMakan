@@ -2,7 +2,13 @@ import { createHmac, randomBytes, randomInt, timingSafeEqual } from "node:crypto
 
 /** Purposes of keyed hashes. A hash for one purpose never matches another. */
 export type HashPurpose =
-  "sign_in_code" | "destination" | "rate_limit" | "refresh_token" | "idempotent_request";
+  | "sign_in_code"
+  | "destination"
+  | "rate_limit"
+  | "refresh_token"
+  | "idempotent_request"
+  | "kitchen_sync_cursor"
+  | "kitchen_sync_change";
 
 /**
  * HMAC-SHA256 under the server's hash key, over the purpose and each part
