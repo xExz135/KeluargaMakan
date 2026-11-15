@@ -58,11 +58,16 @@ export interface KitchenConfig {
   /** KIT-16 offline sync (T-032). */
   readonly sync: {
     /**
-     * Oldest a queued change may be dated: an older `ageMs` is treated as
-     * this old, so it loses to anything changed since (bounded past).
+     * Oldest queued change the sync accepts (bounded past, at most the
+     * contract's 30 days). An older one is rejected on its own; a change is
+     * never re-dated (security review T-032 M1).
      */
     readonly maxChangeAgeHours: number;
-    /** How long a change ID is remembered for replays, and removals for cursors. */
+    /**
+     * How long change IDs and removals are kept. At least
+     * `maxChangeAgeHours`, so every change the sync accepts can still be
+     * compared with the removals made since (T-032 L1).
+     */
     readonly recordRetentionDays: number;
   };
 }
@@ -77,7 +82,7 @@ export const defaultKitchenConfig: KitchenConfig = Object.freeze({
   search: Object.freeze({ defaultResults: 20, maxResults: 50 }),
   maxSetsPerHousehold: 20,
   usageHalfLifeDays: 30,
-  sync: Object.freeze({ maxChangeAgeHours: 7 * 24, recordRetentionDays: 30 }),
+  sync: Object.freeze({ maxChangeAgeHours: 30 * 24, recordRetentionDays: 30 }),
 });
 
 const REFERENCE_ID = new RegExp(ID_PATTERN);
@@ -182,7 +187,7 @@ export function resolveKitchenConfig(overrides: unknown = {}): KitchenConfig {
       365,
       "usageHalfLifeDays",
     ),
-    sync: Object.freeze({
+    sync: syncSettings({
       // The contract's ageMs allows 30 days.
       maxChangeAgeHours: wholeNumber(
         sync["maxChangeAgeHours"] ?? defaultKitchenConfig.sync.maxChangeAgeHours,
@@ -198,6 +203,17 @@ export function resolveKitchenConfig(overrides: unknown = {}): KitchenConfig {
       ),
     }),
   });
+}
+
+/** T-032 L1: removals must be kept at least as long as the oldest change the sync accepts. */
+function syncSettings(sync: KitchenConfig["sync"]): KitchenConfig["sync"] {
+  if (sync.recordRetentionDays * 24 < sync.maxChangeAgeHours) {
+    throw new Error(
+      "kitchen config sync.recordRetentionDays must cover sync.maxChangeAgeHours " +
+        "(removals are kept at least as long as the oldest accepted change)",
+    );
+  }
+  return Object.freeze(sync);
 }
 
 export function kitchenConfigFromEnv(

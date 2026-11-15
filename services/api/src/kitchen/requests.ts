@@ -307,14 +307,17 @@ function readChange(reader: BodyReader, raw: unknown, at: string): SyncChangeInp
   const before = reader.errors.length;
   const changeId = reader.string(record, "changeId", at, { required: true, pattern: UUID_PATTERN });
   const operation = reader.enumValue(record, "operation", at, OPERATIONS, true);
+  // Only the type is checked here: an age out of range rejects just this
+  // change when it is applied (security review T-032 L3).
   let ageMs = 0;
   if (!Object.hasOwn(record, "ageMs")) reader.fail(`${at}/ageMs`, "required");
   else {
     const value = record["ageMs"];
-    if (typeof value !== "number" || !Number.isInteger(value))
+    if (typeof value !== "number" || !Number.isSafeInteger(value)) {
       reader.fail(`${at}/ageMs`, "invalid_type");
-    else if (value < 0 || value > AGE_MS_MAX) reader.fail(`${at}/ageMs`, "invalid_value");
-    else ageMs = value;
+    } else {
+      ageMs = value;
+    }
   }
   let ingredient: IngredientKeyInput | null = null;
   if (!Object.hasOwn(record, "ingredient")) reader.fail(`${at}/ingredient`, "required");

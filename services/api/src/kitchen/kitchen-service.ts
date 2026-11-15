@@ -49,6 +49,7 @@ import {
   type KitchenItemRow,
 } from "./kitchen-store.js";
 import {
+  AGE_MS_MAX,
   cleanBrandName,
   customIngredientRef,
   type BrandInput,
@@ -475,9 +476,12 @@ export class KitchenService {
     now: Date,
   ): Promise<Omit<SyncResultView, "changeId">> {
     const ref = ingredientRefOf(change.ingredient);
-    // Never in the future (ageMs >= 0), and never older than the configured limit.
-    const maxAgeMs = this.#kitchen.sync.maxChangeAgeHours * 3_600_000;
-    const editedAt = new Date(now.getTime() - Math.min(change.ageMs, maxAgeMs));
+    // Security review T-032 M1, L3: a change is dated when it was made, on
+    // the server's clock, and never moved later. An age below 0 (the future)
+    // or past the accepted limit rejects this change only.
+    const maxAgeMs = Math.min(AGE_MS_MAX, this.#kitchen.sync.maxChangeAgeHours * 3_600_000);
+    if (change.ageMs < 0 || change.ageMs > maxAgeMs) throw fieldError("/ageMs", "invalid_value");
+    const editedAt = new Date(now.getTime() - change.ageMs);
     const existing = await findItemFor(tx, scope.householdId, ref);
     const removedAt = await lastRemovalOf(tx, scope.householdId, ref);
     const stored = existing === null ? null : (existing.client_changed_at ?? existing.changed_at);
@@ -495,6 +499,13 @@ export class KitchenService {
     if (existing !== null) {
       const row = await this.#write(tx, scope, existing, change.patch, editedAt, now);
       return { outcome: "applied", itemId: row.id, errorCode: null };
+    }
+    // Removals older than the retention may have been purged, so a change
+    // from before then never adds an item: it could be one removed since
+    // (fail toward "do not bring back").
+    const horizon = now.getTime() - this.#kitchen.sync.recordRetentionDays * 86_400_000;
+    if (editedAt.getTime() < horizon) {
+      return { outcome: "superseded", itemId: null, errorCode: null };
     }
     const category = this.#categoryForNew(ref, change.patch.category ?? null, "");
     const row = await this.#insert(tx, scope, ref, change.patch, category, editedAt, now);
