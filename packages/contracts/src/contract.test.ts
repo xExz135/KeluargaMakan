@@ -613,21 +613,32 @@ describe("Dapur Saya kitchen (T-030, contract 0.2)", () => {
     expect(operation("syncKitchen").operation.description).toMatch(/latest change/);
   });
 
-  it("operations designed ahead of their server work name the task that serves them", () => {
+  it("T-032 every designed kitchen operation is served: none is marked for a later task", () => {
     const planned = operations()
       .filter((entry) => entry.operation["x-server-task"] !== undefined)
-      .map((entry) => `${entry.operation.operationId} ${entry.operation["x-server-task"]}`)
-      .sort();
-    expect(planned).toEqual(
-      [
-        "createIngredientSet T-032",
-        "deleteIngredientSet T-032",
-        "listIngredientSets T-032",
-        "markIngredientSetAvailable T-032",
-        "replaceIngredientSet T-032",
-        "syncKitchen T-032",
-      ].sort(),
-    );
+      .map((entry) => entry.operation.operationId);
+    expect(planned).toEqual([]);
+  });
+
+  it("KIT-09 SAF-07 updates take quantity and brand; a typed brand is never a recorded brand", () => {
+    expect(Object.keys(schema("KitchenItemUpdate").properties ?? {})).toEqual([
+      "state",
+      "category",
+      "quantity",
+      "brand",
+    ]);
+    const description = operation("updateKitchenItem").operation.description ?? "";
+    expect(description).toMatch(/never counts as a recorded brand/);
+    expect(description).toContain("503 `reference_data_unavailable`");
+  });
+
+  it("KIT-16 the sync says how replays, ages, removals and cursors behave", () => {
+    const description = operation("syncKitchen").operation.description ?? "";
+    expect(description).toMatch(/belong to the household/);
+    expect(description).toContain("`idempotency_key_reused`");
+    expect(description).toMatch(/never dated\s+in the future/);
+    expect(description).toMatch(/cannot bring an item back/);
+    expect(description).toMatch(/never carries another household's data/);
   });
 
   it("text a user types never travels in a URL (search queries, custom names)", () => {

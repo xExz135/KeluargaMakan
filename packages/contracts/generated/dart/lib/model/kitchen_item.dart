@@ -53,7 +53,7 @@ class KitchenItem {
   /// Created with the household as a default staple (KIT-07, ACC-05).
   final bool isDefaultStaple;
 
-  /// KIT-06: 1 is the most used item in its category. Null until use is recorded; clients then fall back to their own order.
+  /// KIT-06: 1 is the most used item in its category. A use is a change of state (it ran out, or came back after being out), and older uses count less (configured half-life). Null when the item has no recent use; clients then fall back to their own order.
   ///
   /// Minimum value: 1
   final int? usageRank;
