@@ -1,6 +1,6 @@
 {
   "name": "@keluargamakan/contracts",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "private": true,
   "description": "OpenAPI contract and generated API clients.",
   "type": "module",

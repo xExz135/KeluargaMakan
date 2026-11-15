@@ -1,7 +1,7 @@
 openapi: 3.1.1
 info:
   title: KeluargaMakan API
-  version: 0.2.2
+  version: 0.2.3
   summary: Household manager API for KeluargaMakan (FamilyEats).
   description: >-
     Source of truth for API shapes: change this file first, then implement.
@@ -52,6 +52,14 @@ info:
     operation carries `x-server-task` any more. The descriptions now say what
     a use is for `usageRank` (KIT-06) and how the sync treats removals,
     change IDs, change ages and cursors.
+
+
+    v0.2.3 (security review T-032): a queued change is dated at the server's
+    time minus its `ageMs`, never later, and an `ageMs` out of range is
+    rejected on its own instead of failing the whole sync (the schema no
+    longer bounds it). A change that would add an item and is older than the
+    removals the server keeps is superseded. Temporary rejections are not
+    remembered, so the same change ID can be sent again.
 
 
     Versioning (QUESTIONS #58): adding an operation, an optional request
@@ -1024,10 +1032,16 @@ paths:
         sending it again returns its first result without applying it twice,
         so replaying the queue is safe. Change IDs belong to the household and
         are kept for a configured period; the same ID with a different change
-        is `rejected` with `idempotency_key_reused`. A change is never dated
-        in the future, and one older than the configured limit is dated at
-        that limit. A removal is kept too: a change older than the removal is
-        `superseded`, so an old queued change cannot bring an item back. The
+        is `rejected` with `idempotency_key_reused`. A change rejected for a
+        reason that can pass (`reference_data_unavailable`,
+        `kitchen_item_limit_reached`) is not remembered: send it again later
+        with the same `changeId`. Each change is dated at the server's time
+        minus its `ageMs`, never later. An `ageMs` below 0 or older than the
+        server's limit (at most 30 days) is `rejected` with
+        `validation_failed`, on its own. A removal is kept too: a change
+        older than the removal is `superseded`, so an old queued change cannot
+        bring an item back, and a change that would add an item but is older
+        than the removals the server still keeps is `superseded` as well. The
         response carries every item changed or removed since the cursor and a
         new cursor. When `cursor` is null, not issued by this server for this
         household, or older than the kept removals, the response has all
@@ -2670,11 +2684,11 @@ components:
           description: >-
             Milliseconds from the edit to sending this request, measured on the
             phone. The server dates the change at its own time minus this age
-            (KIT-16), so the phone's clock setting does not matter. Changes
-            older than the server's limit are superseded by any later change.
+            (KIT-16), so the phone's clock setting does not matter, and never
+            later. A negative age, or one older than the server's limit (at
+            most 30 days, 2592000000), makes only this change `rejected`
+            (`validation_failed`); the rest of the sync still applies.
           type: integer
-          minimum: 0
-          maximum: 2592000000
         category: { $ref: "#/components/schemas/KitchenCategory" }
         state: { $ref: "#/components/schemas/KitchenItemState" }
         quantity:
