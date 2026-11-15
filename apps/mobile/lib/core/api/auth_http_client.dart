@@ -96,12 +96,21 @@ final class AuthenticatingClient extends http.BaseClient {
       return _streamed(firstResponse);
     }
 
-    final outcome = await _session.refreshAfterRejected(tokens.accessToken);
+    final outcome = await _session.refreshAfterRejected(
+      tokens.accessToken,
+      accountId: tokens.accountId,
+    );
     switch (outcome) {
-      case Refreshed(:final tokens):
+      case Refreshed(tokens: final next)
+          when next.accountId == tokens.accountId &&
+              (bound is! String || next.accountId == bound):
         final retry = _copy(request as http.Request, retryBody)
-          ..headers['authorization'] = 'Bearer ${tokens.accessToken}';
+          ..headers['authorization'] = 'Bearer ${next.accessToken}';
         return _inner.send(retry);
+      case Refreshed():
+        // Another account's tokens (security review T-034 M1): this
+        // request is never repeated with them. The 401 stands.
+        return _streamed(firstResponse);
       case RefreshEndedSession(:final response):
         return _streamed(response ?? firstResponse);
       case RefreshFailed(:final response):

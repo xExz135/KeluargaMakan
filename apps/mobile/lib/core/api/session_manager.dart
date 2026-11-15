@@ -225,18 +225,26 @@ final class SessionManager {
     return false;
   }
 
-  /// Gets new tokens after the API rejected [rejectedAccessToken].
+  /// Gets new tokens after the API rejected [rejectedAccessToken], which
+  /// belonged to [accountId].
   ///
   /// If another request already refreshed, the newer tokens are returned
-  /// without a second refresh. Throws [http.ClientException] when the refresh
-  /// endpoint cannot be reached; the session is kept.
-  Future<RefreshOutcome> refreshAfterRejected(String rejectedAccessToken) {
-    final inFlight = _inFlight;
-    if (inFlight != null) return inFlight;
+  /// without a second refresh, but only when they are [accountId]'s
+  /// (security review T-034 M1): after a sign-out and another sign-in on
+  /// this phone, the current tokens are someone else's, so the answer is
+  /// [RefreshEndedSession] and the request is never repeated with them.
+  /// Throws [http.ClientException] when the refresh endpoint cannot be
+  /// reached; the session is kept.
+  Future<RefreshOutcome> refreshAfterRejected(
+    String rejectedAccessToken, {
+    required String accountId,
+  }) {
     final tokens = _tokens;
-    if (tokens == null) {
+    if (tokens == null || tokens.accountId != accountId) {
       return Future.value(const RefreshEndedSession(null));
     }
+    final inFlight = _inFlight;
+    if (inFlight != null) return inFlight;
     if (tokens.accessToken != rejectedAccessToken) {
       return Future.value(Refreshed(tokens));
     }
@@ -246,12 +254,19 @@ final class SessionManager {
   }
 
   Future<RefreshOutcome> _rotate(SessionTokens tokens) async {
+    final epoch = _epoch;
     final http.Response response;
     try {
       response = await _refresh(tokens.refreshToken);
     } on api.ApiException catch (e) {
       // The generated client wraps transport errors in ApiException.
       throw http.ClientException('Refresh failed: ${e.code}');
+    }
+    // The session changed while the refresh was on its way (sign-out, or
+    // another account signed in): its answer neither restores the old
+    // account's tokens nor ends the session that is current now.
+    if (_epoch != epoch || !identical(_tokens, tokens)) {
+      return const RefreshEndedSession(null);
     }
     final status = response.statusCode;
     if (status >= 200 && status < 300) {
