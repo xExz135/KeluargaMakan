@@ -623,7 +623,7 @@ export interface paths {
         };
         /**
          * Get the current rule set, reference data and library versions
-         * @description The versions every safety result is computed with (DAT-06, SAF-14): the Cek Aman rule set, the verified reference ingredient data and the recipe library. The phone compares them with the versions stored on its cached safety results; a cached result made with older versions is checked again the next time the recipe is opened online, and the phone refreshes within `refreshWithinHours` (SAF-13, 24 hours target, from configuration). Content changes reach phones without an app release (NFR-20). When the reference data is not loaded or fails verification the answer is 503 `reference_data_unavailable`. Sending the `ETag` back in `If-None-Match` answers 304 with no body while the versions are unchanged.
+         * @description The versions every safety result is computed with (DAT-06, SAF-14): the Cek Aman rule set, the verified reference ingredient data and the recipe library. The phone compares them with the versions stored on its cached safety results; a cached result made with older versions is checked again the next time the recipe is opened online, and the phone refreshes within `refreshWithinHours` (SAF-13, 24 hours target, from configuration). Content changes reach phones without an app release (NFR-20). When the reference data is not loaded or fails verification the answer is 503 `reference_data_unavailable`. The `ETag` is derived from the three versions only. Sending it back in `If-None-Match` answers 304 with no body while they are unchanged; the client accepts a 304 only when the `ETag` it sent matches the one it stored.
          */
         get: operations["getReferenceVersions"];
         put?: never;
@@ -686,7 +686,7 @@ export interface paths {
         };
         /**
          * Get a library recipe image
-         * @description The image bytes of a published recipe image (LIB-03, SUG-09). Recipe images are food photos from the content team, never photos of people. Images are addressed by ID and never change, so the phone may keep them; `If-None-Match` answers 304. No JSON schema in this contract carries an image, a URL or a link.
+         * @description The image bytes of a published recipe image (LIB-03, SUG-09). Recipe images are food photos from the content team, never photos of people. An image ID never changes its bytes, but an image can be withdrawn: the phone checks again with `If-None-Match` before each use (304 while it is current), a withdrawn or retired image answers 404, and the phone drops cached images that the current `libraryVersion` no longer uses. No JSON schema in this contract carries an image, a URL or a link.
          */
         get: operations["getLibraryImage"];
         put?: never;
@@ -734,7 +734,7 @@ export interface paths {
         put?: never;
         /**
          * List checked substitutions and variants for the selected eaters
-         * @description Ingredient substitutions (CKM-09) and content-team variants such as "serve Kakak's portion before adding terasi" (SAF-11), each with its own Cek Aman result for exactly the selected eaters (SAF-02, AI-01). An option that would be Not safe for any selected member, or that could not be checked, is never listed; it is counted in `hiddenCount`. Where the content team defined none, none is offered. Options suggested by AI are only listed when AI is available and pass the same check; with AI down the content-team options still work (AI-08). Using an option re-checks the whole recipe through `getRecipeDetail`. 409 `adaptation_expired`, 404 `not_found` and the 503 codes as for `getRecipeDetail`.
+         * @description Ingredient substitutions (CKM-09) and content-team variants such as "serve Kakak's portion before adding terasi" (SAF-11), each with its own Cek Aman result for exactly the selected eaters (SAF-02, AI-01). An option that would be Not safe for any selected member, or that could not be checked, is never listed; it is counted in `hiddenCount`. Where the content team defined none, none is offered. Options suggested by AI are only listed when AI is available and pass the same check; with AI down the content-team options still work (AI-08). Each option also carries `recipeSafetyWith`, the whole recipe checked with that one option applied. Using options re-checks the whole recipe with all of them through `getRecipeDetail`. 409 `adaptation_expired`, 404 `not_found` and the 503 codes as for `getRecipeDetail`.
          */
         post: operations["listRecipeSubstitutions"];
         delete?: never;
@@ -777,7 +777,7 @@ export interface paths {
         put?: never;
         /**
          * Show three other suggestions for the same inputs
-         * @description "Tampilkan 3 lainnya" (SUG-11): the next page for the same inputs, never repeating an item shown earlier in the set. Asking for the same `page` again returns the same items, so a retry is safe. Each page is checked by Cek Aman when it is served (SUG-04). When the pool is used up `poolExhausted` is true. A set is kept for a configured time; after that the answer is 409 `suggestion_set_expired` and the client asks again with `requestSuggestions`.
+         * @description "Tampilkan 3 lainnya" (SUG-11): the next page for the same inputs, never repeating an item shown earlier in the set. Asking for the same `page` again offers the same recipes, so a retry is safe, but every serve, a repeat of the same page included, runs Cek Aman again against the selected members' current rules and consent and the current versions, with a fresh `checkId` (SUG-04). A stored or cached result is never replayed. A changed result is allowed: an item that is now Not safe for an eater is replaced or dropped, and the others carry their new result. When the pool is used up `poolExhausted` is true. A set is kept for a configured time; after that the answer is 409 `suggestion_set_expired` and the client asks again with `requestSuggestions`.
          */
         post: operations["requestMoreSuggestions"];
         delete?: never;
@@ -791,7 +791,7 @@ export interface paths {
             query?: never;
             header?: never;
             path: {
-                /** @description A cooked meal of the session's household. The phone makes it (a random UUID in lower case) when cooking ends, so the record can be sent again safely. */
+                /** @description A cooked meal of the session's household: a random UUID in lower case that the phone makes when cooking ends, so the record can be sent again safely. Keyed per household. */
                 mealId: components["parameters"]["MealId"];
             };
             cookie?: never;
@@ -799,7 +799,7 @@ export interface paths {
         get?: never;
         /**
          * Record a cooked meal and its feedback
-         * @description The cooked-meal record (QUESTIONS #19) written when cooking ends (CKM-10), with the one-tap household feedback and optional per-person feedback (PRF-13). The phone makes `mealId` (a random UUID) when cooking ends and sends the whole record each time, so the offline queue can replay it safely; the latest record replaces the earlier one. Meal IDs belong to the household. Feedback and recent meals adjust ranking for the household and the people who ate from the next request on (PRF-14, SUG-07, SUG-08). Every eater and rated member must be in the household (404 `not_found` otherwise); a rating for someone who did not eat is 400. Kept for the configured meal-history retention (DAT-04, QUESTIONS #19). No nutrition is recorded in V1.
+         * @description The cooked-meal record (QUESTIONS #19) written when cooking ends (CKM-10), with the one-tap household feedback and optional per-person feedback (PRF-13). The phone makes `mealId` (a random UUID) when cooking ends and sends the whole record each time, so the offline queue can replay it safely. Records are keyed by household and meal ID, so an ID another household used is simply a new meal here. The copy made last on the phone wins (`ageMs`, server bounds): a late older copy is ignored and the stored record is returned. Rate-limited (429). Feedback and recent meals adjust ranking for the household and the people who ate from the next request on (PRF-14, SUG-07, SUG-08). Every eater and rated member must be in the household (404 `not_found` otherwise); a rating for someone who did not eat is 400. Kept for the configured meal-history retention (DAT-04, QUESTIONS #19). No nutrition is recorded in V1.
          */
         put: operations["recordCookedMeal"];
         post?: never;
@@ -820,7 +820,7 @@ export interface paths {
         put?: never;
         /**
          * Report a wrong Cek Aman result
-         * @description From the recipe screen (SAF-15). The report names the recipe, the check it is about (`checkId`, with the rule set and data versions, SAF-14), the members it concerns and what is wrong. The server stores only the members' rule types from that check, never their names, and the content team reviews it in the admin queue. A report never changes a result on any phone. It may be queued offline: send an `Idempotency-Key`. The note is optional, short, and the app asks not to put personal details in it. Rate-limited (429).
+         * @description From the recipe screen (SAF-15). The report names the recipe, the check it is about (`checkId`), the members it concerns and what is wrong. The server takes the rule set and data versions, the result and the rule types from its own log of that check (SAF-14), never from the phone. A `checkId` of another household, or one past its retention, answers 404 `not_found`; a member who is not in the check answers 400. Only the members' rule types are kept, never their names, and the content team reviews the report in the admin queue. A report never changes a result on any phone. It may be queued offline, so `Idempotency-Key` is required; a replay returns the first receipt and does not count against the rate limit (429). The note is optional and short; the app asks not to put personal details in it, and staff only see a redacted copy.
          */
         post: operations["createSafetyReport"];
         delete?: never;
@@ -1025,7 +1025,7 @@ export interface paths {
         put?: never;
         /**
          * Start a new recipe or a new version of one
-         * @description A content editor drafts a new library recipe, or a new version of a published one (`recipeId`), with the LIB-03 fields, regional variant link (LIB-04), and content-team substitutions and variants (SAF-11). Halal status and nutrition are never entered: halal comes from Cek Aman's ingredient data (LIB-05) and nutrition from the reviewed calculation (T-042). A draft is never served to households.
+         * @description A content editor drafts a new library recipe, or a new version of a published one (`recipeId`), with the LIB-03 fields, regional variant link (LIB-04), and content-team substitutions and variants (SAF-11). Halal status and nutrition are never entered: halal comes from Cek Aman's ingredient data (LIB-05) and nutrition from the reviewed calculation (T-042). A draft is never served to households. Variants are validated as `AdminRecipeVariant` says (400 with pointers).
          */
         post: operations["createRecipeDraft"];
         delete?: never;
@@ -1099,7 +1099,7 @@ export interface paths {
         put?: never;
         /**
          * Send a recipe draft for review
-         * @description The author sends a valid draft for approval (`in_review`). It needs a test record for the current revision (409 `recipe_not_tested`) and every ingredient line resolved to a reference ingredient (409 `recipe_ingredients_unresolved`); a newer revision answers 409 `draft_changed`.
+         * @description The author sends a valid draft for approval (`in_review`). It needs a test record for the current revision (409 `recipe_not_tested`) and every ingredient line resolved to a reference ingredient (409 `recipe_ingredients_unresolved`); a newer revision answers 409 `draft_changed`. Every variant must pass the `AdminRecipeVariant` validation: its omitted lines are used only in steps at or after the separation step (400 `validation_failed` with pointers).
          */
         post: operations["submitRecipeDraft"];
         delete?: never;
@@ -1122,7 +1122,7 @@ export interface paths {
         put?: never;
         /**
          * Approve and publish, or reject, a recipe draft
-         * @description A safety reviewer who is not the author (409 `second_person_required`, QUESTIONS #81) approves or rejects a draft in review. Approval publishes it as the recipe's next version at once, without an app release (LIB-11, NFR-20); households get it on their next request, each check recording the recipe version (DAT-06). Approval needs the test record (409 `recipe_not_tested`, LIB-01).
+         * @description A safety reviewer who is not the author (409 `second_person_required`, QUESTIONS #81) approves or rejects a draft in review. Approval publishes it as the recipe's next version at once, without an app release (LIB-11, NFR-20); households get it on their next request, each check recording the recipe version (DAT-06). Approval needs the test record (409 `recipe_not_tested`, LIB-01), and the variant validation of `AdminRecipeVariant` runs again (400).
          */
         post: operations["decideRecipeDraft"];
         delete?: never;
@@ -1965,17 +1965,29 @@ export interface components {
             memberIds: components["schemas"]["Id"][];
         };
         /**
-         * @description SAF-04 per-member result from Cek Aman, the only component that assigns one (SAF-01). Clients render it and never compute, upgrade or default it. An unknown value means no result: the item is hidden, never shown as safe.
+         * @description SAF-04 per-member result from Cek Aman, the only component that assigns one (SAF-01). Clients render it and never compute, upgrade or default it. An unknown value means no result: the item is hidden, never shown as safe. A `safe` or `check_label` result that comes with a `condition` holds only if the cook follows that condition: a client that cannot show the condition next to the badge shows Check the label, never a bare Safe (SAF-11, QUESTIONS #85).
          * @enum {string}
          */
         SafetyStatus: "safe" | "not_safe" | "check_label";
+        /**
+         * @description `separate_portion`: the member's portion is set aside before a step and some ingredient lines never go into it (SAF-11). A client that does not know the value shows Check the label for the member, never a bare Safe.
+         * @enum {string}
+         */
+        SafetyConditionKind: "separate_portion";
+        /** @description SAF-11: the member's result holds only if the cook follows this. For `separate_portion`, the member's portion is set aside before `separateBeforeStepId`, and the ingredient lines `omittedLineIds` never go into it. Clients show the condition next to the member's badge on every surface (card, recipe screen, Mode Masak) and show the separation at that step in Mode Masak. A client that cannot show the condition next to the badge, or does not know `kind`, shows Check the label for the member, never a bare Safe (QUESTIONS #85). A cached result with a condition is reused only together with its variant. */
+        SafetyCondition: {
+            kind: components["schemas"]["SafetyConditionKind"];
+            variantId: components["schemas"]["Id"];
+            separateBeforeStepId: components["schemas"]["Id"];
+            omittedLineIds: components["schemas"]["Id"][];
+        };
         /**
          * @description `contains` and `component` come with `not_safe`; the other kinds with `check_label`. The member's `status` always decides the badge.
          * @enum {string}
          */
         SafetyReasonKind: "contains" | "component" | "unknown" | "brand_uncertain" | "unmapped_rule";
         /**
-         * @description Reason codes from the Cek Aman engine (`packages/cek-aman`). Like `ErrorCode`, codes may be added: a client that does not know a code still renders the member's `status` and shows the generic missing-data line, and never hides a Not safe result or shows it as safe. Until the app decodes unknown codes that way, new codes come with a version bump (QUESTIONS #82).
+         * @description Reason codes from the Cek Aman engine (`packages/cek-aman`). Like `ErrorCode`, codes may be added: a client that does not know a code still renders the member's `status` and shows the generic missing-data line, and never hides a Not safe result or shows it as safe. The app reads food items with a strict hand-written decoder that keeps `status` and shows the generic line for an unknown code, and drops only the bad item (T-054, T-055); until it ships, new codes come with a version bump (QUESTIONS #82).
          * @enum {string}
          */
         SafetyReasonCode: "allergen_contains" | "halal_not_halal" | "diet_not_suitable" | "excluded_ingredient" | "no_ingredients" | "ingredient_unresolved" | "ingredient_not_in_reference" | "components_unverified" | "component_not_in_reference" | "component_cycle" | "allergens_unverified" | "allergen_may_contain" | "allergen_related" | "allergen_unrecognized" | "halal_uncertain" | "diet_uncertain" | "brand_not_recorded" | "brand_unverified" | "component_brand_varies" | "rule_unmapped" | "rule_mapping_unconfirmed" | "rule_mapping_unknown_ingredient" | "rule_invalid";
@@ -2015,11 +2027,12 @@ export interface components {
             brand: components["schemas"]["SafetyBrandRef"] | null;
             detail: string | null;
         };
-        /** @description One selected member's Cek Aman result, by member ID only, never a name (SAF-04, SAF-05). `rulesConsent` is the member's health-data consent state when the check ran (QUESTIONS #36, #48, #52): unless it is `given`, the member's rules were not checked and clients show the neutral "rules not saved" or "not filled in" chip, never Safe, whatever `status` says. A result without `rulesConsent`, or with a value the client does not know, is treated the same way. */
+        /** @description One selected member's Cek Aman result, by member ID only, never a name (SAF-04, SAF-05). `rulesConsent` is the member's health-data consent state when the check ran (QUESTIONS #36, #48, #52). When it is not `given`, the member's rules were not checked: a `safe` status is shown as the neutral "rules not saved" or "not filled in" chip, never as Safe. `not_safe` and `check_label` are always shown as they are, whatever the consent state, and the client logs such a pair as an error: consent never hides a Not safe result. A missing or unknown `rulesConsent` counts as not `given`. `condition` is set when the result holds only if the cook follows a variant (SAF-11) and is null for `not_safe`; a client that cannot show the condition next to the badge shows Check the label, never a bare Safe (QUESTIONS #85). A `safe` result with reasons, or a `not_safe` or `check_label` result without any, is inconsistent and hides the item. */
         MemberSafetyResult: {
             memberId: components["schemas"]["Id"];
             rulesConsent: components["schemas"]["RulesConsentStatus"];
             status: components["schemas"]["SafetyStatus"];
+            condition: components["schemas"]["SafetyCondition"] | null;
             /** @description Empty for `safe`; at least one for the other states. */
             reasons: components["schemas"]["SafetyReason"][];
         };
@@ -2028,7 +2041,7 @@ export interface components {
          * @enum {string}
          */
         HalalStatus: "halal" | "not_halal" | "check_label";
-        /** @description A Cek Aman finding without a member rule: used for the recipe halal status and in the staff review queue. */
+        /** @description A Cek Aman finding without a member rule, for the recipe halal status. */
         SafetyFinding: {
             kind: components["schemas"]["SafetyReasonKind"];
             code: components["schemas"]["SafetyReasonCode"];
@@ -2042,7 +2055,7 @@ export interface components {
             /** @description The ingredients behind `not_halal` or `check_label`; empty for `halal`. */
             findings: components["schemas"]["SafetyFinding"][];
         };
-        /** @description The completed Cek Aman result for one food item (SAF-02). Required on every food item the API returns: an item without one is never returned. `members` holds exactly the selected eaters, in the order of the selection, and nobody else (PRF-11). `checkId` names the logged check with its rule set and data versions (SAF-14, DAT-06); a wrong-result report quotes it. The phone may cache the result with the recipe (CKM-07) and must check again when any version changes or a selected member's rules or consent change. */
+        /** @description The completed Cek Aman result for one food item (SAF-02). Required on every food item the API returns: an item without one is never returned. `members` holds exactly the selected eaters, in the order of the selection, and nobody else (PRF-11). `checkId` names the logged check with its rule set and data versions (SAF-14, DAT-06); a wrong-result report quotes it. The phone may cache the result with the recipe (CKM-07) and must check again when any version changes or a selected member's rules or consent change. Clients check that `members` holds exactly the eaters they asked for (the member IDs of the selection; for `whole_family`, the household's profiles), each once: a missing, extra or repeated member, or an unknown status, hides that item, never the other items on the page. Food items are read with a strict decoder that drops a bad item on its own (T-054, T-055). On an item with a `variant`, exactly the members in `variant.separatedMemberIds` carry that variant as their `condition` (SAF-11). */
         RecipeSafety: {
             checkId: components["schemas"]["Id"];
             /** Format: date-time */
@@ -2185,7 +2198,15 @@ export interface components {
          * @enum {string}
          */
         NutritionStatus: "estimate" | "unavailable";
-        /** @description NUT-05: a range, never a single number; `high` is greater than `low`. Values come only from the reviewed nutrition calculation (T-042), never from AI and never entered by hand in this API. */
+        /**
+         * @description NUT-05: a range, never a single number. Rule: `high` is greater than `low` (so `low` is never above `high`, and never equal to it); the server refuses to store or send anything else, and a client treats a range with `low >= high` as `unavailable`. Values come only from the reviewed nutrition calculation (T-042), never from AI and never entered by hand in this API.
+         * @example {
+         *       "nutrient": "energy",
+         *       "low": 1,
+         *       "high": 2,
+         *       "unit": "kcal"
+         *     }
+         */
         NutrientRange: {
             nutrient: components["schemas"]["NutrientCode"];
             low: number;
@@ -2232,34 +2253,36 @@ export interface components {
         /** @description Who is eating, and optionally the adaptation, substitutions or variant to open the recipe with. The response quantities are for servings scaled to the eaters; the phone rescales them (CKM-05). */
         RecipeDetailRequest: {
             eaters: components["schemas"]["EaterSelection"];
-            /** @description The `adaptation.adaptationId` a suggestion returned (LIB-06). */
+            /** @description The `adaptation.adaptationId` a suggestion returned (LIB-06). Household-bound (see Conventions). */
             adaptationId?: components["schemas"]["Id"];
-            /** @description Checked substitutions to use (SAF-11, CKM-09), from `listRecipeSubstitutions`. */
+            /** @description Checked substitutions to use (SAF-11, CKM-09), from `listRecipeSubstitutions`. Household-bound (see Conventions). */
             substitutionIds?: components["schemas"]["Id"][];
-            /** @description A checked content-team variant (SAF-11). */
+            /** @description A checked content-team variant (SAF-11), offered for this recipe. */
             variantId?: components["schemas"]["Id"];
         };
-        /** @description LIB-06: the recipe was adapted (scaled, substituted or simplified) and is labeled "Diadaptasi", with one line per change ("Disesuaikan: {change}"). `aiAdapted` is true when the AI service made the change; the adapted recipe went through Cek Aman again like any other (AI-01). Change lines never state a safety result. `adaptationId` and `expiresAt` are set for an AI adaptation the server keeps for a configured time. */
+        /** @description LIB-06: the recipe was adapted (scaled, substituted or simplified) and is labeled "Diadaptasi", with one line per change ("Disesuaikan: {change}"). `aiAdapted` is true when the AI service made the change; the adapted recipe went through Cek Aman again like any other (AI-01). Change lines never state a safety result: AI-written lines pass the server's safety-word filter, and a line it blocks is replaced by a content-team line or dropped. `adaptationId` and `expiresAt` are set for an AI adaptation the server keeps for a configured time. */
         AdaptationInfo: {
+            /** @description Household-bound (see Conventions). */
             adaptationId: components["schemas"]["Id"] | null;
             aiAdapted: boolean;
             changes: components["schemas"]["LocalizedText"][];
             /** Format: date-time */
             expiresAt: string | null;
         };
-        /** @description SAF-11: a content-team variant in use, for example "Pisahkan porsi {names} sebelum menambah terasi". The app fills `{names}` from `separatedMemberIds`; those members' portion is set aside before `separateBeforeStepId`, and Cek Aman checked their portion without the ingredients added from that step on. */
+        /** @description SAF-11: a content-team variant in use, for example "Pisahkan porsi {names} sebelum menambah terasi". The app fills `{names}` from `separatedMemberIds`; those members' portion is set aside before `separateBeforeStepId`, and the lines in `omittedLineIds` never go into it, so Mode Masak can say so at each step that adds one. Cek Aman checked their portion without those lines, and each of them carries this variant as the `condition` of their result. The server only publishes variants whose omitted lines are first added at or after the separation step (`AdminRecipeVariant`). */
         AppliedVariant: {
             variantId: components["schemas"]["Id"];
             label: components["schemas"]["LocalizedText"];
             separatedMemberIds: components["schemas"]["Id"][];
             separateBeforeStepId: components["schemas"]["Id"];
+            omittedLineIds: components["schemas"]["Id"][];
         };
         /**
          * @description PRF-12 trade-off templates (`suggest.tradeoff.*`). A hard rule is never a trade-off. Clients show no line for an unknown value.
          * @enum {string}
          */
         TradeOffKind: "spice_separate" | "less_santan" | "not_fried" | "less_salt" | "less_sugar" | "dislike_skipped" | "other";
-        /** @description PRF-12: the one line explaining how the eaters' soft preferences were balanced. `memberIds` are the members the change is for (for `spice_separate`, those who get it mild) and `otherMemberIds` the others (sambal on the side). `ingredient` is set for `dislike_skipped`; `text` for `other`. Never a safety word. */
+        /** @description PRF-12: the one line explaining how the eaters' soft preferences were balanced. `memberIds` are the members the change is for (for `spice_separate`, those who get it mild) and `otherMemberIds` the others (sambal on the side). `ingredient` is set for `dislike_skipped`; `text` for `other`. Never a safety word: `text` is a content-team template in V1, and any AI-written text passes the server's safety-word filter first (blocked text is dropped, and the line is not shown). */
         TradeOff: {
             kind: components["schemas"]["TradeOffKind"];
             memberIds: components["schemas"]["Id"][];
@@ -2290,7 +2313,7 @@ export interface components {
         };
         SubstitutionRequest: {
             eaters: components["schemas"]["EaterSelection"];
-            /** @description Substitutions for the adapted version a suggestion returned. */
+            /** @description Substitutions for the adapted version a suggestion returned. Household-bound (see Conventions). */
             adaptationId?: components["schemas"]["Id"];
         };
         /**
@@ -2298,22 +2321,22 @@ export interface components {
          * @enum {string}
          */
         SubstitutionSource: "content_team" | "ai";
-        /** @description One substitution for an ingredient line (CKM-09). `safety` is the Cek Aman result of the replacement ingredients for the selected eaters; an option that is Not safe for any of them is never listed. `removesConflictFor` are the members whose Not safe result for the recipe goes away with this option, as Cek Aman found by checking the whole recipe with it (QUESTIONS #83). Quantities are for the item's servings. */
+        /** @description One substitution for an ingredient line (CKM-09). `safety` is the Cek Aman result of the replacement ingredients only, for the selected eaters; an option that is Not safe for any of them is never listed. `recipeSafetyWith` is the whole recipe checked with this one option applied, with its own `checkId` (SAF-14): the option resolves a member's conflict only when that member is not `not_safe` there. Clients draw whole-recipe badges only from a whole-recipe result (`recipeSafetyWith`, or `getRecipeDetail`), never from `safety`, and show several options used together only after `getRecipeDetail` returns their combined result (QUESTIONS #83). Quantities are for the item's servings. */
         SubstitutionOption: {
             substitutionId: components["schemas"]["Id"];
             lineId: components["schemas"]["Id"];
             source: components["schemas"]["SubstitutionSource"];
             replacements: components["schemas"]["RecipeIngredientLine"][];
-            /** @description One line on how it changes the dish, from content. */
+            /** @description One line on how it changes the dish, from content, or from AI for `source: ai` after the server's safety-word filter; text that the filter blocks is replaced by content text or dropped. */
             effectNote: components["schemas"]["LocalizedText"] | null;
-            removesConflictFor: components["schemas"]["Id"][];
             safety: components["schemas"]["RecipeSafety"];
+            recipeSafetyWith: components["schemas"]["RecipeSafety"];
         };
         SubstitutionLine: {
             lineId: components["schemas"]["Id"];
             options: components["schemas"]["SubstitutionOption"][];
         };
-        /** @description SAF-11: a content-team variant ("Cara lain"), with the Cek Aman result of the whole recipe cooked that way for the selected eaters. Listed only when it is not Not safe for any of them. */
+        /** @description SAF-11: a content-team variant ("Cara lain"), with the Cek Aman result of the whole recipe cooked that way for the selected eaters. Listed only when it is not Not safe for any of them. The separated members' results carry the variant as their `condition`. */
         RecipeVariant: {
             variant: components["schemas"]["AppliedVariant"];
             safety: components["schemas"]["RecipeSafety"];
@@ -2359,7 +2382,7 @@ export interface components {
             ingredient: components["schemas"]["SafetyIngredientRef"];
             componentPath: components["schemas"]["SafetyComponentRef"][];
         };
-        /** @description SUG-17: no recipe passed Cek Aman for the selected eaters with these inputs. `closestOptions` passed Cek Aman for every selected eater (Safe or Check the label) but need missing ingredients or more time, or are a checked variant; they are never Not safe recipes (QUESTIONS #28). Either list may be empty. */
+        /** @description SUG-17: no recipe passed Cek Aman for the selected eaters with these inputs. `closestOptions` passed Cek Aman for every selected eater (Safe or Check the label) but need missing ingredients or more time, or are a checked variant, whose separated members carry the variant as their `condition`; they are never Not safe recipes (QUESTIONS #28). Either list may be empty. */
         NoSafeRecipe: {
             closestOptions: components["schemas"]["Suggestion"][];
             conflicts: components["schemas"]["SafetyConflict"][];
@@ -2400,8 +2423,10 @@ export interface components {
             overall: components["schemas"]["MealRating"];
             members: components["schemas"]["MemberMealFeedback"][];
         };
-        /** @description SRS 18.1 Meal, minimal for V1 (QUESTIONS #19): what was cooked, when (the household's local date), for which meal, who ate and how many servings, and the feedback or null when skipped. No nutrition, no oil or santan answer in V1 (QUESTIONS #14, #15). */
+        /** @description SRS 18.1 Meal, minimal for V1 (QUESTIONS #19): what was cooked, when (the household's local date), for which meal, who ate and how many servings, and the feedback or null when skipped. No nutrition, no oil or santan answer in V1 (QUESTIONS #14, #15). `ageMs` dates the record: the server places it at its own time minus `ageMs`, never later, as the kitchen sync does (KIT-16), and keeps the latest: a copy dated before the stored one is ignored and the stored record is returned, so a late older copy never overwrites a newer edit. An `ageMs` below 0 or older than the server's limit (configured, at most 30 days) answers 400. A member rated twice answers 400 `duplicate`. */
         CookedMealInput: {
+            /** @description Milliseconds from the edit to sending, measured on the phone (as `KitchenChange.ageMs`). */
+            ageMs: number;
             recipeId: components["schemas"]["ReferenceId"];
             recipeVersion: number;
             adaptationId: components["schemas"]["Id"] | null;
@@ -2414,6 +2439,7 @@ export interface components {
             servings: number;
             feedback: components["schemas"]["MealFeedbackInput"] | null;
         };
+        /** @description The stored record. `changedAt` is the server time the kept copy was dated at. */
         CookedMeal: {
             id: components["schemas"]["Id"];
             recipeId: components["schemas"]["ReferenceId"];
@@ -2427,6 +2453,8 @@ export interface components {
             eaterMemberIds: components["schemas"]["Id"][];
             servings: number;
             feedback: components["schemas"]["MealFeedbackInput"] | null;
+            /** Format: date-time */
+            changedAt: string;
             /** Format: date-time */
             createdAt: string;
             /** Format: date-time */
@@ -2450,12 +2478,11 @@ export interface components {
             substitutionId: components["schemas"]["Id"] | null;
             variantId: components["schemas"]["Id"] | null;
         };
-        /** @description SAF-15 with minimum data. `checkId`, `ruleSetVersion` and `referenceVersion` come from the `RecipeSafety` the user saw (cached ones included). The server keeps only the reported members' rule types from that check, never names or rule wording. `note` is optional; control characters are refused. */
+        /** @description SAF-15 with minimum data. `checkId` is the `RecipeSafety.checkId` the user saw (cached ones included). The server takes the rule set and data versions, the result and the members' rule types from its own logged check, never from the phone: a `checkId` that is not the session household's, or is past its retention, answers 404 `not_found`, and every member in `memberIds` must be in that check (400). Only the reported members' rule types are kept, never names or rule wording. `note` is optional and empty by default; control characters are refused, and staff only ever see a redacted copy. */
         SafetyReportCreate: {
             subject: components["schemas"]["SafetyReportSubject"];
+            /** @description Household-bound (see Conventions). */
             checkId: components["schemas"]["Id"];
-            ruleSetVersion: string;
-            referenceVersion: string;
             /** @description The members the report is about, from the check's members. */
             memberIds: components["schemas"]["Id"][];
             reportType: components["schemas"]["SafetyReportType"];
@@ -2560,7 +2587,7 @@ export interface components {
             replacements: components["schemas"]["AdminIngredientLine"][];
             effectNote: components["schemas"]["LocalizedText"] | null;
         };
-        /** @description A content-team variant (SAF-11): a portion set aside before `separateBeforeStepId`, without `omittedLineIds`. `label` may hold a `{names}` placeholder the app fills in. */
+        /** @description A content-team variant (SAF-11): a portion set aside before `separateBeforeStepId`, without `omittedLineIds`. `label` may hold a `{names}` placeholder the app fills in. Server validation, at save, submit and approval (400 `validation_failed` with pointers into `variants`): `separateBeforeStepId` is a step of the recipe; every omitted line is used by at least one step; no step before `separateBeforeStepId` uses an omitted line; and no substitution brings an omitted ingredient back into the portion. Otherwise Cek Aman would check a portion that already holds the ingredient. */
         AdminRecipeVariant: {
             variantId: components["schemas"]["Id"];
             label: components["schemas"]["LocalizedText"];
@@ -2693,12 +2720,38 @@ export interface components {
             type: components["schemas"]["HardRuleType"];
             allergen: components["schemas"]["StandardAllergen"] | null;
         };
+        /** @description An ingredient as staff see it. Never household-typed text: a custom ingredient (`isCustom`) or a line that does not resolve shows a fixed label in the admin tool, never its name. */
+        AdminIngredientRef: {
+            ingredientId: components["schemas"]["ReferenceId"] | null;
+            /** @description The reference name; null for a custom or unresolved ingredient. */
+            displayName: components["schemas"]["LocalizedText"] | null;
+            isCustom: boolean;
+        };
+        /** @description A Cek Aman finding as staff see it, with no household-typed text. */
+        AdminFinding: {
+            kind: components["schemas"]["SafetyReasonKind"];
+            code: components["schemas"]["SafetyReasonCode"];
+            ingredient: components["schemas"]["AdminIngredientRef"] | null;
+            componentPath: components["schemas"]["SafetyComponentRef"][];
+            brand: components["schemas"]["SafetyBrandRef"] | null;
+            detail: string | null;
+        };
+        /** @description What the report is about, without household-held IDs. For an adapted recipe, `adaptedIngredients` is the snapshot of the adapted ingredient lines taken when the report was filed (adaptations expire); empty otherwise. */
+        AdminReportSubject: {
+            kind: components["schemas"]["SafetySubjectKind"];
+            recipeId: components["schemas"]["ReferenceId"];
+            recipeVersion: number;
+            adapted: boolean;
+            adaptedIngredients: components["schemas"]["AdminIngredientRef"][];
+            substitutionId: components["schemas"]["Id"] | null;
+            variantId: components["schemas"]["Id"] | null;
+        };
         /** @description A reported member as staff see them: a label local to the report (`m1`, `m2`), the logged result, rule types and findings. Never a name, member ID or household ID. `status` is null when the logged check is past its retention (DAT-05). */
         AdminReportMember: {
             memberLabel: string;
             status: components["schemas"]["SafetyStatus"] | null;
             rules: components["schemas"]["AdminRuleSummary"][];
-            findings: components["schemas"]["SafetyFinding"][];
+            findings: components["schemas"]["AdminFinding"][];
         };
         SafetyReportReview: {
             outcome: components["schemas"]["SafetyReportOutcome"];
@@ -2709,15 +2762,16 @@ export interface components {
             /** @description What fixed it, for example an ingredient draft ID. */
             fixReference: string | null;
         };
+        /** @description A report in the staff queue (SAF-15). Staff never see household-typed text verbatim (QUESTIONS #84): custom ingredient names are replaced by a label (`AdminIngredientRef`), and `redactedNote` is the user's optional note after the server replaced phone numbers, email addresses, handles, links, the household's member names and custom ingredient names with fixed labels. Versions come from the logged check. */
         AdminSafetyReport: {
             id: components["schemas"]["Id"];
             /** Format: date-time */
             receivedAt: string;
             status: components["schemas"]["SafetyReportStatus"];
-            subject: components["schemas"]["SafetyReportSubject"];
+            subject: components["schemas"]["AdminReportSubject"];
             reportType: components["schemas"]["SafetyReportType"];
-            ingredient: components["schemas"]["SafetyIngredientRef"] | null;
-            note: string | null;
+            ingredient: components["schemas"]["AdminIngredientRef"] | null;
+            redactedNote: string | null;
             ruleSetVersion: string;
             referenceVersion: string;
             members: components["schemas"]["AdminReportMember"][];
@@ -2745,6 +2799,15 @@ export interface components {
         };
         /** @description Missing, invalid or expired credentials. */
         Unauthorized: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/problem+json": components["schemas"]["Problem"];
+            };
+        };
+        /** @description The caller's token or role does not allow this request (`forbidden`). */
+        Forbidden: {
             headers: {
                 [name: string]: unknown;
             };
@@ -2813,12 +2876,12 @@ export interface components {
         ImageId: components["schemas"]["Id"];
         /** @description A suggestion set of the session's household. */
         SuggestionSetId: components["schemas"]["Id"];
-        /** @description A cooked meal of the session's household. The phone makes it (a random UUID in lower case) when cooking ends, so the record can be sent again safely. */
-        MealId: components["schemas"]["Id"];
+        /** @description A cooked meal of the session's household: a random UUID in lower case that the phone makes when cooking ends, so the record can be sent again safely. Keyed per household. */
+        MealId: string;
         /** @description A staff draft of reference data or of a recipe. */
         DraftId: components["schemas"]["Id"];
         ReportId: components["schemas"]["Id"];
-        /** @description The `ETag` of the copy the client already has. */
+        /** @description The `ETag` of the copy the client already has. The server checks authentication first and answers 304 only when this equals the current `ETag`. The client accepts a 304 only for a request in which it sent the `ETag` it has stored, and treats any other 304 as an error (it keeps checking cached results as stale). */
         IfNoneMatch: string;
         /** @description `nextCursor` of the previous page; absent for the first page. Opaque and issued by the server, never text a user typed. */
         Cursor: components["schemas"]["PageCursor"];
@@ -2830,6 +2893,8 @@ export interface components {
         RecipeStatusFilter: components["schemas"]["RecipeLifecycleStatus"];
         /** @description Only reports in this state. */
         ReportStatusFilter: components["schemas"]["SafetyReportStatus"];
+        /** @description As `IdempotencyKey`, but required: the request is queued offline and replayed, so every send carries a client-generated UUID. */
+        IdempotencyKeyRequired: string;
         /** @description A client-generated UUID. Repeating a request with the same key returns the first result instead of creating a duplicate, so an offline queue can replay safely. Reusing a key with a different body returns 409 `idempotency_key_reused`. Keys are kept for a configured period. */
         IdempotencyKey: string;
     };
@@ -2841,7 +2906,7 @@ export interface components {
         ETag: string;
         /** @description `private, no-cache`: only the phone may keep a copy, and it checks with `If-None-Match` before using it. */
         CacheControl: string;
-        /** @description `private, max-age=31536000, immutable`: an image ID never changes its bytes, so the phone may keep it. */
+        /** @description `private, no-cache`: only the phone keeps a copy, and it checks with `If-None-Match` before each use, so a withdrawn image does not stay on phones. */
         ImageCacheControl: string;
     };
     pathItems: never;
@@ -3925,7 +3990,7 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
-                /** @description The `ETag` of the copy the client already has. */
+                /** @description The `ETag` of the copy the client already has. The server checks authentication first and answers 304 only when this equals the current `ETag`. The client accepts a 304 only for a request in which it sent the `ETag` it has stored, and treats any other 304 as an error (it keeps checking cached results as stale). */
                 "If-None-Match"?: components["parameters"]["IfNoneMatch"];
             };
             path?: never;
@@ -4015,7 +4080,7 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
-                /** @description The `ETag` of the copy the client already has. */
+                /** @description The `ETag` of the copy the client already has. The server checks authentication first and answers 304 only when this equals the current `ETag`. The client accepts a 304 only for a request in which it sent the `ETag` it has stored, and treats any other 304 as an error (it keeps checking cached results as stale). */
                 "If-None-Match"?: components["parameters"]["IfNoneMatch"];
             };
             path: {
@@ -4188,7 +4253,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description A cooked meal of the session's household. The phone makes it (a random UUID in lower case) when cooking ends, so the record can be sent again safely. */
+                /** @description A cooked meal of the session's household: a random UUID in lower case that the phone makes when cooking ends, so the record can be sent again safely. Keyed per household. */
                 mealId: components["parameters"]["MealId"];
             };
             cookie?: never;
@@ -4199,7 +4264,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The record was replaced. */
+            /** @description The record was replaced, or a newer copy was already stored (returned as stored). */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -4221,15 +4286,16 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            429: components["responses"]["TooManyRequests"];
             default: components["responses"]["UnexpectedError"];
         };
     };
     createSafetyReport: {
         parameters: {
             query?: never;
-            header?: {
-                /** @description A client-generated UUID. Repeating a request with the same key returns the first result instead of creating a duplicate, so an offline queue can replay safely. Reusing a key with a different body returns 409 `idempotency_key_reused`. Keys are kept for a configured period. */
-                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            header: {
+                /** @description As `IdempotencyKey`, but required: the request is queued offline and replayed, so every send carries a client-generated UUID. */
+                "Idempotency-Key": components["parameters"]["IdempotencyKeyRequired"];
             };
             path?: never;
             cookie?: never;
@@ -4284,6 +4350,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             default: components["responses"]["UnexpectedError"];
         };
     };
@@ -4314,6 +4381,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             default: components["responses"]["UnexpectedError"];
@@ -4341,6 +4409,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             default: components["responses"]["UnexpectedError"];
         };
@@ -4372,6 +4441,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             default: components["responses"]["UnexpectedError"];
@@ -4397,6 +4467,7 @@ export interface operations {
                 content?: never;
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             default: components["responses"]["UnexpectedError"];
@@ -4429,6 +4500,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             default: components["responses"]["UnexpectedError"];
@@ -4461,6 +4533,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             default: components["responses"]["UnexpectedError"];
@@ -4494,6 +4567,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             default: components["responses"]["UnexpectedError"];
         };
     };
@@ -4524,6 +4598,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             default: components["responses"]["UnexpectedError"];
         };
     };
@@ -4549,6 +4624,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             default: components["responses"]["UnexpectedError"];
         };
@@ -4580,6 +4656,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             default: components["responses"]["UnexpectedError"];
@@ -4612,6 +4689,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             default: components["responses"]["UnexpectedError"];
         };
     };
@@ -4642,6 +4720,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             default: components["responses"]["UnexpectedError"];
@@ -4669,6 +4748,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             default: components["responses"]["UnexpectedError"];
         };
@@ -4700,6 +4780,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             default: components["responses"]["UnexpectedError"];
@@ -4725,6 +4806,7 @@ export interface operations {
                 content?: never;
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             default: components["responses"]["UnexpectedError"];
@@ -4757,6 +4839,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             default: components["responses"]["UnexpectedError"];
@@ -4789,6 +4872,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             default: components["responses"]["UnexpectedError"];
@@ -4821,6 +4905,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             default: components["responses"]["UnexpectedError"];
@@ -4853,6 +4938,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             default: components["responses"]["UnexpectedError"];
         };
     };
@@ -4877,6 +4963,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             default: components["responses"]["UnexpectedError"];
         };
@@ -4907,6 +4994,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             default: components["responses"]["UnexpectedError"];

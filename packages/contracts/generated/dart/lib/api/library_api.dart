@@ -18,7 +18,7 @@ class LibraryApi {
 
   /// Get a library recipe image
   ///
-  /// The image bytes of a published recipe image (LIB-03, SUG-09). Recipe images are food photos from the content team, never photos of people. Images are addressed by ID and never change, so the phone may keep them; `If-None-Match` answers 304. No JSON schema in this contract carries an image, a URL or a link.
+  /// The image bytes of a published recipe image (LIB-03, SUG-09). Recipe images are food photos from the content team, never photos of people. An image ID never changes its bytes, but an image can be withdrawn: the phone checks again with `If-None-Match` before each use (304 while it is current), a withdrawn or retired image answers 404, and the phone drops cached images that the current `libraryVersion` no longer uses. No JSON schema in this contract carries an image, a URL or a link.
   ///
   /// Note: This method returns the HTTP [Response].
   ///
@@ -28,7 +28,7 @@ class LibraryApi {
   ///   A library recipe image.
   ///
   /// * [String] ifNoneMatch:
-  ///   The `ETag` of the copy the client already has.
+  ///   The `ETag` of the copy the client already has. The server checks authentication first and answers 304 only when this equals the current `ETag`. The client accepts a 304 only for a request in which it sent the `ETag` it has stored, and treats any other 304 as an error (it keeps checking cached results as stale).
   Future<Response> getLibraryImageWithHttpInfo(String imageId, { String? ifNoneMatch, Future<void>? abortTrigger, }) async {
     // ignore: prefer_const_declarations
     final path = r'/v1/library/images/{imageId}'
@@ -62,7 +62,7 @@ class LibraryApi {
 
   /// Get a library recipe image
   ///
-  /// The image bytes of a published recipe image (LIB-03, SUG-09). Recipe images are food photos from the content team, never photos of people. Images are addressed by ID and never change, so the phone may keep them; `If-None-Match` answers 304. No JSON schema in this contract carries an image, a URL or a link.
+  /// The image bytes of a published recipe image (LIB-03, SUG-09). Recipe images are food photos from the content team, never photos of people. An image ID never changes its bytes, but an image can be withdrawn: the phone checks again with `If-None-Match` before each use (304 while it is current), a withdrawn or retired image answers 404, and the phone drops cached images that the current `libraryVersion` no longer uses. No JSON schema in this contract carries an image, a URL or a link.
   ///
   /// Parameters:
   ///
@@ -70,7 +70,7 @@ class LibraryApi {
   ///   A library recipe image.
   ///
   /// * [String] ifNoneMatch:
-  ///   The `ETag` of the copy the client already has.
+  ///   The `ETag` of the copy the client already has. The server checks authentication first and answers 304 only when this equals the current `ETag`. The client accepts a 304 only for a request in which it sent the `ETag` it has stored, and treats any other 304 as an error (it keeps checking cached results as stale).
   Future<MultipartFile?> getLibraryImage(String imageId, { String? ifNoneMatch, Future<void>? abortTrigger, }) async {
     final response = await getLibraryImageWithHttpInfo(imageId, ifNoneMatch: ifNoneMatch, abortTrigger: abortTrigger,);
     if (response.statusCode >= HttpStatus.badRequest) {
@@ -201,7 +201,7 @@ class LibraryApi {
 
   /// List checked substitutions and variants for the selected eaters
   ///
-  /// Ingredient substitutions (CKM-09) and content-team variants such as \"serve Kakak's portion before adding terasi\" (SAF-11), each with its own Cek Aman result for exactly the selected eaters (SAF-02, AI-01). An option that would be Not safe for any selected member, or that could not be checked, is never listed; it is counted in `hiddenCount`. Where the content team defined none, none is offered. Options suggested by AI are only listed when AI is available and pass the same check; with AI down the content-team options still work (AI-08). Using an option re-checks the whole recipe through `getRecipeDetail`. 409 `adaptation_expired`, 404 `not_found` and the 503 codes as for `getRecipeDetail`.
+  /// Ingredient substitutions (CKM-09) and content-team variants such as \"serve Kakak's portion before adding terasi\" (SAF-11), each with its own Cek Aman result for exactly the selected eaters (SAF-02, AI-01). An option that would be Not safe for any selected member, or that could not be checked, is never listed; it is counted in `hiddenCount`. Where the content team defined none, none is offered. Options suggested by AI are only listed when AI is available and pass the same check; with AI down the content-team options still work (AI-08). Each option also carries `recipeSafetyWith`, the whole recipe checked with that one option applied. Using options re-checks the whole recipe with all of them through `getRecipeDetail`. 409 `adaptation_expired`, 404 `not_found` and the 503 codes as for `getRecipeDetail`.
   ///
   /// Note: This method returns the HTTP [Response].
   ///
@@ -240,7 +240,7 @@ class LibraryApi {
 
   /// List checked substitutions and variants for the selected eaters
   ///
-  /// Ingredient substitutions (CKM-09) and content-team variants such as \"serve Kakak's portion before adding terasi\" (SAF-11), each with its own Cek Aman result for exactly the selected eaters (SAF-02, AI-01). An option that would be Not safe for any selected member, or that could not be checked, is never listed; it is counted in `hiddenCount`. Where the content team defined none, none is offered. Options suggested by AI are only listed when AI is available and pass the same check; with AI down the content-team options still work (AI-08). Using an option re-checks the whole recipe through `getRecipeDetail`. 409 `adaptation_expired`, 404 `not_found` and the 503 codes as for `getRecipeDetail`.
+  /// Ingredient substitutions (CKM-09) and content-team variants such as \"serve Kakak's portion before adding terasi\" (SAF-11), each with its own Cek Aman result for exactly the selected eaters (SAF-02, AI-01). An option that would be Not safe for any selected member, or that could not be checked, is never listed; it is counted in `hiddenCount`. Where the content team defined none, none is offered. Options suggested by AI are only listed when AI is available and pass the same check; with AI down the content-team options still work (AI-08). Each option also carries `recipeSafetyWith`, the whole recipe checked with that one option applied. Using options re-checks the whole recipe with all of them through `getRecipeDetail`. 409 `adaptation_expired`, 404 `not_found` and the 503 codes as for `getRecipeDetail`.
   ///
   /// Parameters:
   ///

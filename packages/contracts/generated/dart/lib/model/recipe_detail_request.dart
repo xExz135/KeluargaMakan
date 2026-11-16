@@ -21,7 +21,7 @@ class RecipeDetailRequest {
 
   final EaterSelection eaters;
 
-  /// The `adaptation.adaptationId` a suggestion returned (LIB-06).
+  /// The `adaptation.adaptationId` a suggestion returned (LIB-06). Household-bound (see Conventions).
   ///
   /// Please note: This property should have been non-nullable! Since the specification file
   /// does not include a default value (using the "default:" property), however, the generated
@@ -30,10 +30,10 @@ class RecipeDetailRequest {
   ///
   final Optional<String?> adaptationId;
 
-  /// Checked substitutions to use (SAF-11, CKM-09), from `listRecipeSubstitutions`.
+  /// Checked substitutions to use (SAF-11, CKM-09), from `listRecipeSubstitutions`. Household-bound (see Conventions).
   final Optional<Set<String>?> substitutionIds;
 
-  /// A checked content-team variant (SAF-11).
+  /// A checked content-team variant (SAF-11), offered for this recipe.
   ///
   /// Please note: This property should have been non-nullable! Since the specification file
   /// does not include a default value (using the "default:" property), however, the generated

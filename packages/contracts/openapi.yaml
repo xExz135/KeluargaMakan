@@ -88,8 +88,46 @@ info:
     "unavailable" (QUESTIONS #15).
 
 
+    Conditional results (SAF-11, QUESTIONS #85): a member's result that
+    holds only if the cook sets a portion aside carries a `condition`. A
+    client that cannot show the condition next to the badge shows Check the
+    label, never a bare Safe. Consent never hides a Not safe result: a
+    member whose consent is not `given` shows the neutral chip only in
+    place of Safe.
+
+
+    AI-written text (AI-01, SAF-10): adaptation change lines, trade-off
+    text and substitution effect notes (`x-text-filter: safety-words`) pass
+    the server's safety-word filter, the same word lists as `pnpm
+    check:safety-words` in both languages, before they are returned. Text
+    the filter blocks is replaced by curated content text or dropped, and
+    is logged by code only. The filter is a requirement of the tasks that
+    serve those fields (T-044, T-047, T-048, T-063).
+
+
+    Household-bound IDs (NFR-09): every ID the server hands out and the
+    phone sends back (`adaptationId`, `checkId`, `substitutionId`,
+    `variantId`, `suggestionSetId`, `mealId`, member IDs) belongs to the
+    session's household and to the recipe it is sent with. An ID of
+    another household gets the same answer, with the same timing, as an
+    unknown or expired one (404 `not_found`, or 409 where an operation says
+    so), so it never tells that the ID exists. Server-made IDs are random,
+    at least 122 bits.
+
+
+    Retention (SET-04, SET-07, SET-08, DAT-05): schemas of member-linked
+    data kept on the server carry `x-retention`, saying how long it is kept
+    and what member deletion, consent withdrawal, account deletion and
+    export do to it. Periods come from configuration; the deletion and
+    export endpoints are T-069.
+
+
     Access: household operations declare `bearerAuth` and the server
-    permission they need (`x-permission`). Admin operations are under
+    permission they need (`x-permission`). The permissions of the 0.3
+    household operations (`library:read`, `suggestion:request`,
+    `meal:write`, `safety_report:write`) are household permissions
+    (`x-permission-scope: household`): scoped from the session and never
+    granted to staff. Admin operations are under
     `/v1/admin`, tag `Admin`, and declare `staffAuth` with the staff roles
     they allow (`x-staff-roles`, QUESTIONS #20). Lists that grow page with an
     opaque `cursor` (in the body of a search, or in the query of an admin
@@ -1230,12 +1268,15 @@ paths:
         phone refreshes within `refreshWithinHours` (SAF-13, 24 hours target,
         from configuration). Content changes reach phones without an app
         release (NFR-20). When the reference data is not loaded or fails
-        verification the answer is 503 `reference_data_unavailable`. Sending
-        the `ETag` back in `If-None-Match` answers 304 with no body while the
-        versions are unchanged.
+        verification the answer is 503 `reference_data_unavailable`. The
+        `ETag` is derived from the three versions only. Sending it back in
+        `If-None-Match` answers 304 with no body while they are unchanged;
+        the client accepts a 304 only when the `ETag` it sent matches the one
+        it stored.
       security:
         - bearerAuth: []
       x-permission: reference:read
+      x-permission-scope: reference
       x-server-task: T-050
       x-requirements: [SAF-13, DAT-06, NFR-20, SAF-14]
       parameters:
@@ -1286,6 +1327,7 @@ paths:
       security:
         - bearerAuth: []
       x-permission: library:read
+      x-permission-scope: household
       x-server-task: T-041
       x-requirements: [LIB-08, LIB-01, LIB-05, SAF-02, SAF-04, SAF-05, PRF-09, PRF-11, AI-08]
       requestBody:
@@ -1318,6 +1360,7 @@ paths:
       security:
         - bearerAuth: []
       x-permission: library:read
+      x-permission-scope: household
       x-server-task: T-041
       x-requirements: [LIB-08, LIB-04]
       responses:
@@ -1340,12 +1383,16 @@ paths:
       description: >-
         The image bytes of a published recipe image (LIB-03, SUG-09). Recipe
         images are food photos from the content team, never photos of
-        people. Images are addressed by ID and never change, so the phone
-        may keep them; `If-None-Match` answers 304. No JSON schema in this
-        contract carries an image, a URL or a link.
+        people. An image ID never changes its bytes, but an image can be
+        withdrawn: the phone checks again with `If-None-Match` before each
+        use (304 while it is current), a withdrawn or retired image answers
+        404, and the phone drops cached images that the current
+        `libraryVersion` no longer uses. No JSON schema in this contract
+        carries an image, a URL or a link.
       security:
         - bearerAuth: []
       x-permission: library:read
+      x-permission-scope: household
       x-server-task: T-041
       x-requirements: [LIB-03, SUG-09]
       parameters:
@@ -1406,6 +1453,7 @@ paths:
       security:
         - bearerAuth: []
       x-permission: library:read
+      x-permission-scope: household
       x-server-task: T-041
       x-requirements:
         [
@@ -1462,12 +1510,14 @@ paths:
         `hiddenCount`. Where the content team defined none, none is offered.
         Options suggested by AI are only listed when AI is available and pass
         the same check; with AI down the content-team options still work
-        (AI-08). Using an option re-checks the whole recipe through
-        `getRecipeDetail`. 409 `adaptation_expired`, 404 `not_found` and the
+        (AI-08). Each option also carries `recipeSafetyWith`, the whole
+        recipe checked with that one option applied. Using options re-checks
+        the whole recipe with all of them through `getRecipeDetail`. 409 `adaptation_expired`, 404 `not_found` and the
         503 codes as for `getRecipeDetail`.
       security:
         - bearerAuth: []
       x-permission: library:read
+      x-permission-scope: household
       x-server-task: T-048
       x-requirements: [CKM-09, SAF-11, SAF-02, SAF-12, PRF-11, AI-01, AI-08]
       requestBody:
@@ -1520,6 +1570,7 @@ paths:
       security:
         - bearerAuth: []
       x-permission: suggestion:request
+      x-permission-scope: household
       x-server-task: T-044
       x-requirements:
         [
@@ -1574,15 +1625,20 @@ paths:
       description: >-
         "Tampilkan 3 lainnya" (SUG-11): the next page for the same inputs,
         never repeating an item shown earlier in the set. Asking for the
-        same `page` again returns the same items, so a retry is safe. Each
-        page is checked by Cek Aman when it is served (SUG-04). When the
-        pool is used up `poolExhausted` is true. A set is kept for a
-        configured time; after that the answer is 409
-        `suggestion_set_expired` and the client asks again with
-        `requestSuggestions`.
+        same `page` again offers the same recipes, so a retry is safe, but
+        every serve, a repeat of the same page included, runs Cek Aman again
+        against the selected members' current rules and consent and the
+        current versions, with a fresh `checkId` (SUG-04). A stored or
+        cached result is never replayed. A changed result is allowed: an
+        item that is now Not safe for an eater is replaced or dropped, and
+        the others carry their new result. When the pool is used up
+        `poolExhausted` is true. A set is kept for a configured time; after
+        that the answer is 409 `suggestion_set_expired` and the client asks
+        again with `requestSuggestions`.
       security:
         - bearerAuth: []
       x-permission: suggestion:request
+      x-permission-scope: household
       x-server-task: T-044
       x-requirements: [SUG-11, SUG-04, SAF-02, PRF-11]
       requestBody:
@@ -1617,8 +1673,11 @@ paths:
         (CKM-10), with the one-tap household feedback and optional
         per-person feedback (PRF-13). The phone makes `mealId` (a random
         UUID) when cooking ends and sends the whole record each time, so the
-        offline queue can replay it safely; the latest record replaces the
-        earlier one. Meal IDs belong to the household. Feedback and recent
+        offline queue can replay it safely. Records are keyed by household
+        and meal ID, so an ID another household used is simply a new meal
+        here. The copy made last on the phone wins (`ageMs`, server bounds):
+        a late older copy is ignored and the stored record is returned.
+        Rate-limited (429). Feedback and recent
         meals adjust ranking for the household and the people who ate from
         the next request on (PRF-14, SUG-07, SUG-08). Every eater and rated
         member must be in the household (404 `not_found` otherwise); a
@@ -1628,6 +1687,7 @@ paths:
       security:
         - bearerAuth: []
       x-permission: meal:write
+      x-permission-scope: household
       x-server-task: T-045
       x-requirements: [PRF-13, PRF-14, CKM-10, SUG-07, SUG-08]
       requestBody:
@@ -1637,7 +1697,7 @@ paths:
             schema: { $ref: "#/components/schemas/CookedMealInput" }
       responses:
         "200":
-          description: The record was replaced.
+          description: The record was replaced, or a newer copy was already stored (returned as stored).
           content:
             application/json:
               schema: { $ref: "#/components/schemas/CookedMeal" }
@@ -1650,6 +1710,7 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
         default: { $ref: "#/components/responses/UnexpectedError" }
 
   # ---------------------------------------------------------------- Safety reports
@@ -1660,20 +1721,26 @@ paths:
       summary: Report a wrong Cek Aman result
       description: >-
         From the recipe screen (SAF-15). The report names the recipe, the
-        check it is about (`checkId`, with the rule set and data versions,
-        SAF-14), the members it concerns and what is wrong. The server
-        stores only the members' rule types from that check, never their
-        names, and the content team reviews it in the admin queue. A report
-        never changes a result on any phone. It may be queued offline: send
-        an `Idempotency-Key`. The note is optional, short, and the app asks
-        not to put personal details in it. Rate-limited (429).
+        check it is about (`checkId`), the members it concerns and what is
+        wrong. The server takes the rule set and data versions, the result
+        and the rule types from its own log of that check (SAF-14), never
+        from the phone. A `checkId` of another household, or one past its
+        retention, answers 404 `not_found`; a member who is not in the check
+        answers 400. Only the members' rule types are kept, never their
+        names, and the content team reviews the report in the admin queue.
+        A report never changes a result on any phone. It may be queued
+        offline, so `Idempotency-Key` is required; a replay returns the
+        first receipt and does not count against the rate limit (429). The
+        note is optional and short; the app asks not to put personal
+        details in it, and staff only see a redacted copy.
       security:
         - bearerAuth: []
       x-permission: safety_report:write
+      x-permission-scope: household
       x-server-task: T-049
       x-requirements: [SAF-15, SAF-14, NFR-21]
       parameters:
-        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/IdempotencyKeyRequired"
       requestBody:
         required: true
         content:
@@ -1716,6 +1783,7 @@ paths:
               schema: { $ref: "#/components/schemas/IngredientDraftList" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         default: { $ref: "#/components/responses/UnexpectedError" }
     post:
       tags: [Admin]
@@ -1750,6 +1818,7 @@ paths:
               schema: { $ref: "#/components/schemas/IngredientDraft" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
         default: { $ref: "#/components/responses/UnexpectedError" }
@@ -1773,6 +1842,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/IngredientDraft" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         default: { $ref: "#/components/responses/UnexpectedError" }
     put:
@@ -1802,6 +1872,7 @@ paths:
               schema: { $ref: "#/components/schemas/IngredientDraft" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
         default: { $ref: "#/components/responses/UnexpectedError" }
@@ -1819,6 +1890,7 @@ paths:
         "204":
           description: Discarded.
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
         default: { $ref: "#/components/responses/UnexpectedError" }
@@ -1852,6 +1924,7 @@ paths:
               schema: { $ref: "#/components/schemas/IngredientDraft" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
         default: { $ref: "#/components/responses/UnexpectedError" }
@@ -1888,6 +1961,7 @@ paths:
               schema: { $ref: "#/components/schemas/IngredientDraft" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
         default: { $ref: "#/components/responses/UnexpectedError" }
@@ -1928,6 +2002,7 @@ paths:
               schema: { $ref: "#/components/schemas/LibraryImage" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         default: { $ref: "#/components/responses/UnexpectedError" }
 
   /v1/admin/recipes:
@@ -1953,6 +2028,7 @@ paths:
               schema: { $ref: "#/components/schemas/AdminRecipeList" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         default: { $ref: "#/components/responses/UnexpectedError" }
 
   /v1/admin/recipes/{recipeId}:
@@ -1974,6 +2050,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/AdminRecipe" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         default: { $ref: "#/components/responses/UnexpectedError" }
 
@@ -2008,6 +2085,7 @@ paths:
               schema: { $ref: "#/components/schemas/AdminRecipe" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
         default: { $ref: "#/components/responses/UnexpectedError" }
@@ -2035,6 +2113,7 @@ paths:
               schema: { $ref: "#/components/schemas/RecipeDraftList" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         default: { $ref: "#/components/responses/UnexpectedError" }
     post:
       tags: [Admin]
@@ -2046,7 +2125,8 @@ paths:
         link (LIB-04), and content-team substitutions and variants (SAF-11).
         Halal status and nutrition are never entered: halal comes from Cek
         Aman's ingredient data (LIB-05) and nutrition from the reviewed
-        calculation (T-042). A draft is never served to households.
+        calculation (T-042). A draft is never served to households. Variants
+        are validated as `AdminRecipeVariant` says (400 with pointers).
       security:
         - staffAuth: []
       x-staff-roles: [content_editor]
@@ -2067,6 +2147,7 @@ paths:
               schema: { $ref: "#/components/schemas/RecipeDraft" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
         default: { $ref: "#/components/responses/UnexpectedError" }
@@ -2090,6 +2171,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/RecipeDraft" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         default: { $ref: "#/components/responses/UnexpectedError" }
     put:
@@ -2119,6 +2201,7 @@ paths:
               schema: { $ref: "#/components/schemas/RecipeDraft" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
         default: { $ref: "#/components/responses/UnexpectedError" }
@@ -2136,6 +2219,7 @@ paths:
         "204":
           description: Discarded.
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
         default: { $ref: "#/components/responses/UnexpectedError" }
@@ -2171,6 +2255,7 @@ paths:
               schema: { $ref: "#/components/schemas/RecipeDraft" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
         default: { $ref: "#/components/responses/UnexpectedError" }
@@ -2187,7 +2272,9 @@ paths:
         a test record for the current revision (409 `recipe_not_tested`) and
         every ingredient line resolved to a reference ingredient (409
         `recipe_ingredients_unresolved`); a newer revision answers 409
-        `draft_changed`.
+        `draft_changed`. Every variant must pass the `AdminRecipeVariant`
+        validation: its omitted lines are used only in steps at or after
+        the separation step (400 `validation_failed` with pointers).
       security:
         - staffAuth: []
       x-staff-roles: [content_editor]
@@ -2206,6 +2293,7 @@ paths:
               schema: { $ref: "#/components/schemas/RecipeDraft" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
         default: { $ref: "#/components/responses/UnexpectedError" }
@@ -2224,7 +2312,8 @@ paths:
         recipe's next version at once, without an app release (LIB-11,
         NFR-20); households get it on their next request, each check
         recording the recipe version (DAT-06). Approval needs the test
-        record (409 `recipe_not_tested`, LIB-01).
+        record (409 `recipe_not_tested`, LIB-01), and the variant validation
+        of `AdminRecipeVariant` runs again (400).
       security:
         - staffAuth: []
       x-staff-roles: [safety_reviewer]
@@ -2243,6 +2332,7 @@ paths:
               schema: { $ref: "#/components/schemas/RecipeDraft" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
         default: { $ref: "#/components/responses/UnexpectedError" }
@@ -2273,6 +2363,7 @@ paths:
               schema: { $ref: "#/components/schemas/AdminSafetyReportList" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         default: { $ref: "#/components/responses/UnexpectedError" }
 
   /v1/admin/safety-reports/{reportId}:
@@ -2294,6 +2385,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/AdminSafetyReport" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         default: { $ref: "#/components/responses/UnexpectedError" }
 
@@ -2328,6 +2420,7 @@ paths:
               schema: { $ref: "#/components/schemas/AdminSafetyReport" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
         default: { $ref: "#/components/responses/UnexpectedError" }
@@ -2337,16 +2430,24 @@ components:
     bearerAuth:
       type: http
       scheme: bearer
-      description: Short-lived access token from `Session.tokens.accessToken`.
+      x-token-audience: household
+      description: >-
+        Short-lived household access token from `Session.tokens.accessToken`.
+        Never accepted on `/v1/admin` routes.
     staffAuth:
       type: http
       scheme: bearer
+      x-token-audience: staff
       description: >-
         Staff access token for the internal admin tool only (INT-15,
-        QUESTIONS #20): issued to a named staff account after sign-in with
-        MFA, carrying its staff roles. Never issued to household accounts,
-        services or agents. A household token is refused on admin routes and
-        a staff token on every other route (403 `forbidden`).
+        QUESTIONS #20, #80): issued to a named staff account after sign-in
+        with MFA, carrying its staff roles. Distinct from household tokens:
+        its own issuer, audience and signing key on the internal admin host,
+        and each verifier rejects the other's tokens. Never issued to
+        household accounts, services or agents. A household token is refused
+        on admin routes and a staff token on every other route (403
+        `forbidden`). No staff token is issued and no admin route is served
+        until QUESTIONS #80 is decided.
 
   parameters:
     ProfileId:
@@ -2394,10 +2495,13 @@ components:
       in: path
       required: true
       description: >-
-        A cooked meal of the session's household. The phone makes it (a
-        random UUID in lower case) when cooking ends, so the record can be
-        sent again safely.
-      schema: { $ref: "#/components/schemas/Id" }
+        A cooked meal of the session's household: a random UUID in lower
+        case that the phone makes when cooking ends, so the record can be
+        sent again safely. Keyed per household.
+      schema:
+        type: string
+        format: uuid
+        pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
     DraftId:
       name: draftId
       in: path
@@ -2413,7 +2517,12 @@ components:
       name: If-None-Match
       in: header
       required: false
-      description: The `ETag` of the copy the client already has.
+      description: >-
+        The `ETag` of the copy the client already has. The server checks
+        authentication first and answers 304 only when this equals the
+        current `ETag`. The client accepts a 304 only for a request in which
+        it sent the `ETag` it has stored, and treats any other 304 as an
+        error (it keeps checking cached results as stale).
       schema:
         type: string
         maxLength: 200
@@ -2452,6 +2561,16 @@ components:
       required: false
       description: Only reports in this state.
       schema: { $ref: "#/components/schemas/SafetyReportStatus" }
+    IdempotencyKeyRequired:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: >-
+        As `IdempotencyKey`, but required: the request is queued offline and
+        replayed, so every send carries a client-generated UUID.
+      schema:
+        type: string
+        format: uuid
     IdempotencyKey:
       name: Idempotency-Key
       in: header
@@ -2483,8 +2602,9 @@ components:
         type: string
     ImageCacheControl:
       description: >-
-        `private, max-age=31536000, immutable`: an image ID never changes
-        its bytes, so the phone may keep it.
+        `private, no-cache`: only the phone keeps a copy, and it checks with
+        `If-None-Match` before each use, so a withdrawn image does not stay
+        on phones.
       schema:
         type: string
 
@@ -2496,6 +2616,11 @@ components:
           schema: { $ref: "#/components/schemas/Problem" }
     Unauthorized:
       description: Missing, invalid or expired credentials.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    Forbidden:
+      description: The caller's token or role does not allow this request (`forbidden`).
       content:
         application/problem+json:
           schema: { $ref: "#/components/schemas/Problem" }
@@ -4402,10 +4527,49 @@ components:
         SAF-04 per-member result from Cek Aman, the only component that
         assigns one (SAF-01). Clients render it and never compute, upgrade
         or default it. An unknown value means no result: the item is hidden,
-        never shown as safe.
+        never shown as safe. A `safe` or `check_label` result that comes with
+        a `condition` holds only if the cook follows that condition: a client
+        that cannot show the condition next to the badge shows Check the
+        label, never a bare Safe (SAF-11, QUESTIONS #85).
       x-data-sensitivity: public
       type: string
       enum: [safe, not_safe, check_label]
+
+    SafetyConditionKind:
+      description: >-
+        `separate_portion`: the member's portion is set aside before a step
+        and some ingredient lines never go into it (SAF-11). A client that
+        does not know the value shows Check the label for the member, never
+        a bare Safe.
+      x-data-sensitivity: public
+      type: string
+      enum: [separate_portion]
+
+    SafetyCondition:
+      description: >-
+        SAF-11: the member's result holds only if the cook follows this.
+        For `separate_portion`, the member's portion is set aside before
+        `separateBeforeStepId`, and the ingredient lines `omittedLineIds`
+        never go into it. Clients show the condition next to the member's
+        badge on every surface (card, recipe screen, Mode Masak) and show
+        the separation at that step in Mode Masak. A client that cannot
+        show the condition next to the badge, or does not know `kind`, shows
+        Check the label for the member, never a bare Safe (QUESTIONS #85). A
+        cached result with a condition is reused only together with its
+        variant.
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required: [kind, variantId, separateBeforeStepId, omittedLineIds]
+      properties:
+        kind: { $ref: "#/components/schemas/SafetyConditionKind" }
+        variantId: { $ref: "#/components/schemas/Id" }
+        separateBeforeStepId: { $ref: "#/components/schemas/Id" }
+        omittedLineIds:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: { $ref: "#/components/schemas/Id" }
 
     SafetyReasonKind:
       description: >-
@@ -4421,8 +4585,10 @@ components:
         `ErrorCode`, codes may be added: a client that does not know a code
         still renders the member's `status` and shows the generic
         missing-data line, and never hides a Not safe result or shows it as
-        safe. Until the app decodes unknown codes that way, new codes come
-        with a version bump (QUESTIONS #82).
+        safe. The app reads food items with a strict hand-written decoder
+        that keeps `status` and shows the generic line for an unknown code,
+        and drops only the bad item (T-054, T-055); until it ships, new
+        codes come with a version bump (QUESTIONS #82).
       x-data-sensitivity: public
       type: string
       enum:
@@ -4562,19 +4728,31 @@ components:
       description: >-
         One selected member's Cek Aman result, by member ID only, never a
         name (SAF-04, SAF-05). `rulesConsent` is the member's health-data
-        consent state when the check ran (QUESTIONS #36, #48, #52): unless
-        it is `given`, the member's rules were not checked and clients show
-        the neutral "rules not saved" or "not filled in" chip, never Safe,
-        whatever `status` says. A result without `rulesConsent`, or with a
-        value the client does not know, is treated the same way.
+        consent state when the check ran (QUESTIONS #36, #48, #52). When it
+        is not `given`, the member's rules were not checked: a `safe` status
+        is shown as the neutral "rules not saved" or "not filled in" chip,
+        never as Safe. `not_safe` and `check_label` are always shown as they
+        are, whatever the consent state, and the client logs such a pair as
+        an error: consent never hides a Not safe result. A missing or
+        unknown `rulesConsent` counts as not `given`. `condition` is set when
+        the result holds only if the cook follows a variant (SAF-11) and is
+        null for `not_safe`; a client that cannot show the condition next
+        to the badge shows Check the label, never a bare Safe (QUESTIONS
+        #85). A `safe` result with reasons, or a `not_safe` or
+        `check_label` result without any, is inconsistent and hides the
+        item.
       x-data-sensitivity: sensitive_health
       type: object
       additionalProperties: false
-      required: [memberId, rulesConsent, status, reasons]
+      required: [memberId, rulesConsent, status, condition, reasons]
       properties:
         memberId: { $ref: "#/components/schemas/Id" }
         rulesConsent: { $ref: "#/components/schemas/RulesConsentStatus" }
         status: { $ref: "#/components/schemas/SafetyStatus" }
+        condition:
+          oneOf:
+            - $ref: "#/components/schemas/SafetyCondition"
+            - type: "null"
         reasons:
           description: Empty for `safe`; at least one for the other states.
           type: array
@@ -4593,8 +4771,8 @@ components:
 
     SafetyFinding:
       description: >-
-        A Cek Aman finding without a member rule: used for the recipe halal
-        status and in the staff review queue.
+        A Cek Aman finding without a member rule, for the recipe halal
+        status.
       x-data-sensitivity: personal
       type: object
       additionalProperties: false
@@ -4638,7 +4816,15 @@ components:
         logged check with its rule set and data versions (SAF-14, DAT-06);
         a wrong-result report quotes it. The phone may cache the result
         with the recipe (CKM-07) and must check again when any version
-        changes or a selected member's rules or consent change.
+        changes or a selected member's rules or consent change. Clients
+        check that `members` holds exactly the eaters they asked for (the
+        member IDs of the selection; for `whole_family`, the household's
+        profiles), each once: a missing, extra or repeated member, or an
+        unknown status, hides that item, never the other items on the page.
+        Food items are read with a strict decoder that drops a bad item on
+        its own (T-054, T-055). On an item with a `variant`, exactly the
+        members in `variant.separatedMemberIds` carry that variant as their
+        `condition` (SAF-11).
       x-data-sensitivity: sensitive_health
       type: object
       additionalProperties: false
@@ -4998,13 +5184,18 @@ components:
 
     NutrientRange:
       description: >-
-        NUT-05: a range, never a single number; `high` is greater than
-        `low`. Values come only from the reviewed nutrition calculation
-        (T-042), never from AI and never entered by hand in this API.
+        NUT-05: a range, never a single number. Rule: `high` is greater than
+        `low` (so `low` is never above `high`, and never equal to it); the
+        server refuses to store or send anything else, and a client treats a
+        range with `low >= high` as `unavailable`. Values come only from the
+        reviewed nutrition calculation (T-042), never from AI and never
+        entered by hand in this API.
       x-data-sensitivity: public
+      x-constraint: high > low
       type: object
       additionalProperties: false
       required: [nutrient, low, high, unit]
+      example: { nutrient: energy, low: 1, high: 2, unit: kcal }
       properties:
         nutrient: { $ref: "#/components/schemas/NutrientCode" }
         low:
@@ -5136,17 +5327,17 @@ components:
       properties:
         eaters: { $ref: "#/components/schemas/EaterSelection" }
         adaptationId:
-          description: The `adaptation.adaptationId` a suggestion returned (LIB-06).
+          description: The `adaptation.adaptationId` a suggestion returned (LIB-06). Household-bound (see Conventions).
           allOf:
             - $ref: "#/components/schemas/Id"
         substitutionIds:
-          description: Checked substitutions to use (SAF-11, CKM-09), from `listRecipeSubstitutions`.
+          description: Checked substitutions to use (SAF-11, CKM-09), from `listRecipeSubstitutions`. Household-bound (see Conventions).
           type: array
           maxItems: 20
           uniqueItems: true
           items: { $ref: "#/components/schemas/Id" }
         variantId:
-          description: A checked content-team variant (SAF-11).
+          description: A checked content-team variant (SAF-11), offered for this recipe.
           allOf:
             - $ref: "#/components/schemas/Id"
 
@@ -5156,20 +5347,30 @@ components:
         and is labeled "Diadaptasi", with one line per change ("Disesuaikan:
         {change}"). `aiAdapted` is true when the AI service made the change;
         the adapted recipe went through Cek Aman again like any other
-        (AI-01). Change lines never state a safety result. `adaptationId`
-        and `expiresAt` are set for an AI adaptation the server keeps for a
+        (AI-01). Change lines never state a safety result: AI-written lines
+        pass the server's safety-word filter, and a line it blocks is
+        replaced by a content-team line or dropped. `adaptationId` and
+        `expiresAt` are set for an AI adaptation the server keeps for a
         configured time.
       x-data-sensitivity: personal
+      x-retention:
+        period: configured adaptation lifetime (hours, `expiresAt`), then deleted
+        memberDeletion: adaptations made for a deleted member's eaters are deleted
+        consentWithdrawal: adaptations made with the member's rules are deleted
+        accountDeletion: deleted with the household within the SET-08 window
+        export: not exported (short-lived working data)
       type: object
       additionalProperties: false
       required: [adaptationId, aiAdapted, changes, expiresAt]
       properties:
         adaptationId:
+          description: Household-bound (see Conventions).
           oneOf:
             - $ref: "#/components/schemas/Id"
             - type: "null"
         aiAdapted: { type: boolean }
         changes:
+          x-text-filter: safety-words
           type: array
           maxItems: 10
           items: { $ref: "#/components/schemas/LocalizedText" }
@@ -5182,12 +5383,16 @@ components:
         SAF-11: a content-team variant in use, for example "Pisahkan porsi
         {names} sebelum menambah terasi". The app fills `{names}` from
         `separatedMemberIds`; those members' portion is set aside before
-        `separateBeforeStepId`, and Cek Aman checked their portion without
-        the ingredients added from that step on.
+        `separateBeforeStepId`, and the lines in `omittedLineIds` never go
+        into it, so Mode Masak can say so at each step that adds one. Cek
+        Aman checked their portion without those lines, and each of them
+        carries this variant as the `condition` of their result. The server
+        only publishes variants whose omitted lines are first added at or
+        after the separation step (`AdminRecipeVariant`).
       x-data-sensitivity: personal
       type: object
       additionalProperties: false
-      required: [variantId, label, separatedMemberIds, separateBeforeStepId]
+      required: [variantId, label, separatedMemberIds, separateBeforeStepId, omittedLineIds]
       properties:
         variantId: { $ref: "#/components/schemas/Id" }
         label: { $ref: "#/components/schemas/LocalizedText" }
@@ -5197,6 +5402,11 @@ components:
           uniqueItems: true
           items: { $ref: "#/components/schemas/Id" }
         separateBeforeStepId: { $ref: "#/components/schemas/Id" }
+        omittedLineIds:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: { $ref: "#/components/schemas/Id" }
 
     TradeOffKind:
       description: >-
@@ -5212,7 +5422,10 @@ components:
         balanced. `memberIds` are the members the change is for (for
         `spice_separate`, those who get it mild) and `otherMemberIds` the
         others (sambal on the side). `ingredient` is set for
-        `dislike_skipped`; `text` for `other`. Never a safety word.
+        `dislike_skipped`; `text` for `other`. Never a safety word: `text`
+        is a content-team template in V1, and any AI-written text passes the
+        server's safety-word filter first (blocked text is dropped, and the
+        line is not shown).
       x-data-sensitivity: personal
       type: object
       additionalProperties: false
@@ -5232,6 +5445,7 @@ components:
             - $ref: "#/components/schemas/LocalizedText"
             - type: "null"
         text:
+          x-text-filter: safety-words
           oneOf:
             - $ref: "#/components/schemas/LocalizedText"
             - type: "null"
@@ -5315,7 +5529,7 @@ components:
       properties:
         eaters: { $ref: "#/components/schemas/EaterSelection" }
         adaptationId:
-          description: Substitutions for the adapted version a suggestion returned.
+          description: Substitutions for the adapted version a suggestion returned. Household-bound (see Conventions).
           allOf:
             - $ref: "#/components/schemas/Id"
 
@@ -5331,18 +5545,21 @@ components:
     SubstitutionOption:
       description: >-
         One substitution for an ingredient line (CKM-09). `safety` is the Cek
-        Aman result of the replacement ingredients for the selected eaters;
-        an option that is Not safe for any of them is never listed.
-        `removesConflictFor` are the members whose Not safe result for the
-        recipe goes away with this option, as Cek Aman found by checking the
-        whole recipe with it (QUESTIONS #83). Quantities are for the item's
-        servings.
+        Aman result of the replacement ingredients only, for the selected
+        eaters; an option that is Not safe for any of them is never listed.
+        `recipeSafetyWith` is the whole recipe checked with this one option
+        applied, with its own `checkId` (SAF-14): the option resolves a
+        member's conflict only when that member is not `not_safe` there.
+        Clients draw whole-recipe badges only from a whole-recipe result
+        (`recipeSafetyWith`, or `getRecipeDetail`), never from `safety`, and
+        show several options used together only after `getRecipeDetail`
+        returns their combined result (QUESTIONS #83). Quantities are for
+        the item's servings.
       x-data-sensitivity: sensitive_health
       x-food-item: true
       type: object
       additionalProperties: false
-      required:
-        [substitutionId, lineId, source, replacements, effectNote, removesConflictFor, safety]
+      required: [substitutionId, lineId, source, replacements, effectNote, safety, recipeSafetyWith]
       properties:
         substitutionId: { $ref: "#/components/schemas/Id" }
         lineId: { $ref: "#/components/schemas/Id" }
@@ -5352,15 +5569,16 @@ components:
           minItems: 1
           items: { $ref: "#/components/schemas/RecipeIngredientLine" }
         effectNote:
-          description: One line on how it changes the dish, from content.
+          description: >-
+            One line on how it changes the dish, from content, or from AI for
+            `source: ai` after the server's safety-word filter; text that the
+            filter blocks is replaced by content text or dropped.
+          x-text-filter: safety-words
           oneOf:
             - $ref: "#/components/schemas/LocalizedText"
             - type: "null"
-        removesConflictFor:
-          type: array
-          uniqueItems: true
-          items: { $ref: "#/components/schemas/Id" }
         safety: { $ref: "#/components/schemas/RecipeSafety" }
+        recipeSafetyWith: { $ref: "#/components/schemas/RecipeSafety" }
 
     SubstitutionLine:
       x-data-sensitivity: sensitive_health
@@ -5378,7 +5596,8 @@ components:
       description: >-
         SAF-11: a content-team variant ("Cara lain"), with the Cek Aman
         result of the whole recipe cooked that way for the selected eaters.
-        Listed only when it is not Not safe for any of them.
+        Listed only when it is not Not safe for any of them. The separated
+        members' results carry the variant as their `condition`.
       x-data-sensitivity: sensitive_health
       x-food-item: true
       type: object
@@ -5510,8 +5729,9 @@ components:
         SUG-17: no recipe passed Cek Aman for the selected eaters with these
         inputs. `closestOptions` passed Cek Aman for every selected eater
         (Safe or Check the label) but need missing ingredients or more time,
-        or are a checked variant; they are never Not safe recipes
-        (QUESTIONS #28). Either list may be empty.
+        or are a checked variant, whose separated members carry the variant
+        as their `condition`; they are never Not safe recipes (QUESTIONS
+        #28). Either list may be empty.
       x-data-sensitivity: sensitive_health
       type: object
       additionalProperties: false
@@ -5536,6 +5756,12 @@ components:
         `memberIds` are the eaters the set was checked for, and
         `libraryVersion` the library it was ranked from (DAT-06).
       x-data-sensitivity: sensitive_health
+      x-retention:
+        period: configured set lifetime (`expiresAt`), then deleted with its pages
+        memberDeletion: sets for a deleted member's eaters are deleted
+        consentWithdrawal: sets checked with the member's rules are deleted
+        accountDeletion: deleted with the household within the SET-08 window
+        export: not exported (short-lived working data)
       type: object
       additionalProperties: false
       required:
@@ -5618,8 +5844,21 @@ components:
         SRS 18.1 Meal, minimal for V1 (QUESTIONS #19): what was cooked, when
         (the household's local date), for which meal, who ate and how many
         servings, and the feedback or null when skipped. No nutrition, no oil
-        or santan answer in V1 (QUESTIONS #14, #15).
+        or santan answer in V1 (QUESTIONS #14, #15). `ageMs` dates the
+        record: the server places it at its own time minus `ageMs`, never
+        later, as the kitchen sync does (KIT-16), and keeps the latest: a
+        copy dated before the stored one is ignored and the stored record is
+        returned, so a late older copy never overwrites a newer edit. An
+        `ageMs` below 0 or older than the server's limit (configured, at
+        most 30 days) answers 400. A member rated twice answers 400
+        `duplicate`.
       x-data-sensitivity: personal
+      x-retention:
+        period: meal-history retention from configuration (DAT-04, 2 years target, QUESTIONS #19), then deleted
+        memberDeletion: the member is removed from `eaterMemberIds` and their feedback deleted; a meal left with no eater is deleted
+        consentWithdrawal: not health data in V1 (no nutrition); kept
+        accountDeletion: deleted with the household within the SET-08 window
+        export: included in the household export (SET-06, T-069)
       type: object
       additionalProperties: false
       required:
@@ -5634,8 +5873,12 @@ components:
           eaterMemberIds,
           servings,
           feedback,
+          ageMs,
         ]
       properties:
+        ageMs:
+          description: Milliseconds from the edit to sending, measured on the phone (as `KitchenChange.ageMs`).
+          type: integer
         recipeId: { $ref: "#/components/schemas/ReferenceId" }
         recipeVersion:
           type: integer
@@ -5673,7 +5916,14 @@ components:
             - type: "null"
 
     CookedMeal:
+      description: The stored record. `changedAt` is the server time the kept copy was dated at.
       x-data-sensitivity: personal
+      x-retention:
+        period: meal-history retention from configuration (DAT-04, 2 years target, QUESTIONS #19), then deleted
+        memberDeletion: the member is removed from `eaterMemberIds` and their feedback deleted; a meal left with no eater is deleted
+        consentWithdrawal: not health data in V1 (no nutrition); kept
+        accountDeletion: deleted with the household within the SET-08 window
+        export: included in the household export (SET-06, T-069)
       type: object
       additionalProperties: false
       required:
@@ -5689,6 +5939,7 @@ components:
           eaterMemberIds,
           servings,
           feedback,
+          changedAt,
           createdAt,
           updatedAt,
         ]
@@ -5723,6 +5974,9 @@ components:
           oneOf:
             - $ref: "#/components/schemas/MealFeedbackInput"
             - type: "null"
+        changedAt:
+          type: string
+          format: date-time
         createdAt:
           type: string
           format: date-time
@@ -5781,34 +6035,31 @@ components:
 
     SafetyReportCreate:
       description: >-
-        SAF-15 with minimum data. `checkId`, `ruleSetVersion` and
-        `referenceVersion` come from the `RecipeSafety` the user saw (cached
-        ones included). The server keeps only the reported members' rule
-        types from that check, never names or rule wording. `note` is
-        optional; control characters are refused.
+        SAF-15 with minimum data. `checkId` is the `RecipeSafety.checkId` the
+        user saw (cached ones included). The server takes the rule set and
+        data versions, the result and the members' rule types from its own
+        logged check, never from the phone: a `checkId` that is not the
+        session household's, or is past its retention, answers 404
+        `not_found`, and every member in `memberIds` must be in that check
+        (400). Only the reported members' rule types are kept, never names
+        or rule wording. `note` is optional and empty by default; control
+        characters are refused, and staff only ever see a redacted copy.
       x-data-sensitivity: sensitive_health
+      x-retention:
+        period: report retention from configuration, no longer than DAT-05 (QUESTIONS #84)
+        memberDeletion: the member's rows (rule types, findings) are deleted, or the report is anonymized by dropping `checkId` and the household link; only a de-identified case stays for the regression suite
+        consentWithdrawal: the rule types and findings stored for that member are deleted
+        accountDeletion: the household link and `checkId` are dropped within the SET-08 window; only de-identified cases stay
+        export: the household's own reports are included in the export (SET-06, T-069)
       type: object
       additionalProperties: false
-      required:
-        [
-          subject,
-          checkId,
-          ruleSetVersion,
-          referenceVersion,
-          memberIds,
-          reportType,
-          ingredientLineId,
-          note,
-        ]
+      required: [subject, checkId, memberIds, reportType, ingredientLineId, note]
       properties:
         subject: { $ref: "#/components/schemas/SafetyReportSubject" }
-        checkId: { $ref: "#/components/schemas/Id" }
-        ruleSetVersion:
-          type: string
-          maxLength: 200
-        referenceVersion:
-          type: string
-          maxLength: 200
+        checkId:
+          description: Household-bound (see Conventions).
+          allOf:
+            - $ref: "#/components/schemas/Id"
         memberIds:
           description: The members the report is about, from the check's members.
           type: array
@@ -6080,8 +6331,15 @@ components:
       description: >-
         A content-team variant (SAF-11): a portion set aside before
         `separateBeforeStepId`, without `omittedLineIds`. `label` may hold a
-        `{names}` placeholder the app fills in.
+        `{names}` placeholder the app fills in. Server validation, at save,
+        submit and approval (400 `validation_failed` with pointers into
+        `variants`): `separateBeforeStepId` is a step of the recipe; every
+        omitted line is used by at least one step; no step before
+        `separateBeforeStepId` uses an omitted line; and no substitution
+        brings an omitted ingredient back into the portion. Otherwise Cek
+        Aman would check a portion that already holds the ingredient.
       x-data-sensitivity: public
+      x-validation: omitted lines are used only in steps at or after separateBeforeStepId, and by at least one step
       type: object
       additionalProperties: false
       required: [variantId, label, separateBeforeStepId, omittedLineIds]
@@ -6443,6 +6701,81 @@ components:
             - $ref: "#/components/schemas/StandardAllergen"
             - type: "null"
 
+    AdminIngredientRef:
+      description: >-
+        An ingredient as staff see it. Never household-typed text: a custom
+        ingredient (`isCustom`) or a line that does not resolve shows a
+        fixed label in the admin tool, never its name.
+      x-data-sensitivity: public
+      type: object
+      additionalProperties: false
+      required: [ingredientId, displayName, isCustom]
+      properties:
+        ingredientId:
+          oneOf:
+            - $ref: "#/components/schemas/ReferenceId"
+            - type: "null"
+        displayName:
+          description: The reference name; null for a custom or unresolved ingredient.
+          oneOf:
+            - $ref: "#/components/schemas/LocalizedText"
+            - type: "null"
+        isCustom: { type: boolean }
+
+    AdminFinding:
+      description: A Cek Aman finding as staff see it, with no household-typed text.
+      x-data-sensitivity: public
+      type: object
+      additionalProperties: false
+      required: [kind, code, ingredient, componentPath, brand, detail]
+      properties:
+        kind: { $ref: "#/components/schemas/SafetyReasonKind" }
+        code: { $ref: "#/components/schemas/SafetyReasonCode" }
+        ingredient:
+          oneOf:
+            - $ref: "#/components/schemas/AdminIngredientRef"
+            - type: "null"
+        componentPath:
+          type: array
+          items: { $ref: "#/components/schemas/SafetyComponentRef" }
+        brand:
+          oneOf:
+            - $ref: "#/components/schemas/SafetyBrandRef"
+            - type: "null"
+        detail:
+          type: [string, "null"]
+          maxLength: 100
+
+    AdminReportSubject:
+      description: >-
+        What the report is about, without household-held IDs. For an
+        adapted recipe, `adaptedIngredients` is the snapshot of the adapted
+        ingredient lines taken when the report was filed (adaptations
+        expire); empty otherwise.
+      x-data-sensitivity: public
+      type: object
+      additionalProperties: false
+      required:
+        [kind, recipeId, recipeVersion, adapted, adaptedIngredients, substitutionId, variantId]
+      properties:
+        kind: { $ref: "#/components/schemas/SafetySubjectKind" }
+        recipeId: { $ref: "#/components/schemas/ReferenceId" }
+        recipeVersion:
+          type: integer
+          minimum: 1
+        adapted: { type: boolean }
+        adaptedIngredients:
+          type: array
+          items: { $ref: "#/components/schemas/AdminIngredientRef" }
+        substitutionId:
+          oneOf:
+            - $ref: "#/components/schemas/Id"
+            - type: "null"
+        variantId:
+          oneOf:
+            - $ref: "#/components/schemas/Id"
+            - type: "null"
+
     AdminReportMember:
       description: >-
         A reported member as staff see them: a label local to the report
@@ -6466,7 +6799,7 @@ components:
           items: { $ref: "#/components/schemas/AdminRuleSummary" }
         findings:
           type: array
-          items: { $ref: "#/components/schemas/SafetyFinding" }
+          items: { $ref: "#/components/schemas/AdminFinding" }
 
     SafetyReportReview:
       x-data-sensitivity: personal
@@ -6488,7 +6821,21 @@ components:
           maxLength: 100
 
     AdminSafetyReport:
+      description: >-
+        A report in the staff queue (SAF-15). Staff never see household-typed
+        text verbatim (QUESTIONS #84): custom ingredient names are replaced
+        by a label (`AdminIngredientRef`), and `redactedNote` is the user's
+        optional note after the server replaced phone numbers, email
+        addresses, handles, links, the household's member names and custom
+        ingredient names with fixed labels. Versions come from the logged
+        check.
       x-data-sensitivity: sensitive_health
+      x-retention:
+        period: report retention from configuration, no longer than DAT-05 (QUESTIONS #84)
+        memberDeletion: the member's rows (rule types, findings) are deleted, or the report is anonymized by dropping `checkId` and the household link; only a de-identified case stays for the regression suite
+        consentWithdrawal: the rule types and findings stored for that member are deleted
+        accountDeletion: the household link and `checkId` are dropped within the SET-08 window; only de-identified cases stay
+        export: the household's own reports are included in the export (SET-06, T-069)
       type: object
       additionalProperties: false
       required:
@@ -6499,7 +6846,7 @@ components:
           subject,
           reportType,
           ingredient,
-          note,
+          redactedNote,
           ruleSetVersion,
           referenceVersion,
           members,
@@ -6511,13 +6858,13 @@ components:
           type: string
           format: date-time
         status: { $ref: "#/components/schemas/SafetyReportStatus" }
-        subject: { $ref: "#/components/schemas/SafetyReportSubject" }
+        subject: { $ref: "#/components/schemas/AdminReportSubject" }
         reportType: { $ref: "#/components/schemas/SafetyReportType" }
         ingredient:
           oneOf:
-            - $ref: "#/components/schemas/SafetyIngredientRef"
+            - $ref: "#/components/schemas/AdminIngredientRef"
             - type: "null"
-        note:
+        redactedNote:
           type: [string, "null"]
           maxLength: 300
         ruleSetVersion: { type: string }

@@ -17,6 +17,7 @@ class AppliedVariant {
     required this.label,
     this.separatedMemberIds = const {},
     required this.separateBeforeStepId,
+    this.omittedLineIds = const {},
   });
 
   /// Opaque identifier (lowercase, safe for Cek Aman rule IDs).
@@ -29,12 +30,15 @@ class AppliedVariant {
   /// Opaque identifier (lowercase, safe for Cek Aman rule IDs).
   final String separateBeforeStepId;
 
+  final Set<String> omittedLineIds;
+
   @override
   bool operator ==(Object other) => identical(this, other) || other is AppliedVariant &&
     other.variantId == variantId &&
     other.label == label &&
     _deepEquality.equals(other.separatedMemberIds, separatedMemberIds) &&
-    other.separateBeforeStepId == separateBeforeStepId;
+    other.separateBeforeStepId == separateBeforeStepId &&
+    _deepEquality.equals(other.omittedLineIds, omittedLineIds);
 
   @override
   int get hashCode =>
@@ -42,10 +46,11 @@ class AppliedVariant {
     (variantId.hashCode) +
     (label.hashCode) +
     (separatedMemberIds.hashCode) +
-    (separateBeforeStepId.hashCode);
+    (separateBeforeStepId.hashCode) +
+    (omittedLineIds.hashCode);
 
   @override
-  String toString() => 'AppliedVariant[variantId=$variantId, label=$label, separatedMemberIds=$separatedMemberIds, separateBeforeStepId=$separateBeforeStepId]';
+  String toString() => 'AppliedVariant[variantId=$variantId, label=$label, separatedMemberIds=$separatedMemberIds, separateBeforeStepId=$separateBeforeStepId, omittedLineIds=$omittedLineIds]';
 
   Map<String, dynamic> toJson() {
     final json = <String, dynamic>{};
@@ -53,6 +58,7 @@ class AppliedVariant {
       json[r'label'] = this.label;
       json[r'separatedMemberIds'] = this.separatedMemberIds.toList(growable: false);
       json[r'separateBeforeStepId'] = this.separateBeforeStepId;
+      json[r'omittedLineIds'] = this.omittedLineIds.toList(growable: false);
     return json;
   }
 
@@ -63,11 +69,13 @@ class AppliedVariant {
     LocalizedText? label,
     Set<String>? separatedMemberIds,
     String? separateBeforeStepId,
+    Set<String>? omittedLineIds,
   }) => AppliedVariant(
     variantId: variantId ?? this.variantId,
     label: label ?? this.label,
     separatedMemberIds: separatedMemberIds ?? this.separatedMemberIds,
     separateBeforeStepId: separateBeforeStepId ?? this.separateBeforeStepId,
+    omittedLineIds: omittedLineIds ?? this.omittedLineIds,
   );
 
   /// Returns a new [AppliedVariant] instance and imports its values from
@@ -89,6 +97,8 @@ class AppliedVariant {
         assert(json[r'separatedMemberIds'] != null, 'Required key "AppliedVariant[separatedMemberIds]" has a null value in JSON.');
         assert(json.containsKey(r'separateBeforeStepId'), 'Required key "AppliedVariant[separateBeforeStepId]" is missing from JSON.');
         assert(json[r'separateBeforeStepId'] != null, 'Required key "AppliedVariant[separateBeforeStepId]" has a null value in JSON.');
+        assert(json.containsKey(r'omittedLineIds'), 'Required key "AppliedVariant[omittedLineIds]" is missing from JSON.');
+        assert(json[r'omittedLineIds'] != null, 'Required key "AppliedVariant[omittedLineIds]" has a null value in JSON.');
         return true;
       }());
 
@@ -99,6 +109,9 @@ class AppliedVariant {
             ? (json[r'separatedMemberIds'] as Iterable).cast<String>().toSet()
             : const {},
         separateBeforeStepId: mapValueOfType<String>(json, r'separateBeforeStepId')!,
+        omittedLineIds: json[r'omittedLineIds'] is Iterable
+            ? (json[r'omittedLineIds'] as Iterable).cast<String>().toSet()
+            : const {},
       );
     }
     return null;
@@ -150,6 +163,7 @@ class AppliedVariant {
     'label',
     'separatedMemberIds',
     'separateBeforeStepId',
+    'omittedLineIds',
   };
 }
 

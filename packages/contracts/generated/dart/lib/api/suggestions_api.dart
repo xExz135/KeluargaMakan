@@ -18,7 +18,7 @@ class SuggestionsApi {
 
   /// Show three other suggestions for the same inputs
   ///
-  /// \"Tampilkan 3 lainnya\" (SUG-11): the next page for the same inputs, never repeating an item shown earlier in the set. Asking for the same `page` again returns the same items, so a retry is safe. Each page is checked by Cek Aman when it is served (SUG-04). When the pool is used up `poolExhausted` is true. A set is kept for a configured time; after that the answer is 409 `suggestion_set_expired` and the client asks again with `requestSuggestions`.
+  /// \"Tampilkan 3 lainnya\" (SUG-11): the next page for the same inputs, never repeating an item shown earlier in the set. Asking for the same `page` again offers the same recipes, so a retry is safe, but every serve, a repeat of the same page included, runs Cek Aman again against the selected members' current rules and consent and the current versions, with a fresh `checkId` (SUG-04). A stored or cached result is never replayed. A changed result is allowed: an item that is now Not safe for an eater is replaced or dropped, and the others carry their new result. When the pool is used up `poolExhausted` is true. A set is kept for a configured time; after that the answer is 409 `suggestion_set_expired` and the client asks again with `requestSuggestions`.
   ///
   /// Note: This method returns the HTTP [Response].
   ///
@@ -57,7 +57,7 @@ class SuggestionsApi {
 
   /// Show three other suggestions for the same inputs
   ///
-  /// \"Tampilkan 3 lainnya\" (SUG-11): the next page for the same inputs, never repeating an item shown earlier in the set. Asking for the same `page` again returns the same items, so a retry is safe. Each page is checked by Cek Aman when it is served (SUG-04). When the pool is used up `poolExhausted` is true. A set is kept for a configured time; after that the answer is 409 `suggestion_set_expired` and the client asks again with `requestSuggestions`.
+  /// \"Tampilkan 3 lainnya\" (SUG-11): the next page for the same inputs, never repeating an item shown earlier in the set. Asking for the same `page` again offers the same recipes, so a retry is safe, but every serve, a repeat of the same page included, runs Cek Aman again against the selected members' current rules and consent and the current versions, with a fresh `checkId` (SUG-04). A stored or cached result is never replayed. A changed result is allowed: an item that is now Not safe for an eater is replaced or dropped, and the others carry their new result. When the pool is used up `poolExhausted` is true. A set is kept for a configured time; after that the answer is 409 `suggestion_set_expired` and the client asks again with `requestSuggestions`.
   ///
   /// Parameters:
   ///

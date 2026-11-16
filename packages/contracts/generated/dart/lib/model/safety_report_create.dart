@@ -15,8 +15,6 @@ class SafetyReportCreate {
   SafetyReportCreate({
     required this.subject,
     required this.checkId,
-    required this.ruleSetVersion,
-    required this.referenceVersion,
     this.memberIds = const {},
     required this.reportType,
     required this.ingredientLineId,
@@ -25,12 +23,8 @@ class SafetyReportCreate {
 
   final SafetyReportSubject subject;
 
-  /// Opaque identifier (lowercase, safe for Cek Aman rule IDs).
+  /// Household-bound (see Conventions).
   final String checkId;
-
-  final String ruleSetVersion;
-
-  final String referenceVersion;
 
   /// The members the report is about, from the check's members.
   final Set<String> memberIds;
@@ -46,8 +40,6 @@ class SafetyReportCreate {
   bool operator ==(Object other) => identical(this, other) || other is SafetyReportCreate &&
     other.subject == subject &&
     other.checkId == checkId &&
-    other.ruleSetVersion == ruleSetVersion &&
-    other.referenceVersion == referenceVersion &&
     _deepEquality.equals(other.memberIds, memberIds) &&
     other.reportType == reportType &&
     other.ingredientLineId == ingredientLineId &&
@@ -58,22 +50,18 @@ class SafetyReportCreate {
     // ignore: unnecessary_parenthesis
     (subject.hashCode) +
     (checkId.hashCode) +
-    (ruleSetVersion.hashCode) +
-    (referenceVersion.hashCode) +
     (memberIds.hashCode) +
     (reportType.hashCode) +
     (ingredientLineId == null ? 0 : ingredientLineId!.hashCode) +
     (note == null ? 0 : note!.hashCode);
 
   @override
-  String toString() => 'SafetyReportCreate[subject=$subject, checkId=$checkId, ruleSetVersion=$ruleSetVersion, referenceVersion=$referenceVersion, memberIds=$memberIds, reportType=$reportType, ingredientLineId=$ingredientLineId, note=$note]';
+  String toString() => 'SafetyReportCreate[subject=$subject, checkId=$checkId, memberIds=$memberIds, reportType=$reportType, ingredientLineId=$ingredientLineId, note=$note]';
 
   Map<String, dynamic> toJson() {
     final json = <String, dynamic>{};
       json[r'subject'] = this.subject;
       json[r'checkId'] = this.checkId;
-      json[r'ruleSetVersion'] = this.ruleSetVersion;
-      json[r'referenceVersion'] = this.referenceVersion;
       json[r'memberIds'] = this.memberIds.toList(growable: false);
       json[r'reportType'] = this.reportType;
     if (this.ingredientLineId != null) {
@@ -94,8 +82,6 @@ class SafetyReportCreate {
   SafetyReportCreate copyWith({
     SafetyReportSubject? subject,
     String? checkId,
-    String? ruleSetVersion,
-    String? referenceVersion,
     Set<String>? memberIds,
     SafetyReportType? reportType,
     String? ingredientLineId,
@@ -105,8 +91,6 @@ class SafetyReportCreate {
   }) => SafetyReportCreate(
     subject: subject ?? this.subject,
     checkId: checkId ?? this.checkId,
-    ruleSetVersion: ruleSetVersion ?? this.ruleSetVersion,
-    referenceVersion: referenceVersion ?? this.referenceVersion,
     memberIds: memberIds ?? this.memberIds,
     reportType: reportType ?? this.reportType,
     ingredientLineId: ingredientLineIdSetToNull ? null : ingredientLineId ?? this.ingredientLineId,
@@ -128,10 +112,6 @@ class SafetyReportCreate {
         assert(json[r'subject'] != null, 'Required key "SafetyReportCreate[subject]" has a null value in JSON.');
         assert(json.containsKey(r'checkId'), 'Required key "SafetyReportCreate[checkId]" is missing from JSON.');
         assert(json[r'checkId'] != null, 'Required key "SafetyReportCreate[checkId]" has a null value in JSON.');
-        assert(json.containsKey(r'ruleSetVersion'), 'Required key "SafetyReportCreate[ruleSetVersion]" is missing from JSON.');
-        assert(json[r'ruleSetVersion'] != null, 'Required key "SafetyReportCreate[ruleSetVersion]" has a null value in JSON.');
-        assert(json.containsKey(r'referenceVersion'), 'Required key "SafetyReportCreate[referenceVersion]" is missing from JSON.');
-        assert(json[r'referenceVersion'] != null, 'Required key "SafetyReportCreate[referenceVersion]" has a null value in JSON.');
         assert(json.containsKey(r'memberIds'), 'Required key "SafetyReportCreate[memberIds]" is missing from JSON.');
         assert(json[r'memberIds'] != null, 'Required key "SafetyReportCreate[memberIds]" has a null value in JSON.');
         assert(json.containsKey(r'reportType'), 'Required key "SafetyReportCreate[reportType]" is missing from JSON.');
@@ -144,8 +124,6 @@ class SafetyReportCreate {
       return SafetyReportCreate(
         subject: SafetyReportSubject.fromJson(json[r'subject'])!,
         checkId: mapValueOfType<String>(json, r'checkId')!,
-        ruleSetVersion: mapValueOfType<String>(json, r'ruleSetVersion')!,
-        referenceVersion: mapValueOfType<String>(json, r'referenceVersion')!,
         memberIds: json[r'memberIds'] is Iterable
             ? (json[r'memberIds'] as Iterable).cast<String>().toSet()
             : const {},
@@ -201,8 +179,6 @@ class SafetyReportCreate {
   static const requiredKeys = <String>{
     'subject',
     'checkId',
-    'ruleSetVersion',
-    'referenceVersion',
     'memberIds',
     'reportType',
     'ingredientLineId',

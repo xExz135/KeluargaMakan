@@ -126,8 +126,11 @@ describe("OpenAPI structure", () => {
       "createRecipeDraft",
       "uploadLibraryImage",
     ]) {
-      const refs = (operation(id).operation.parameters ?? []).map((p) => p.$ref);
-      expect(refs, id).toContain("#/components/parameters/IdempotencyKey");
+      const refs = (operation(id).operation.parameters ?? []).map((p) => p.$ref ?? "");
+      expect(
+        refs.filter((ref) => /^#\/components\/parameters\/IdempotencyKey(Required)?$/.test(ref)),
+        id,
+      ).toHaveLength(1);
     }
   });
 });

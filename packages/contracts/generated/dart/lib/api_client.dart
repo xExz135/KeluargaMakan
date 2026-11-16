@@ -189,32 +189,6 @@ class ApiClient {
           return AccountRoleTypeTransformer().decode(value);
         case 'AdaptationInfo':
           return AdaptationInfo.fromJson(value);
-        case 'AdminIngredientLine':
-          return AdminIngredientLine.fromJson(value);
-        case 'AdminRecipe':
-          return AdminRecipe.fromJson(value);
-        case 'AdminRecipeContent':
-          return AdminRecipeContent.fromJson(value);
-        case 'AdminRecipeList':
-          return AdminRecipeList.fromJson(value);
-        case 'AdminRecipeListItem':
-          return AdminRecipeListItem.fromJson(value);
-        case 'AdminRecipeTestRecord':
-          return AdminRecipeTestRecord.fromJson(value);
-        case 'AdminRecipeVariant':
-          return AdminRecipeVariant.fromJson(value);
-        case 'AdminRecipeVersion':
-          return AdminRecipeVersion.fromJson(value);
-        case 'AdminReportMember':
-          return AdminReportMember.fromJson(value);
-        case 'AdminRuleSummary':
-          return AdminRuleSummary.fromJson(value);
-        case 'AdminSafetyReport':
-          return AdminSafetyReport.fromJson(value);
-        case 'AdminSafetyReportList':
-          return AdminSafetyReportList.fromJson(value);
-        case 'AdminSubstitution':
-          return AdminSubstitution.fromJson(value);
         case 'AgeGroup':
           return AgeGroupTypeTransformer().decode(value);
         case 'AiAvailability':
@@ -253,18 +227,6 @@ class ApiClient {
           return DeviceInfo.fromJson(value);
         case 'DevicePlatform':
           return DevicePlatformTypeTransformer().decode(value);
-        case 'DraftDecision':
-          return DraftDecisionTypeTransformer().decode(value);
-        case 'DraftDecisionInput':
-          return DraftDecisionInput.fromJson(value);
-        case 'DraftOperation':
-          return DraftOperationTypeTransformer().decode(value);
-        case 'DraftReview':
-          return DraftReview.fromJson(value);
-        case 'DraftRevisionInput':
-          return DraftRevisionInput.fromJson(value);
-        case 'DraftStatus':
-          return DraftStatusTypeTransformer().decode(value);
         case 'EaterMode':
           return EaterModeTypeTransformer().decode(value);
         case 'EaterSelection':
@@ -313,14 +275,6 @@ class ApiClient {
           return HouseholdCreate.fromJson(value);
         case 'HouseholdUpdate':
           return HouseholdUpdate.fromJson(value);
-        case 'IngredientDraft':
-          return IngredientDraft.fromJson(value);
-        case 'IngredientDraftCreate':
-          return IngredientDraftCreate.fromJson(value);
-        case 'IngredientDraftList':
-          return IngredientDraftList.fromJson(value);
-        case 'IngredientDraftUpdate':
-          return IngredientDraftUpdate.fromJson(value);
         case 'IngredientQuantity':
           return IngredientQuantity.fromJson(value);
         case 'IngredientSearchHit':
@@ -375,8 +329,6 @@ class ApiClient {
           return LanguageTypeTransformer().decode(value);
         case 'LessOf':
           return LessOfTypeTransformer().decode(value);
-        case 'LibraryImage':
-          return LibraryImage.fromJson(value);
         case 'LibraryRecipeListItem':
           return LibraryRecipeListItem.fromJson(value);
         case 'LibraryRegionList':
@@ -451,28 +403,16 @@ class ApiClient {
           return RecipeDetailRequest.fromJson(value);
         case 'RecipeDifficulty':
           return RecipeDifficultyTypeTransformer().decode(value);
-        case 'RecipeDraft':
-          return RecipeDraft.fromJson(value);
-        case 'RecipeDraftCreate':
-          return RecipeDraftCreate.fromJson(value);
-        case 'RecipeDraftList':
-          return RecipeDraftList.fromJson(value);
-        case 'RecipeDraftUpdate':
-          return RecipeDraftUpdate.fromJson(value);
         case 'RecipeHalalStatus':
           return RecipeHalalStatus.fromJson(value);
         case 'RecipeImage':
           return RecipeImage.fromJson(value);
         case 'RecipeIngredientLine':
           return RecipeIngredientLine.fromJson(value);
-        case 'RecipeLifecycleStatus':
-          return RecipeLifecycleStatusTypeTransformer().decode(value);
         case 'RecipeOrigin':
           return RecipeOriginTypeTransformer().decode(value);
         case 'RecipeRegion':
           return RecipeRegion.fromJson(value);
-        case 'RecipeRetireInput':
-          return RecipeRetireInput.fromJson(value);
         case 'RecipeSafety':
           return RecipeSafety.fromJson(value);
         case 'RecipeSpiceLevel':
@@ -485,8 +425,6 @@ class ApiClient {
           return RecipeTags.fromJson(value);
         case 'RecipeTestRecord':
           return RecipeTestRecord.fromJson(value);
-        case 'RecipeTestRecordInput':
-          return RecipeTestRecordInput.fromJson(value);
         case 'RecipeVariant':
           return RecipeVariant.fromJson(value);
         case 'RecognitionConfidence':
@@ -517,6 +455,10 @@ class ApiClient {
           return SafetyBrandRef.fromJson(value);
         case 'SafetyComponentRef':
           return SafetyComponentRef.fromJson(value);
+        case 'SafetyCondition':
+          return SafetyCondition.fromJson(value);
+        case 'SafetyConditionKind':
+          return SafetyConditionKindTypeTransformer().decode(value);
         case 'SafetyConflict':
           return SafetyConflict.fromJson(value);
         case 'SafetyFinding':
@@ -531,16 +473,8 @@ class ApiClient {
           return SafetyReasonKindTypeTransformer().decode(value);
         case 'SafetyReportCreate':
           return SafetyReportCreate.fromJson(value);
-        case 'SafetyReportOutcome':
-          return SafetyReportOutcomeTypeTransformer().decode(value);
         case 'SafetyReportReceipt':
           return SafetyReportReceipt.fromJson(value);
-        case 'SafetyReportReview':
-          return SafetyReportReview.fromJson(value);
-        case 'SafetyReportReviewInput':
-          return SafetyReportReviewInput.fromJson(value);
-        case 'SafetyReportStatus':
-          return SafetyReportStatusTypeTransformer().decode(value);
         case 'SafetyReportSubject':
           return SafetyReportSubject.fromJson(value);
         case 'SafetyReportType':

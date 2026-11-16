@@ -18,8 +18,8 @@ class SubstitutionOption {
     required this.source_,
     this.replacements = const [],
     required this.effectNote,
-    this.removesConflictFor = const {},
     required this.safety,
+    required this.recipeSafetyWith,
   });
 
   /// Opaque identifier (lowercase, safe for Cek Aman rule IDs).
@@ -32,12 +32,12 @@ class SubstitutionOption {
 
   final List<RecipeIngredientLine> replacements;
 
-  /// One line on how it changes the dish, from content.
+  /// One line on how it changes the dish, from content, or from AI for `source: ai` after the server's safety-word filter; text that the filter blocks is replaced by content text or dropped.
   final LocalizedText? effectNote;
 
-  final Set<String> removesConflictFor;
-
   final RecipeSafety safety;
+
+  final RecipeSafety recipeSafetyWith;
 
   @override
   bool operator ==(Object other) => identical(this, other) || other is SubstitutionOption &&
@@ -46,8 +46,8 @@ class SubstitutionOption {
     other.source_ == source_ &&
     _deepEquality.equals(other.replacements, replacements) &&
     other.effectNote == effectNote &&
-    _deepEquality.equals(other.removesConflictFor, removesConflictFor) &&
-    other.safety == safety;
+    other.safety == safety &&
+    other.recipeSafetyWith == recipeSafetyWith;
 
   @override
   int get hashCode =>
@@ -57,11 +57,11 @@ class SubstitutionOption {
     (source_.hashCode) +
     (replacements.hashCode) +
     (effectNote == null ? 0 : effectNote!.hashCode) +
-    (removesConflictFor.hashCode) +
-    (safety.hashCode);
+    (safety.hashCode) +
+    (recipeSafetyWith.hashCode);
 
   @override
-  String toString() => 'SubstitutionOption[substitutionId=$substitutionId, lineId=$lineId, source_=$source_, replacements=$replacements, effectNote=$effectNote, removesConflictFor=$removesConflictFor, safety=$safety]';
+  String toString() => 'SubstitutionOption[substitutionId=$substitutionId, lineId=$lineId, source_=$source_, replacements=$replacements, effectNote=$effectNote, safety=$safety, recipeSafetyWith=$recipeSafetyWith]';
 
   Map<String, dynamic> toJson() {
     final json = <String, dynamic>{};
@@ -74,8 +74,8 @@ class SubstitutionOption {
     } else {
       json[r'effectNote'] = null;
     }
-      json[r'removesConflictFor'] = this.removesConflictFor.toList(growable: false);
       json[r'safety'] = this.safety;
+      json[r'recipeSafetyWith'] = this.recipeSafetyWith;
     return json;
   }
 
@@ -88,16 +88,16 @@ class SubstitutionOption {
     List<RecipeIngredientLine>? replacements,
     LocalizedText? effectNote,
     bool effectNoteSetToNull = false,
-    Set<String>? removesConflictFor,
     RecipeSafety? safety,
+    RecipeSafety? recipeSafetyWith,
   }) => SubstitutionOption(
     substitutionId: substitutionId ?? this.substitutionId,
     lineId: lineId ?? this.lineId,
     source_: source_ ?? this.source_,
     replacements: replacements ?? this.replacements,
     effectNote: effectNoteSetToNull ? null : effectNote ?? this.effectNote,
-    removesConflictFor: removesConflictFor ?? this.removesConflictFor,
     safety: safety ?? this.safety,
+    recipeSafetyWith: recipeSafetyWith ?? this.recipeSafetyWith,
   );
 
   /// Returns a new [SubstitutionOption] instance and imports its values from
@@ -120,10 +120,10 @@ class SubstitutionOption {
         assert(json.containsKey(r'replacements'), 'Required key "SubstitutionOption[replacements]" is missing from JSON.');
         assert(json[r'replacements'] != null, 'Required key "SubstitutionOption[replacements]" has a null value in JSON.');
         assert(json.containsKey(r'effectNote'), 'Required key "SubstitutionOption[effectNote]" is missing from JSON.');
-        assert(json.containsKey(r'removesConflictFor'), 'Required key "SubstitutionOption[removesConflictFor]" is missing from JSON.');
-        assert(json[r'removesConflictFor'] != null, 'Required key "SubstitutionOption[removesConflictFor]" has a null value in JSON.');
         assert(json.containsKey(r'safety'), 'Required key "SubstitutionOption[safety]" is missing from JSON.');
         assert(json[r'safety'] != null, 'Required key "SubstitutionOption[safety]" has a null value in JSON.');
+        assert(json.containsKey(r'recipeSafetyWith'), 'Required key "SubstitutionOption[recipeSafetyWith]" is missing from JSON.');
+        assert(json[r'recipeSafetyWith'] != null, 'Required key "SubstitutionOption[recipeSafetyWith]" has a null value in JSON.');
         return true;
       }());
 
@@ -133,10 +133,8 @@ class SubstitutionOption {
         source_: SubstitutionSource.fromJson(json[r'source'])!,
         replacements: RecipeIngredientLine.listFromJson(json[r'replacements']),
         effectNote: LocalizedText.fromJson(json[r'effectNote']),
-        removesConflictFor: json[r'removesConflictFor'] is Iterable
-            ? (json[r'removesConflictFor'] as Iterable).cast<String>().toSet()
-            : const {},
         safety: RecipeSafety.fromJson(json[r'safety'])!,
+        recipeSafetyWith: RecipeSafety.fromJson(json[r'recipeSafetyWith'])!,
       );
     }
     return null;
@@ -189,8 +187,8 @@ class SubstitutionOption {
     'source',
     'replacements',
     'effectNote',
-    'removesConflictFor',
     'safety',
+    'recipeSafetyWith',
   };
 }
 

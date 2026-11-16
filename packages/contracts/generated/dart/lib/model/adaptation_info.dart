@@ -19,7 +19,7 @@ class AdaptationInfo {
     required this.expiresAt,
   });
 
-  /// Opaque identifier (lowercase, safe for Cek Aman rule IDs).
+  /// Household-bound (see Conventions).
   final String? adaptationId;
 
   final bool aiAdapted;

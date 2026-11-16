@@ -2,6 +2,11 @@
 //   src/generated/schema.ts   TypeScript types (openapi-typescript), used with openapi-fetch
 //   generated/dart/           Dart package `keluargamakan_api` (OpenAPI Generator, `dart`)
 //
+// The Dart package is for the mobile app, so it is generated from a copy of
+// the spec without the staff-only `Admin` operations, their `staffAuth`
+// scheme and the components only they use (security review T-040 L6). The
+// TypeScript types keep the whole contract (the admin tool uses them).
+//
 // The Dart generator is a pinned OpenAPI Generator jar from Maven Central,
 // verified against a SHA-256 checksum before it runs, and needs Java 11 or
 // later. Set OPENAPI_GENERATOR_JAR to use a local copy of the same jar (it is
@@ -116,6 +121,71 @@ async function resolveGeneratorJar() {
   return jarPath;
 }
 
+/** Every `#/components/<kind>/<name>` reference inside `value`. */
+function componentRefs(value, found = new Set()) {
+  if (Array.isArray(value)) {
+    for (const item of value) componentRefs(item, found);
+  } else if (value && typeof value === "object") {
+    for (const [key, child] of Object.entries(value)) {
+      if (key === "$ref" && typeof child === "string" && child.startsWith("#/components/")) {
+        found.add(child);
+      } else {
+        componentRefs(child, found);
+      }
+    }
+  }
+  return found;
+}
+
+/** Components reachable from `roots`, following references inside components. */
+function reachableComponents(spec, roots) {
+  const seen = new Set();
+  const pending = [...componentRefs(roots)];
+  while (pending.length > 0) {
+    const ref = pending.pop();
+    if (seen.has(ref)) continue;
+    seen.add(ref);
+    const [, , kind, name] = ref.split("/");
+    pending.push(...componentRefs(spec.components?.[kind]?.[name]));
+  }
+  return seen;
+}
+
+const ADMIN_TAG = "Admin";
+const METHODS = ["get", "put", "post", "patch", "delete"];
+
+/** The spec without the staff-only admin API (see the header comment). */
+export function mobileSpec(source) {
+  const spec = structuredClone(source);
+  const isAdmin = (item) =>
+    METHODS.filter((m) => m in item).every((m) => item[m].tags?.includes(ADMIN_TAG));
+  const adminPaths = Object.entries(spec.paths).filter(([, item]) => isAdmin(item));
+  const otherPaths = Object.entries(spec.paths).filter(([, item]) => !isAdmin(item));
+  for (const [, item] of otherPaths) {
+    for (const m of METHODS) {
+      if (item[m]?.tags?.includes(ADMIN_TAG)) throw new Error("an admin operation shares a path");
+    }
+  }
+  const kept = reachableComponents(
+    spec,
+    otherPaths.map(([, item]) => item),
+  );
+  const adminOnly = [
+    ...reachableComponents(
+      spec,
+      adminPaths.map(([, item]) => item),
+    ),
+  ].filter((ref) => !kept.has(ref));
+  spec.paths = Object.fromEntries(otherPaths);
+  spec.tags = spec.tags.filter((tag) => tag.name !== ADMIN_TAG);
+  delete spec.components.securitySchemes.staffAuth;
+  for (const ref of adminOnly) {
+    const [, , kind, name] = ref.split("/");
+    delete spec.components[kind][name];
+  }
+  return spec;
+}
+
 function generateDart(jarPath, spec) {
   const java = spawnSync("java", ["-version"], { encoding: "utf8" });
   if (java.error || java.status !== 0)
@@ -140,13 +210,16 @@ function generateDart(jarPath, spec) {
   };
 
   rmSync(dartOut, { recursive: true, force: true });
+  mkdirSync(jarCacheDir, { recursive: true });
+  const dartSpecPath = join(jarCacheDir, "openapi.mobile.json");
+  writeFileSync(dartSpecPath, JSON.stringify(mobileSpec(spec), null, 2));
   const args = [
     "-Dfile.encoding=UTF-8",
     "-jar",
     jarPath,
     "generate",
     "--input-spec",
-    specPath,
+    dartSpecPath,
     "--generator-name",
     "dart",
     "--output",
@@ -180,6 +253,8 @@ function generateDart(jarPath, spec) {
   log("Dart: generated/dart (package keluargamakan_api)");
 }
 
-const spec = parse(readFileSync(specPath, "utf8"));
-await generateTypeScript();
-generateDart(await resolveGeneratorJar(), spec);
+if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
+  const spec = parse(readFileSync(specPath, "utf8"));
+  await generateTypeScript();
+  generateDart(await resolveGeneratorJar(), spec);
+}

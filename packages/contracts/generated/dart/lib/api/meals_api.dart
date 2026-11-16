@@ -18,14 +18,14 @@ class MealsApi {
 
   /// Record a cooked meal and its feedback
   ///
-  /// The cooked-meal record (QUESTIONS #19) written when cooking ends (CKM-10), with the one-tap household feedback and optional per-person feedback (PRF-13). The phone makes `mealId` (a random UUID) when cooking ends and sends the whole record each time, so the offline queue can replay it safely; the latest record replaces the earlier one. Meal IDs belong to the household. Feedback and recent meals adjust ranking for the household and the people who ate from the next request on (PRF-14, SUG-07, SUG-08). Every eater and rated member must be in the household (404 `not_found` otherwise); a rating for someone who did not eat is 400. Kept for the configured meal-history retention (DAT-04, QUESTIONS #19). No nutrition is recorded in V1.
+  /// The cooked-meal record (QUESTIONS #19) written when cooking ends (CKM-10), with the one-tap household feedback and optional per-person feedback (PRF-13). The phone makes `mealId` (a random UUID) when cooking ends and sends the whole record each time, so the offline queue can replay it safely. Records are keyed by household and meal ID, so an ID another household used is simply a new meal here. The copy made last on the phone wins (`ageMs`, server bounds): a late older copy is ignored and the stored record is returned. Rate-limited (429). Feedback and recent meals adjust ranking for the household and the people who ate from the next request on (PRF-14, SUG-07, SUG-08). Every eater and rated member must be in the household (404 `not_found` otherwise); a rating for someone who did not eat is 400. Kept for the configured meal-history retention (DAT-04, QUESTIONS #19). No nutrition is recorded in V1.
   ///
   /// Note: This method returns the HTTP [Response].
   ///
   /// Parameters:
   ///
   /// * [String] mealId (required):
-  ///   A cooked meal of the session's household. The phone makes it (a random UUID in lower case) when cooking ends, so the record can be sent again safely.
+  ///   A cooked meal of the session's household: a random UUID in lower case that the phone makes when cooking ends, so the record can be sent again safely. Keyed per household.
   ///
   /// * [CookedMealInput] cookedMealInput (required):
   Future<Response> recordCookedMealWithHttpInfo(String mealId, CookedMealInput cookedMealInput, { Future<void>? abortTrigger, }) async {
@@ -57,12 +57,12 @@ class MealsApi {
 
   /// Record a cooked meal and its feedback
   ///
-  /// The cooked-meal record (QUESTIONS #19) written when cooking ends (CKM-10), with the one-tap household feedback and optional per-person feedback (PRF-13). The phone makes `mealId` (a random UUID) when cooking ends and sends the whole record each time, so the offline queue can replay it safely; the latest record replaces the earlier one. Meal IDs belong to the household. Feedback and recent meals adjust ranking for the household and the people who ate from the next request on (PRF-14, SUG-07, SUG-08). Every eater and rated member must be in the household (404 `not_found` otherwise); a rating for someone who did not eat is 400. Kept for the configured meal-history retention (DAT-04, QUESTIONS #19). No nutrition is recorded in V1.
+  /// The cooked-meal record (QUESTIONS #19) written when cooking ends (CKM-10), with the one-tap household feedback and optional per-person feedback (PRF-13). The phone makes `mealId` (a random UUID) when cooking ends and sends the whole record each time, so the offline queue can replay it safely. Records are keyed by household and meal ID, so an ID another household used is simply a new meal here. The copy made last on the phone wins (`ageMs`, server bounds): a late older copy is ignored and the stored record is returned. Rate-limited (429). Feedback and recent meals adjust ranking for the household and the people who ate from the next request on (PRF-14, SUG-07, SUG-08). Every eater and rated member must be in the household (404 `not_found` otherwise); a rating for someone who did not eat is 400. Kept for the configured meal-history retention (DAT-04, QUESTIONS #19). No nutrition is recorded in V1.
   ///
   /// Parameters:
   ///
   /// * [String] mealId (required):
-  ///   A cooked meal of the session's household. The phone makes it (a random UUID in lower case) when cooking ends, so the record can be sent again safely.
+  ///   A cooked meal of the session's household: a random UUID in lower case that the phone makes when cooking ends, so the record can be sent again safely. Keyed per household.
   ///
   /// * [CookedMealInput] cookedMealInput (required):
   Future<CookedMeal?> recordCookedMeal(String mealId, CookedMealInput cookedMealInput, { Future<void>? abortTrigger, }) async {
