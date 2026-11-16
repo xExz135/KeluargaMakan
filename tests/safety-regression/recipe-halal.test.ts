@@ -63,27 +63,22 @@ describe("NFR-07 LIB-05 recipe halal regression cases", () => {
 });
 
 describe("LIB-05 SAF-08 the recipe halal status matches Cek Aman's halal rule", () => {
-  /** Lines for a regression case: each line uses the brand recorded for its ingredient. */
-  function linesFor(testCase: (typeof regressionCases)[number]): RecipeLineInput[] | null {
-    const brands = new Map<string, string>();
-    for (const [ingredientId, brandId] of testCase.brands ?? []) {
-      if (brands.has(ingredientId)) return null; // a line has one brand
-      brands.set(ingredientId, brandId);
-    }
-    return toInput(testCase).ingredients.map((item, index) => {
-      const brandId = item.ingredientId === null ? undefined : brands.get(item.ingredientId);
-      const lineId = `fx-line-${index + 1}`;
-      return brandId === undefined
-        ? { lineId, ingredientId: item.ingredientId }
-        : { lineId, ingredientId: item.ingredientId, brandId };
-    });
+  /** Lines for a regression case: each line lists every brand recorded for its ingredient. */
+  function linesFor(testCase: (typeof regressionCases)[number]): RecipeLineInput[] {
+    const recorded = toInput(testCase).recordedBrands;
+    return toInput(testCase).ingredients.map((item, index) => ({
+      lineId: `fx-line-${index + 1}`,
+      ingredientId: item.ingredientId,
+      brandIds: recorded
+        .filter((brand) => brand.ingredientId === item.ingredientId)
+        .map((brand) => brand.brandId),
+    }));
   }
 
   it("LIB-05 SAF-08 for every regression recipe, the derived status and findings equal a halal member's result", () => {
     let compared = 0;
     for (const testCase of regressionCases) {
       const lines = linesFor(testCase);
-      if (lines === null) continue;
       const input = toInput(testCase);
       const engine = evaluate({ ...input, members: [fixtureMembers.ayah] }).perMember[0]!;
       const derived = deriveRecipeHalal({ lines, reference: input.reference });
@@ -110,25 +105,41 @@ describe("LIB-05 SAF-08 the recipe halal status matches Cek Aman's halal rule", 
       );
       compared += 1;
     }
-    expect(compared).toBeGreaterThan(30);
+    // Every regression recipe, the two-brand households (REG-023, REG-085) included.
+    expect(compared).toBe(regressionCases.length);
   });
 
-  it("LIB-05 SAF-08 a recipe the halal member may not eat is never halal, and one needing a label check is never halal", () => {
+  it("LIB-05 SAF-07 SAF-08 for every recipe halal case, the status equals a halal member's result with the same recorded brands", () => {
+    const perLineOnly: string[] = [];
     for (const testCase of recipeHalalCases) {
-      const result = deriveRecipeHalal(toHalalInput(testCase));
+      const lines = toLines(testCase.lines);
+      const brandsOf = (id: string | null): string =>
+        JSON.stringify(lines.find((line) => line.ingredientId === id)?.brandIds ?? []);
+      // The engine keys brands by ingredient; a case that gives two lines of one
+      // ingredient different brands tests per-line brands and has no member equivalent.
+      if (
+        lines.some((line) => JSON.stringify(line.brandIds ?? []) !== brandsOf(line.ingredientId))
+      ) {
+        perLineOnly.push(testCase.id);
+        continue;
+      }
       const member = evaluate({
-        ingredients: toLines(testCase.lines).map((line) => ({
-          ingredientId: line.ingredientId,
-          rawName: line.lineId,
-        })),
-        recordedBrands: [],
+        ingredients: lines.map((line) => ({ ingredientId: line.ingredientId, rawName: "" })),
+        recordedBrands: lines.flatMap((line) =>
+          line.ingredientId === null
+            ? []
+            : (line.brandIds ?? []).map((brandId) => ({
+                ingredientId: line.ingredientId!,
+                brandId,
+              })),
+        ),
         members: [fixtureMembers.ayah],
         reference: toHalalInput(testCase).reference,
       }).perMember[0]!;
-      // Without any brand, the member's result is the same or stricter.
-      if (member.status === "safe") expect(result.status, testCase.id).toBe("halal");
-      if (result.status !== "halal") expect(member.status, testCase.id).not.toBe("safe");
+      const result = deriveRecipeHalal(toHalalInput(testCase));
+      expect(result.status, testCase.id).toBe(HALAL_OF[member.status]);
     }
+    expect(perLineOnly).toEqual(["HAL-017"]);
   });
 });
 

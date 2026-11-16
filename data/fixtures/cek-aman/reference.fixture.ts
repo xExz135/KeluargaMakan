@@ -191,6 +191,12 @@ export const fixtureIngredients: readonly ReferenceIngredient[] = [
     brandVariants: [
       variant("fx_brand_kecap_a", "Fixture Kecap A", true, { allergens: contains("soy") }),
       variant("fx_brand_kecap_b", "Fixture Kecap B", false, { allergens: contains("soy") }),
+      // Fixture value only: a verified variant that fails a halal rule, for the
+      // two-brand household case (LIB-05, SAF-07).
+      variant("fx_brand_kecap_c", "Fixture Kecap C", true, {
+        allergens: contains("soy"),
+        halal: notHalal("alcohol"),
+      }),
     ],
   }),
   ingredient("fx_kecap_asin", "Kecap asin", "Soy sauce", "condiment", {

@@ -510,4 +510,19 @@ export const regressionCases: readonly RegressionCase[] = [
       bude: ["not_safe", "allergen_contains", "halal_uncertain", "brand_not_recorded"],
     },
   },
+  {
+    id: "REG-085",
+    requirements: ["SAF-07", "SAF-08", "LIB-05"],
+    title: "two recorded kecap brands, one halal and one with alcohol: the worst brand wins",
+    ingredients: [...base, "fx_kecap_manis"],
+    brands: [
+      ["fx_kecap_manis", "fx_brand_kecap_a"],
+      ["fx_kecap_manis", "fx_brand_kecap_c"],
+    ],
+    expect: {
+      ayah: ["not_safe", "halal_not_halal"],
+      kakek: ["not_safe", "allergen_contains"],
+      ibu: ["safe"],
+    },
+  },
 ];
