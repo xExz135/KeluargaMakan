@@ -46,13 +46,28 @@ interface GeneralIssue {
   readonly detail: string | null;
 }
 
-/** One recipe ingredient analyzed against the reference data, before any rule is applied. */
+/**
+ * One recipe ingredient analyzed against the reference data, before any rule is applied.
+ *
+ * @internal Engine internal (SAF-01, SAF-12): never import it from outside
+ * packages/cek-aman. It skips the input checks of the public entry points, so
+ * a hand-built argument can give "Safe". Only the package root is public;
+ * scripts/check-engine-imports.mjs and the lint rule refuse a deep import.
+ */
 export interface IngredientAnalysis {
   readonly ref: IngredientRef;
   readonly findings: readonly Finding[];
   readonly issues: readonly GeneralIssue[];
 }
 
+/**
+ * A selected member with classified rules.
+ *
+ * @internal Engine internal (SAF-01, SAF-12): never import it from outside
+ * packages/cek-aman. It skips the input checks of the public entry points, so
+ * a hand-built argument can give "Safe". Only the package root is public;
+ * scripts/check-engine-imports.mjs and the lint rule refuse a deep import.
+ */
 export interface PreparedMember {
   readonly memberId: string;
   readonly rules: readonly ClassifiedRule[];
@@ -75,6 +90,14 @@ function fail(message: string): never {
 // Input preparation
 // ---------------------------------------------------------------------------
 
+/**
+ * The reference dataset, indexed by ingredient ID.
+ *
+ * @internal Engine internal (SAF-01, SAF-12): never import it from outside
+ * packages/cek-aman. It skips the input checks of the public entry points, so
+ * a hand-built argument can give "Safe". Only the package root is public;
+ * scripts/check-engine-imports.mjs and the lint rule refuse a deep import.
+ */
 export interface IndexedReference {
   readonly version: string;
   readonly records: ReadonlyMap<string, Obj>;
@@ -84,6 +107,11 @@ export interface IndexedReference {
  * Reads and indexes the reference dataset once. Internal to the package: the
  * recipe halal derivation (LIB-05) reuses it so a recipe is checked against
  * one snapshot, read once (DAT-06).
+ *
+ * @internal Engine internal (SAF-01, SAF-12): never import it from outside
+ * packages/cek-aman. It skips the input checks of the public entry points, so
+ * a hand-built argument can give "Safe". Only the package root is public;
+ * scripts/check-engine-imports.mjs and the lint rule refuse a deep import.
  */
 export function indexReference(raw: unknown): IndexedReference {
   if (!isObject(raw)) fail("reference data is required");
@@ -121,7 +149,14 @@ function prepareMembers(
   });
 }
 
-/** Recorded brands per ingredient ID. Malformed entries are ignored, which fails closed. */
+/**
+ * Recorded brands per ingredient ID. Malformed entries are ignored, which fails closed.
+ *
+ * @internal Engine internal (SAF-01, SAF-12): never import it from outside
+ * packages/cek-aman. It skips the input checks of the public entry points, so
+ * a hand-built argument can give "Safe". Only the package root is public;
+ * scripts/check-engine-imports.mjs and the lint rule refuse a deep import.
+ */
 export function indexBrands(raw: unknown): ReadonlyMap<string, readonly string[]> {
   const list = ownItems(raw);
   if (list === null) fail("recordedBrands must be a list (may be empty)");
@@ -178,6 +213,14 @@ function brandViews(
   return views;
 }
 
+/**
+ * SAF-03, SAF-07, SAF-09: what the reference data say about one recipe ingredient.
+ *
+ * @internal Engine internal (SAF-01, SAF-12): never import it from outside
+ * packages/cek-aman. It skips the input checks of the public entry points, so
+ * a hand-built argument can give "Safe". Only the package root is public;
+ * scripts/check-engine-imports.mjs and the lint rule refuse a deep import.
+ */
 export function analyzeIngredient(
   raw: unknown,
   index: number,
@@ -359,6 +402,14 @@ function deriveStatus(reasons: readonly SafetyReason[]): SafetyStatus {
   return reasons.length > 0 ? "check_label" : "safe";
 }
 
+/**
+ * SAF-04: one member's result from analyses that `analyzeIngredient` built.
+ *
+ * @internal Engine internal (SAF-01, SAF-12): never import it from outside
+ * packages/cek-aman. It skips the input checks of the public entry points, so
+ * a hand-built argument can give "Safe". Only the package root is public;
+ * scripts/check-engine-imports.mjs and the lint rule refuse a deep import.
+ */
 export function evaluateMember(
   member: PreparedMember,
   analyses: readonly IngredientAnalysis[],

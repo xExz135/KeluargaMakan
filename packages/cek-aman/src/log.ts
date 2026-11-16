@@ -70,7 +70,14 @@ function requireText(value: unknown, name: string): string {
   return value;
 }
 
-/** Checks a log context; internal, shared with the recipe halal log (LIB-05). */
+/**
+ * Checks a log context; shared with the recipe halal log (LIB-05).
+ *
+ * @internal Engine internal (SAF-01, SAF-12): never import it from outside
+ * packages/cek-aman. It skips the input checks of the public entry points, so
+ * a hand-built argument can give "Safe". Only the package root is public;
+ * scripts/check-engine-imports.mjs and the lint rule refuse a deep import.
+ */
 export function readContext(raw: unknown): SafetyLogContext {
   const context = isObject(raw) ? raw : {};
   const rawSubject = own(context, "subject");
