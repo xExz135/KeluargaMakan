@@ -121,6 +121,10 @@ describe("OpenAPI structure", () => {
       "recordHealthDataConsent",
       "addKitchenItem",
       "createIngredientSet",
+      "createSafetyReport",
+      "createIngredientDraft",
+      "createRecipeDraft",
+      "uploadLibraryImage",
     ]) {
       const refs = (operation(id).operation.parameters ?? []).map((p) => p.$ref);
       expect(refs, id).toContain("#/components/parameters/IdempotencyKey");
@@ -614,7 +618,7 @@ describe("Dapur Saya kitchen (T-030, contract 0.2)", () => {
   });
 
   it("T-032 every designed kitchen operation is served: none is marked for a later task", () => {
-    const planned = operations()
+    const planned = kitchenOps
       .filter((entry) => entry.operation["x-server-task"] !== undefined)
       .map((entry) => entry.operation.operationId);
     expect(planned).toEqual([]);
@@ -648,17 +652,38 @@ describe("Dapur Saya kitchen (T-030, contract 0.2)", () => {
   });
 
   it("text a user types never travels in a URL (search queries, custom names)", () => {
+    // No inline query parameter anywhere. The only query parameters are the
+    // shared paging and status-filter components of the staff admin lists,
+    // whose values are server-issued cursors, numbers or enums (contract 0.3).
+    const PAGING = [
+      "#/components/parameters/Cursor",
+      "#/components/parameters/PageLimit",
+      "#/components/parameters/DraftStatusFilter",
+      "#/components/parameters/RecipeStatusFilter",
+      "#/components/parameters/ReportStatusFilter",
+    ];
     const queryParams = operations().flatMap((entry) =>
       (entry.operation.parameters ?? [])
+        .map((p) => ({
+          ref: p.$ref ?? "",
+          in: p.$ref ? SPEC.components.parameters[refName(p.$ref)]?.in : p.in,
+        }))
         .filter((p) => p.in === "query")
-        .map((p) => `${entry.operation.operationId}:${p.name ?? ""}`),
+        .map((p) => ({ path: entry.path, ref: p.ref })),
     );
+    for (const { path, ref } of queryParams) {
+      expect(PAGING, `${path} ${ref}`).toContain(ref);
+      expect(path).toMatch(/^\/v1\/admin\//);
+    }
+    expect(schema("PageCursor")).toMatchObject({
+      type: "string",
+      pattern: "^[A-Za-z0-9_-]{1,512}$",
+    });
     const pathLevel = Object.values(SPEC.paths).flatMap((item) =>
       ((item["parameters"] ?? []) as { in?: string; name?: string }[])
         .filter((p) => p.in === "query")
         .map((p) => p.name ?? ""),
     );
-    expect(queryParams).toEqual([]);
     expect(pathLevel.sort()).toEqual(["audience", "language"]);
   });
 
@@ -854,7 +879,7 @@ describe("data protection", () => {
     ]);
   });
 
-  it("no V2 or V3 surfaces: co-cooks, invites, plans, shared links, fasting, nutrition, health profiles", () => {
+  it("no V2 or V3 surfaces: co-cooks, invites, plans, shared links, fasting, nutrition logs, health profiles", () => {
     const surface = [
       ...Object.keys(SPEC.paths),
       ...Object.keys(SPEC.components.schemas),
@@ -862,9 +887,23 @@ describe("data protection", () => {
     ];
     expect(
       surface.filter((s) =>
-        /co.?cook|invite|plan|share|fasting|ramadan|nutrition|health.?profile|journal/i.test(s),
+        /co.?cook|invite|plan|share|fasting|ramadan|health.?profile|journal/i.test(s),
       ),
     ).toEqual([]);
+    // Contract 0.3: LIB-03 nutrition per serving (an estimate range, V1 always
+    // "unavailable", QUESTIONS #15) is the only nutrition surface. No logging,
+    // no balance and no nutrition endpoint (V2, V3).
+    const NUTRITION_SHAPES = [
+      "NutritionPerServing",
+      "NutritionStatus",
+      "NutrientRange",
+      "NutrientCode",
+      "NutrientUnit",
+      "nutritionPerServing",
+      "nutrient",
+    ];
+    expect(surface.filter((s) => /nutri/i.test(s) && !NUTRITION_SHAPES.includes(s))).toEqual([]);
+    expect(Object.keys(SPEC.paths).filter((p) => /nutri|balance|log/i.test(p))).toEqual([]);
   });
 });
 

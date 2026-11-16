@@ -16,6 +16,69 @@ class ReferenceApi {
 
   final ApiClient apiClient;
 
+  /// Get the current rule set, reference data and library versions
+  ///
+  /// The versions every safety result is computed with (DAT-06, SAF-14): the Cek Aman rule set, the verified reference ingredient data and the recipe library. The phone compares them with the versions stored on its cached safety results; a cached result made with older versions is checked again the next time the recipe is opened online, and the phone refreshes within `refreshWithinHours` (SAF-13, 24 hours target, from configuration). Content changes reach phones without an app release (NFR-20). When the reference data is not loaded or fails verification the answer is 503 `reference_data_unavailable`. Sending the `ETag` back in `If-None-Match` answers 304 with no body while the versions are unchanged.
+  ///
+  /// Note: This method returns the HTTP [Response].
+  ///
+  /// Parameters:
+  ///
+  /// * [String] ifNoneMatch:
+  ///   The `ETag` of the copy the client already has.
+  Future<Response> getReferenceVersionsWithHttpInfo({ String? ifNoneMatch, Future<void>? abortTrigger, }) async {
+    // ignore: prefer_const_declarations
+    final path = r'/v1/reference/versions';
+
+    // ignore: prefer_final_locals
+    Object? postBody;
+
+    final queryParams = <QueryParam>[];
+    final headerParams = <String, String>{};
+    final formParams = <String, String>{};
+
+    if (ifNoneMatch != null) {
+      headerParams[r'If-None-Match'] = parameterToString(ifNoneMatch);
+    }
+
+    const contentTypes = <String>[];
+
+
+    return apiClient.invokeAPI(
+      path,
+      'GET',
+      queryParams,
+      postBody,
+      headerParams,
+      formParams,
+      contentTypes.isEmpty ? null : contentTypes.first,
+      abortTrigger: abortTrigger,
+    );
+  }
+
+  /// Get the current rule set, reference data and library versions
+  ///
+  /// The versions every safety result is computed with (DAT-06, SAF-14): the Cek Aman rule set, the verified reference ingredient data and the recipe library. The phone compares them with the versions stored on its cached safety results; a cached result made with older versions is checked again the next time the recipe is opened online, and the phone refreshes within `refreshWithinHours` (SAF-13, 24 hours target, from configuration). Content changes reach phones without an app release (NFR-20). When the reference data is not loaded or fails verification the answer is 503 `reference_data_unavailable`. Sending the `ETag` back in `If-None-Match` answers 304 with no body while the versions are unchanged.
+  ///
+  /// Parameters:
+  ///
+  /// * [String] ifNoneMatch:
+  ///   The `ETag` of the copy the client already has.
+  Future<ReferenceVersions?> getReferenceVersions({ String? ifNoneMatch, Future<void>? abortTrigger, }) async {
+    final response = await getReferenceVersionsWithHttpInfo(ifNoneMatch: ifNoneMatch, abortTrigger: abortTrigger,);
+    if (response.statusCode >= HttpStatus.badRequest) {
+      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
+    }
+    // When a remote server returns no body with a status of 204, we shall not decode it.
+    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
+    // FormatException when trying to decode an empty string.
+    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'ReferenceVersions',) as ReferenceVersions;
+    
+    }
+    return null;
+  }
+
   /// Get the whole reference ingredient catalog
   ///
   /// Every ingredient of the verified reference dataset with its names, local and regional names, kitchen category and brands, for the copy the phone keeps for offline search (KIT-04). `referenceVersion` changes whenever the data changes. When the dataset is not loaded or fails verification the answer is 503 `reference_data_unavailable`, never an empty catalog. No safety data (components, allergens, halal) is included: only Cek Aman uses those. The `ETag` identifies the dataset; a phone that sends it back in `If-None-Match` gets 304 with no body while its copy is current, so refreshing the copy is cheap.

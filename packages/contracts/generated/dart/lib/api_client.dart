@@ -187,8 +187,40 @@ class ApiClient {
           return Account.fromJson(value);
         case 'AccountRole':
           return AccountRoleTypeTransformer().decode(value);
+        case 'AdaptationInfo':
+          return AdaptationInfo.fromJson(value);
+        case 'AdminIngredientLine':
+          return AdminIngredientLine.fromJson(value);
+        case 'AdminRecipe':
+          return AdminRecipe.fromJson(value);
+        case 'AdminRecipeContent':
+          return AdminRecipeContent.fromJson(value);
+        case 'AdminRecipeList':
+          return AdminRecipeList.fromJson(value);
+        case 'AdminRecipeListItem':
+          return AdminRecipeListItem.fromJson(value);
+        case 'AdminRecipeTestRecord':
+          return AdminRecipeTestRecord.fromJson(value);
+        case 'AdminRecipeVariant':
+          return AdminRecipeVariant.fromJson(value);
+        case 'AdminRecipeVersion':
+          return AdminRecipeVersion.fromJson(value);
+        case 'AdminReportMember':
+          return AdminReportMember.fromJson(value);
+        case 'AdminRuleSummary':
+          return AdminRuleSummary.fromJson(value);
+        case 'AdminSafetyReport':
+          return AdminSafetyReport.fromJson(value);
+        case 'AdminSafetyReportList':
+          return AdminSafetyReportList.fromJson(value);
+        case 'AdminSubstitution':
+          return AdminSubstitution.fromJson(value);
         case 'AgeGroup':
           return AgeGroupTypeTransformer().decode(value);
+        case 'AiAvailability':
+          return AiAvailabilityTypeTransformer().decode(value);
+        case 'AppliedVariant':
+          return AppliedVariant.fromJson(value);
         case 'Avatar':
           return Avatar.fromJson(value);
         case 'AvatarStyle':
@@ -211,10 +243,32 @@ class ApiClient {
           return ConsentText.fromJson(value);
         case 'ConsentTextSection':
           return ConsentTextSection.fromJson(value);
+        case 'CookedMeal':
+          return CookedMeal.fromJson(value);
+        case 'CookedMealInput':
+          return CookedMealInput.fromJson(value);
+        case 'Cuisine':
+          return CuisineTypeTransformer().decode(value);
         case 'DeviceInfo':
           return DeviceInfo.fromJson(value);
         case 'DevicePlatform':
           return DevicePlatformTypeTransformer().decode(value);
+        case 'DraftDecision':
+          return DraftDecisionTypeTransformer().decode(value);
+        case 'DraftDecisionInput':
+          return DraftDecisionInput.fromJson(value);
+        case 'DraftOperation':
+          return DraftOperationTypeTransformer().decode(value);
+        case 'DraftReview':
+          return DraftReview.fromJson(value);
+        case 'DraftRevisionInput':
+          return DraftRevisionInput.fromJson(value);
+        case 'DraftStatus':
+          return DraftStatusTypeTransformer().decode(value);
+        case 'EaterMode':
+          return EaterModeTypeTransformer().decode(value);
+        case 'EaterSelection':
+          return EaterSelection.fromJson(value);
         case 'ErrorCode':
           return ErrorCodeTypeTransformer().decode(value);
         case 'ExpectedConsentState':
@@ -235,6 +289,8 @@ class ApiClient {
           return GuardianConfirmation.fromJson(value);
         case 'GuardianConfirmationInput':
           return GuardianConfirmationInput.fromJson(value);
+        case 'HalalStatus':
+          return HalalStatusTypeTransformer().decode(value);
         case 'HardRule':
           return HardRule.fromJson(value);
         case 'HardRuleCreate':
@@ -249,12 +305,24 @@ class ApiClient {
           return HealthDataConsentDecision.fromJson(value);
         case 'HealthDataConsentWithdrawal':
           return HealthDataConsentWithdrawal.fromJson(value);
+        case 'HiddenNotSafe':
+          return HiddenNotSafe.fromJson(value);
         case 'Household':
           return Household.fromJson(value);
         case 'HouseholdCreate':
           return HouseholdCreate.fromJson(value);
         case 'HouseholdUpdate':
           return HouseholdUpdate.fromJson(value);
+        case 'IngredientDraft':
+          return IngredientDraft.fromJson(value);
+        case 'IngredientDraftCreate':
+          return IngredientDraftCreate.fromJson(value);
+        case 'IngredientDraftList':
+          return IngredientDraftList.fromJson(value);
+        case 'IngredientDraftUpdate':
+          return IngredientDraftUpdate.fromJson(value);
+        case 'IngredientQuantity':
+          return IngredientQuantity.fromJson(value);
         case 'IngredientSearchHit':
           return IngredientSearchHit.fromJson(value);
         case 'IngredientSearchRequest':
@@ -267,6 +335,8 @@ class ApiClient {
           return IngredientSetInput.fromJson(value);
         case 'IngredientSetList':
           return IngredientSetList.fromJson(value);
+        case 'KitchenAvailability':
+          return KitchenAvailabilityTypeTransformer().decode(value);
         case 'KitchenBrand':
           return KitchenBrand.fromJson(value);
         case 'KitchenBrandInput':
@@ -293,6 +363,8 @@ class ApiClient {
           return KitchenItemStateTypeTransformer().decode(value);
         case 'KitchenItemUpdate':
           return KitchenItemUpdate.fromJson(value);
+        case 'KitchenMatch':
+          return KitchenMatch.fromJson(value);
         case 'KitchenQuantity':
           return KitchenQuantityTypeTransformer().decode(value);
         case 'KitchenSyncRequest':
@@ -303,6 +375,16 @@ class ApiClient {
           return LanguageTypeTransformer().decode(value);
         case 'LessOf':
           return LessOfTypeTransformer().decode(value);
+        case 'LibraryImage':
+          return LibraryImage.fromJson(value);
+        case 'LibraryRecipeListItem':
+          return LibraryRecipeListItem.fromJson(value);
+        case 'LibraryRegionList':
+          return LibraryRegionList.fromJson(value);
+        case 'LibrarySearchRequest':
+          return LibrarySearchRequest.fromJson(value);
+        case 'LibrarySearchResult':
+          return LibrarySearchResult.fromJson(value);
         case 'LikesDislikes':
           return LikesDislikes.fromJson(value);
         case 'LikesDislikesInput':
@@ -317,6 +399,32 @@ class ApiClient {
           return MappingConfirmerTypeTransformer().decode(value);
         case 'MappingStatus':
           return MappingStatusTypeTransformer().decode(value);
+        case 'MealFeedbackInput':
+          return MealFeedbackInput.fromJson(value);
+        case 'MealRating':
+          return MealRatingTypeTransformer().decode(value);
+        case 'MealType':
+          return MealTypeTypeTransformer().decode(value);
+        case 'MemberMealFeedback':
+          return MemberMealFeedback.fromJson(value);
+        case 'MemberMealRating':
+          return MemberMealRatingTypeTransformer().decode(value);
+        case 'MemberSafetyResult':
+          return MemberSafetyResult.fromJson(value);
+        case 'MissingIngredient':
+          return MissingIngredient.fromJson(value);
+        case 'NoSafeRecipe':
+          return NoSafeRecipe.fromJson(value);
+        case 'NutrientCode':
+          return NutrientCodeTypeTransformer().decode(value);
+        case 'NutrientRange':
+          return NutrientRange.fromJson(value);
+        case 'NutrientUnit':
+          return NutrientUnitTypeTransformer().decode(value);
+        case 'NutritionPerServing':
+          return NutritionPerServing.fromJson(value);
+        case 'NutritionStatus':
+          return NutritionStatusTypeTransformer().decode(value);
         case 'PhotoSession':
           return PhotoSession.fromJson(value);
         case 'PhotoSessionStatus':
@@ -337,6 +445,50 @@ class ApiClient {
           return ProfileRules.fromJson(value);
         case 'ProfileUpdate':
           return ProfileUpdate.fromJson(value);
+        case 'RecipeDetail':
+          return RecipeDetail.fromJson(value);
+        case 'RecipeDetailRequest':
+          return RecipeDetailRequest.fromJson(value);
+        case 'RecipeDifficulty':
+          return RecipeDifficultyTypeTransformer().decode(value);
+        case 'RecipeDraft':
+          return RecipeDraft.fromJson(value);
+        case 'RecipeDraftCreate':
+          return RecipeDraftCreate.fromJson(value);
+        case 'RecipeDraftList':
+          return RecipeDraftList.fromJson(value);
+        case 'RecipeDraftUpdate':
+          return RecipeDraftUpdate.fromJson(value);
+        case 'RecipeHalalStatus':
+          return RecipeHalalStatus.fromJson(value);
+        case 'RecipeImage':
+          return RecipeImage.fromJson(value);
+        case 'RecipeIngredientLine':
+          return RecipeIngredientLine.fromJson(value);
+        case 'RecipeLifecycleStatus':
+          return RecipeLifecycleStatusTypeTransformer().decode(value);
+        case 'RecipeOrigin':
+          return RecipeOriginTypeTransformer().decode(value);
+        case 'RecipeRegion':
+          return RecipeRegion.fromJson(value);
+        case 'RecipeRetireInput':
+          return RecipeRetireInput.fromJson(value);
+        case 'RecipeSafety':
+          return RecipeSafety.fromJson(value);
+        case 'RecipeSpiceLevel':
+          return RecipeSpiceLevelTypeTransformer().decode(value);
+        case 'RecipeStep':
+          return RecipeStep.fromJson(value);
+        case 'RecipeSummary':
+          return RecipeSummary.fromJson(value);
+        case 'RecipeTags':
+          return RecipeTags.fromJson(value);
+        case 'RecipeTestRecord':
+          return RecipeTestRecord.fromJson(value);
+        case 'RecipeTestRecordInput':
+          return RecipeTestRecordInput.fromJson(value);
+        case 'RecipeVariant':
+          return RecipeVariant.fromJson(value);
         case 'RecognitionConfidence':
           return RecognitionConfidenceTypeTransformer().decode(value);
         case 'RecognitionConfirmation':
@@ -355,10 +507,50 @@ class ApiClient {
           return RecognizedItem.fromJson(value);
         case 'ReferenceIngredientCatalog':
           return ReferenceIngredientCatalog.fromJson(value);
+        case 'ReferenceVersions':
+          return ReferenceVersions.fromJson(value);
         case 'RulesConsentState':
           return RulesConsentState.fromJson(value);
         case 'RulesConsentStatus':
           return RulesConsentStatusTypeTransformer().decode(value);
+        case 'SafetyBrandRef':
+          return SafetyBrandRef.fromJson(value);
+        case 'SafetyComponentRef':
+          return SafetyComponentRef.fromJson(value);
+        case 'SafetyConflict':
+          return SafetyConflict.fromJson(value);
+        case 'SafetyFinding':
+          return SafetyFinding.fromJson(value);
+        case 'SafetyIngredientRef':
+          return SafetyIngredientRef.fromJson(value);
+        case 'SafetyReason':
+          return SafetyReason.fromJson(value);
+        case 'SafetyReasonCode':
+          return SafetyReasonCodeTypeTransformer().decode(value);
+        case 'SafetyReasonKind':
+          return SafetyReasonKindTypeTransformer().decode(value);
+        case 'SafetyReportCreate':
+          return SafetyReportCreate.fromJson(value);
+        case 'SafetyReportOutcome':
+          return SafetyReportOutcomeTypeTransformer().decode(value);
+        case 'SafetyReportReceipt':
+          return SafetyReportReceipt.fromJson(value);
+        case 'SafetyReportReview':
+          return SafetyReportReview.fromJson(value);
+        case 'SafetyReportReviewInput':
+          return SafetyReportReviewInput.fromJson(value);
+        case 'SafetyReportStatus':
+          return SafetyReportStatusTypeTransformer().decode(value);
+        case 'SafetyReportSubject':
+          return SafetyReportSubject.fromJson(value);
+        case 'SafetyReportType':
+          return SafetyReportTypeTypeTransformer().decode(value);
+        case 'SafetyRuleRef':
+          return SafetyRuleRef.fromJson(value);
+        case 'SafetyStatus':
+          return SafetyStatusTypeTransformer().decode(value);
+        case 'SafetySubjectKind':
+          return SafetySubjectKindTypeTransformer().decode(value);
         case 'Session':
           return Session.fromJson(value);
         case 'SessionRefresh':
@@ -381,12 +573,38 @@ class ApiClient {
           return SoftPreferencesInput.fromJson(value);
         case 'SpiceLevel':
           return SpiceLevelTypeTransformer().decode(value);
+        case 'StaffRole':
+          return StaffRoleTypeTransformer().decode(value);
         case 'StandardAllergen':
           return StandardAllergenTypeTransformer().decode(value);
         case 'StandardAllergenList':
           return StandardAllergenList.fromJson(value);
+        case 'SubstitutionLine':
+          return SubstitutionLine.fromJson(value);
+        case 'SubstitutionList':
+          return SubstitutionList.fromJson(value);
+        case 'SubstitutionOption':
+          return SubstitutionOption.fromJson(value);
+        case 'SubstitutionRequest':
+          return SubstitutionRequest.fromJson(value);
+        case 'SubstitutionSource':
+          return SubstitutionSourceTypeTransformer().decode(value);
+        case 'Suggestion':
+          return Suggestion.fromJson(value);
+        case 'SuggestionMoreRequest':
+          return SuggestionMoreRequest.fromJson(value);
+        case 'SuggestionRequest':
+          return SuggestionRequest.fromJson(value);
+        case 'SuggestionSet':
+          return SuggestionSet.fromJson(value);
         case 'TexturePreference':
           return TexturePreferenceTypeTransformer().decode(value);
+        case 'TimeAvailable':
+          return TimeAvailableTypeTransformer().decode(value);
+        case 'TradeOff':
+          return TradeOff.fromJson(value);
+        case 'TradeOffKind':
+          return TradeOffKindTypeTransformer().decode(value);
         default:
           dynamic match;
           if (value is List && (match = _regList.firstMatch(targetType)?.group(1)) != null) {

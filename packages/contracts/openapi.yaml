@@ -1,7 +1,7 @@
 openapi: 3.1.1
 info:
   title: KeluargaMakan API
-  version: 0.2.3
+  version: 0.3.0
   summary: Household manager API for KeluargaMakan (FamilyEats).
   description: >-
     Source of truth for API shapes: change this file first, then implement.
@@ -62,6 +62,40 @@ info:
     remembered, so the same change ID can be sent again.
 
 
+    v0.3.0 (additive): the library, recipes, suggestions and safety
+    reports, the first step to Masak Apa Hari Ini. Library browse and search
+    by name, ingredient, region, meal type and time (LIB-08); the recipe
+    screen with per-member Cek Aman results (CKM-01, SAF-04, SAF-05);
+    suggestions and "Show others" (SUG-01 to SUG-17 for V1); checked
+    substitutions and variants (CKM-09, SAF-11); the cooked-meal record with
+    feedback (PRF-13, PRF-14); wrong-result reports (SAF-15); the reference
+    data versions (SAF-13, DAT-06); and the staff-only admin endpoints for
+    ingredient data and recipes with draft and second-person approval and
+    the report review queue (INT-15, LIB-11). Every operation added here
+    carries `x-server-task`: it is designed here and served from that
+    backlog task, and a server without it answers 404 `not_found`.
+
+
+    Safety results (SAF-01, SAF-02, AI-01): every schema that returns a food
+    item (`x-food-item`) requires `safety`, the completed Cek Aman result for
+    exactly the selected eaters, by member ID. No item is returned without
+    one. Only Cek Aman assigns a result; no field carries an AI safety
+    verdict, and nothing in the contract can override or skip a check
+    (SAF-12). Clients render results as they come and fail closed: an
+    unknown or missing status hides the item, and a member whose consent at
+    check time is not `given` is never shown as safe. Nutrition is only ever
+    a labeled estimate range or "unavailable" (NUT-05); V1 sends
+    "unavailable" (QUESTIONS #15).
+
+
+    Access: household operations declare `bearerAuth` and the server
+    permission they need (`x-permission`). Admin operations are under
+    `/v1/admin`, tag `Admin`, and declare `staffAuth` with the staff roles
+    they allow (`x-staff-roles`, QUESTIONS #20). Lists that grow page with an
+    opaque `cursor` (in the body of a search, or in the query of an admin
+    list) and answer `nextCursor`.
+
+
     Versioning (QUESTIONS #58): adding an operation, an optional request
     field or a response field is backward compatible. A new value in a
     response enum is not: installed apps fail closed on unknown values, so it
@@ -85,7 +119,9 @@ info:
     `sensitive_health` data (hard rules) is stored encrypted with a key separate
     from general household data (DAT-02) and is only stored after a consent
     record exists (ACC-08, DECISIONS 2026-11-10). No endpoint in this contract
-    forwards names, contact details or photos of people to AI services (AI-03).
+    forwards names, contact details or photos of people to AI services (AI-03),
+    and no request carries a health condition: suggestion and recipe requests
+    name members by ID and the server reads their rules itself.
 servers:
   - url: http://localhost:3000
     description: Local development
@@ -114,7 +150,26 @@ tags:
   - name: Reference
     description: >-
       Read-only reference vocabularies and the reference ingredient catalog
-      (PRF-04, KIT-04). Values come from the human-owned reference data.
+      (PRF-04, KIT-04) and the versions in use (SAF-13, DAT-06). Values come
+      from the human-owned reference data.
+  - name: Library
+    description: >-
+      The tested Indonesian recipe library: browse, search, recipe screen and
+      checked substitutions, each item with its Cek Aman result for the
+      selected eaters (LIB-01 to LIB-08, CKM-01, CKM-09, SAF-11).
+  - name: Suggestions
+    description: Masak Apa Hari Ini, three checked suggestions per request (SUG-01 to SUG-17).
+  - name: Meals
+    description: Cooked-meal records and post-meal feedback (PRF-13, PRF-14, CKM-10).
+  - name: SafetyReports
+    description: Reports of a wrong Cek Aman result, with minimum data (SAF-15).
+  - name: Admin
+    description: >-
+      Internal admin tool only (INT-15): reference ingredient data and
+      recipes with draft and second-person approval, and the wrong-result
+      review queue. Staff tokens (`staffAuth`) only; served on the internal
+      admin host, never indexed, never reachable with a household token.
+      Who builds the staff sign-in and these routes is QUESTIONS #80.
 
 paths:
   # ---------------------------------------------------------------- Auth
@@ -1161,12 +1216,1137 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         default: { $ref: "#/components/responses/UnexpectedError" }
 
+  /v1/reference/versions:
+    get:
+      tags: [Reference]
+      operationId: getReferenceVersions
+      summary: Get the current rule set, reference data and library versions
+      description: >-
+        The versions every safety result is computed with (DAT-06, SAF-14):
+        the Cek Aman rule set, the verified reference ingredient data and the
+        recipe library. The phone compares them with the versions stored on
+        its cached safety results; a cached result made with older versions
+        is checked again the next time the recipe is opened online, and the
+        phone refreshes within `refreshWithinHours` (SAF-13, 24 hours target,
+        from configuration). Content changes reach phones without an app
+        release (NFR-20). When the reference data is not loaded or fails
+        verification the answer is 503 `reference_data_unavailable`. Sending
+        the `ETag` back in `If-None-Match` answers 304 with no body while the
+        versions are unchanged.
+      security:
+        - bearerAuth: []
+      x-permission: reference:read
+      x-server-task: T-050
+      x-requirements: [SAF-13, DAT-06, NFR-20, SAF-14]
+      parameters:
+        - $ref: "#/components/parameters/IfNoneMatch"
+      responses:
+        "200":
+          description: The current versions.
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+            Cache-Control: { $ref: "#/components/headers/CacheControl" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReferenceVersions" }
+        "304":
+          description: Unchanged since the `If-None-Match` ETag; no body.
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+            Cache-Control: { $ref: "#/components/headers/CacheControl" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+
+  # ---------------------------------------------------------------- Library
+  /v1/library/recipes/search:
+    post:
+      tags: [Library]
+      operationId: searchLibraryRecipes
+      summary: Browse and search the recipe library for the selected eaters
+      description: >-
+        Lists published library recipes (LIB-08): with no `query` and no
+        filters it is the browse list; `query` matches recipe names and
+        ingredient names, local names included; `regionIds`, `mealTypes`
+        and `timeAvailable` filter. Only published recipes with a recorded
+        tester and test date are ever served (LIB-01). Every item carries a
+        completed Cek Aman result for exactly the selected eaters (SAF-02,
+        PRF-11); an item Cek Aman could not check is left out, never returned
+        without a result. Recipes that are Not safe for a selected member are
+        left out and counted in `hiddenNotSafe` unless `includeNotSafe` is
+        true; when included they carry their Not safe result, never a softer
+        one. The query travels in the body, so it never appears in a URL or
+        an access log, and is never stored. Pages follow `nextCursor`; a
+        cursor works only with the same request body (400 otherwise). A
+        selected member that is not in the household answers 404
+        `not_found`. When a member's rules cannot be read the answer is 503
+        `rules_unavailable`, and without verified reference data or library
+        it is 503 `reference_data_unavailable`, never an unchecked list. Works
+        with every AI service down (AI-08).
+      security:
+        - bearerAuth: []
+      x-permission: library:read
+      x-server-task: T-041
+      x-requirements: [LIB-08, LIB-01, LIB-05, SAF-02, SAF-04, SAF-05, PRF-09, PRF-11, AI-08]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LibrarySearchRequest" }
+      responses:
+        "200":
+          description: One page of recipes, each with its Cek Aman result.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LibrarySearchResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+
+  /v1/library/regions:
+    get:
+      tags: [Library]
+      operationId: listLibraryRegions
+      summary: List the regions the library filters by
+      description: >-
+        The regions published recipes come from, with their display names
+        from the content team, for the region filter (LIB-08) and regional
+        variants (LIB-04). Content data, not a fixed list in the app.
+      security:
+        - bearerAuth: []
+      x-permission: library:read
+      x-server-task: T-041
+      x-requirements: [LIB-08, LIB-04]
+      responses:
+        "200":
+          description: The regions.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LibraryRegionList" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+
+  /v1/library/images/{imageId}:
+    parameters:
+      - $ref: "#/components/parameters/ImageId"
+    get:
+      tags: [Library]
+      operationId: getLibraryImage
+      summary: Get a library recipe image
+      description: >-
+        The image bytes of a published recipe image (LIB-03, SUG-09). Recipe
+        images are food photos from the content team, never photos of
+        people. Images are addressed by ID and never change, so the phone
+        may keep them; `If-None-Match` answers 304. No JSON schema in this
+        contract carries an image, a URL or a link.
+      security:
+        - bearerAuth: []
+      x-permission: library:read
+      x-server-task: T-041
+      x-requirements: [LIB-03, SUG-09]
+      parameters:
+        - $ref: "#/components/parameters/IfNoneMatch"
+      responses:
+        "200":
+          description: The image.
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+            Cache-Control: { $ref: "#/components/headers/ImageCacheControl" }
+          content:
+            image/webp:
+              schema:
+                type: string
+                format: binary
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+        "304":
+          description: The phone's copy is current; no body.
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+            Cache-Control: { $ref: "#/components/headers/ImageCacheControl" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+
+  /v1/library/recipes/{recipeId}/detail:
+    parameters:
+      - $ref: "#/components/parameters/RecipeId"
+    post:
+      tags: [Library]
+      operationId: getRecipeDetail
+      summary: Open a recipe for the selected eaters
+      description: >-
+        The recipe screen (CKM-01): ingredients with what is in the kitchen
+        and what is missing, steps with timers, time, servings scaled to the
+        eaters' portions (SUG-16), the halal status from Cek Aman's
+        ingredient data (LIB-05) and the per-member Cek Aman result for
+        exactly the selected eaters (SAF-02, SAF-04, SAF-05, PRF-11). It is
+        a POST because the request names who is eating and every check is
+        logged with its rule set and data versions (SAF-14); it changes no
+        household data. The recipe is returned whatever its result, so the
+        manager can see why it is Not safe; there is no way to override that
+        result (SAF-12). `adaptationId` opens the adapted version a
+        suggestion returned (LIB-06); the server keeps it for a configured
+        time, then answers 409 `adaptation_expired` and the client opens the
+        library recipe instead. `substitutionIds` and `variantId` apply
+        checked substitutions and variants (SAF-11, CKM-09): the whole
+        recipe is checked again with them, and one that is not offered for
+        these eaters answers 409 `substitution_not_available`. A recipe that
+        is not published (or retired) answers 404 `not_found`. 503
+        `rules_unavailable` or `reference_data_unavailable` when Cek Aman
+        cannot run; the recipe is never returned without a result. With
+        every AI service down the library recipe, its result and
+        content-team substitutions still work (AI-08).
+      security:
+        - bearerAuth: []
+      x-permission: library:read
+      x-server-task: T-041
+      x-requirements:
+        [
+          CKM-01,
+          LIB-01,
+          LIB-03,
+          LIB-04,
+          LIB-05,
+          LIB-06,
+          SAF-02,
+          SAF-04,
+          SAF-05,
+          SAF-11,
+          SAF-12,
+          SAF-14,
+          SUG-16,
+          PRF-11,
+          PRF-12,
+          NUT-05,
+          AI-01,
+          AI-08,
+        ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RecipeDetailRequest" }
+      responses:
+        "200":
+          description: The recipe with its Cek Aman result.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecipeDetail" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+
+  /v1/library/recipes/{recipeId}/substitutions:
+    parameters:
+      - $ref: "#/components/parameters/RecipeId"
+    post:
+      tags: [Library]
+      operationId: listRecipeSubstitutions
+      summary: List checked substitutions and variants for the selected eaters
+      description: >-
+        Ingredient substitutions (CKM-09) and content-team variants such as
+        "serve Kakak's portion before adding terasi" (SAF-11), each with its
+        own Cek Aman result for exactly the selected eaters (SAF-02, AI-01).
+        An option that would be Not safe for any selected member, or that
+        could not be checked, is never listed; it is counted in
+        `hiddenCount`. Where the content team defined none, none is offered.
+        Options suggested by AI are only listed when AI is available and pass
+        the same check; with AI down the content-team options still work
+        (AI-08). Using an option re-checks the whole recipe through
+        `getRecipeDetail`. 409 `adaptation_expired`, 404 `not_found` and the
+        503 codes as for `getRecipeDetail`.
+      security:
+        - bearerAuth: []
+      x-permission: library:read
+      x-server-task: T-048
+      x-requirements: [CKM-09, SAF-11, SAF-02, SAF-12, PRF-11, AI-01, AI-08]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SubstitutionRequest" }
+      responses:
+        "200":
+          description: The checked options.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SubstitutionList" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+
+  # ---------------------------------------------------------------- Suggestions
+  /v1/household/suggestions:
+    post:
+      tags: [Suggestions]
+      operationId: requestSuggestions
+      summary: Get three suggestions for who is eating, the meal and the time
+      description: >-
+        Masak Apa Hari Ini (SUG-01, SUG-02): up to three suggestions from the
+        household's saved kitchen (sync queued changes first, KIT-16), the
+        selected eaters (PRF-09, PRF-11), the meal type, the time available
+        and the cuisine (Indonesian in V1, SUG-03). Ranking favors the most
+        available and fewest missing ingredients (SUG-05), avoids recent
+        dishes and repeated main proteins (SUG-07, window from
+        configuration) and follows the eaters' likes, dislikes and feedback
+        (SUG-08); every hard rule is met first, then soft preferences, with
+        any trade-off in one line (PRF-12). Every suggestion passes Cek Aman
+        for exactly the selected eaters before it is returned; one that is
+        Not safe for any of them is replaced, not returned (SUG-04, SAF-02).
+        An AI adaptation is made after the library pick and checked again
+        (LIB-06, AI-01); with AI off or down the library recipes are used
+        (AI-08, `aiAvailability`). `onlyWhatIHave` keeps recipes with zero
+        missing ingredients (SUG-12). Fewer than three items means fewer
+        passed. When none passes, `noSafeRecipe` says so and lists the
+        closest checked options and the conflicts (SUG-17). Missing
+        ingredients are a plain list to copy; there are no shopping lists
+        (SUG-10). Answered within the SUG-13 target (5 s at p90, from
+        configuration). 503 `rules_unavailable` or
+        `reference_data_unavailable` when Cek Aman cannot run: no suggestion
+        is ever returned without a completed result.
+      security:
+        - bearerAuth: []
+      x-permission: suggestion:request
+      x-server-task: T-044
+      x-requirements:
+        [
+          SUG-01,
+          SUG-02,
+          SUG-03,
+          SUG-04,
+          SUG-05,
+          SUG-07,
+          SUG-08,
+          SUG-09,
+          SUG-10,
+          SUG-12,
+          SUG-13,
+          SUG-16,
+          SUG-17,
+          PRF-09,
+          PRF-11,
+          PRF-12,
+          SAF-02,
+          SAF-05,
+          AI-01,
+          AI-08,
+          DAT-06,
+        ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SuggestionRequest" }
+      responses:
+        "200":
+          description: The first page of suggestions.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SuggestionSet" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+
+  /v1/household/suggestions/{suggestionSetId}/more:
+    parameters:
+      - $ref: "#/components/parameters/SuggestionSetId"
+    post:
+      tags: [Suggestions]
+      operationId: requestMoreSuggestions
+      summary: Show three other suggestions for the same inputs
+      description: >-
+        "Tampilkan 3 lainnya" (SUG-11): the next page for the same inputs,
+        never repeating an item shown earlier in the set. Asking for the
+        same `page` again returns the same items, so a retry is safe. Each
+        page is checked by Cek Aman when it is served (SUG-04). When the
+        pool is used up `poolExhausted` is true. A set is kept for a
+        configured time; after that the answer is 409
+        `suggestion_set_expired` and the client asks again with
+        `requestSuggestions`.
+      security:
+        - bearerAuth: []
+      x-permission: suggestion:request
+      x-server-task: T-044
+      x-requirements: [SUG-11, SUG-04, SAF-02, PRF-11]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SuggestionMoreRequest" }
+      responses:
+        "200":
+          description: The requested page.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SuggestionSet" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+
+  # ---------------------------------------------------------------- Meals
+  /v1/household/meals/{mealId}:
+    parameters:
+      - $ref: "#/components/parameters/MealId"
+    put:
+      tags: [Meals]
+      operationId: recordCookedMeal
+      summary: Record a cooked meal and its feedback
+      description: >-
+        The cooked-meal record (QUESTIONS #19) written when cooking ends
+        (CKM-10), with the one-tap household feedback and optional
+        per-person feedback (PRF-13). The phone makes `mealId` (a random
+        UUID) when cooking ends and sends the whole record each time, so the
+        offline queue can replay it safely; the latest record replaces the
+        earlier one. Meal IDs belong to the household. Feedback and recent
+        meals adjust ranking for the household and the people who ate from
+        the next request on (PRF-14, SUG-07, SUG-08). Every eater and rated
+        member must be in the household (404 `not_found` otherwise); a
+        rating for someone who did not eat is 400. Kept for the configured
+        meal-history retention (DAT-04, QUESTIONS #19). No nutrition is
+        recorded in V1.
+      security:
+        - bearerAuth: []
+      x-permission: meal:write
+      x-server-task: T-045
+      x-requirements: [PRF-13, PRF-14, CKM-10, SUG-07, SUG-08]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CookedMealInput" }
+      responses:
+        "200":
+          description: The record was replaced.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CookedMeal" }
+        "201":
+          description: The record was created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CookedMeal" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+
+  # ---------------------------------------------------------------- Safety reports
+  /v1/household/safety-reports:
+    post:
+      tags: [SafetyReports]
+      operationId: createSafetyReport
+      summary: Report a wrong Cek Aman result
+      description: >-
+        From the recipe screen (SAF-15). The report names the recipe, the
+        check it is about (`checkId`, with the rule set and data versions,
+        SAF-14), the members it concerns and what is wrong. The server
+        stores only the members' rule types from that check, never their
+        names, and the content team reviews it in the admin queue. A report
+        never changes a result on any phone. It may be queued offline: send
+        an `Idempotency-Key`. The note is optional, short, and the app asks
+        not to put personal details in it. Rate-limited (429).
+      security:
+        - bearerAuth: []
+      x-permission: safety_report:write
+      x-server-task: T-049
+      x-requirements: [SAF-15, SAF-14, NFR-21]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SafetyReportCreate" }
+      responses:
+        "202":
+          description: Received for review.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SafetyReportReceipt" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+
+  # ---------------------------------------------------------------- Admin (staff only)
+  /v1/admin/reference/ingredient-drafts:
+    get:
+      tags: [Admin]
+      operationId: listIngredientDrafts
+      summary: List reference ingredient drafts
+      description: Drafts of ingredient data changes, newest first, optionally by status (INT-15, SAF-13).
+      security:
+        - staffAuth: []
+      x-staff-roles: [content_editor, safety_reviewer, admin]
+      x-server-task: T-050
+      x-requirements: [INT-15, SAF-13]
+      parameters:
+        - $ref: "#/components/parameters/DraftStatusFilter"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/PageLimit"
+      responses:
+        "200":
+          description: One page of drafts.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/IngredientDraftList" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+    post:
+      tags: [Admin]
+      operationId: createIngredientDraft
+      summary: Start a draft change to the ingredient data
+      description: >-
+        A content editor proposes a new ingredient, a change to one, or its
+        retirement (SAF-06, SAF-07, SAF-13). The content is validated against
+        the reference ingredient schema (400 `validation_failed` with
+        pointers into `content`). Nothing reaches Cek Aman until a second
+        person approves it and it is published in a reference release
+        (two-step approval, QUESTIONS #20). Every change is attributed to the
+        staff member and versioned (DAT-06). Values come from the content
+        team; this API never fills them in.
+      security:
+        - staffAuth: []
+      x-staff-roles: [content_editor]
+      x-server-task: T-050
+      x-requirements: [INT-15, SAF-06, SAF-07, SAF-13, DAT-06, NFR-20]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/IngredientDraftCreate" }
+      responses:
+        "201":
+          description: Draft created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/IngredientDraft" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+
+  /v1/admin/reference/ingredient-drafts/{draftId}:
+    parameters:
+      - $ref: "#/components/parameters/DraftId"
+    get:
+      tags: [Admin]
+      operationId: getIngredientDraft
+      summary: Get an ingredient draft
+      security:
+        - staffAuth: []
+      x-staff-roles: [content_editor, safety_reviewer, admin]
+      x-server-task: T-050
+      x-requirements: [INT-15]
+      responses:
+        "200":
+          description: The draft.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/IngredientDraft" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+    put:
+      tags: [Admin]
+      operationId: updateIngredientDraft
+      summary: Replace an ingredient draft's content
+      description: >-
+        Only the author, and only while the draft is `draft` or `rejected`
+        (409 `draft_not_editable` otherwise). `expectedRevision` is the
+        revision the editor started from; a newer one answers 409
+        `draft_changed`. Editing a rejected draft returns it to `draft`.
+      security:
+        - staffAuth: []
+      x-staff-roles: [content_editor]
+      x-server-task: T-050
+      x-requirements: [INT-15, SAF-13]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/IngredientDraftUpdate" }
+      responses:
+        "200":
+          description: The updated draft.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/IngredientDraft" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+    delete:
+      tags: [Admin]
+      operationId: discardIngredientDraft
+      summary: Discard an ingredient draft
+      description: The author discards a draft that is not approved yet (409 `draft_not_editable` otherwise). It is kept as `discarded` for the audit trail.
+      security:
+        - staffAuth: []
+      x-staff-roles: [content_editor]
+      x-server-task: T-050
+      x-requirements: [INT-15]
+      responses:
+        "204":
+          description: Discarded.
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+
+  /v1/admin/reference/ingredient-drafts/{draftId}/submit:
+    parameters:
+      - $ref: "#/components/parameters/DraftId"
+    post:
+      tags: [Admin]
+      operationId: submitIngredientDraft
+      summary: Send an ingredient draft for review
+      description: >-
+        The author sends a valid draft to a safety reviewer (`in_review`).
+        A draft with validation errors answers 400; a newer revision 409
+        `draft_changed`.
+      security:
+        - staffAuth: []
+      x-staff-roles: [content_editor]
+      x-server-task: T-050
+      x-requirements: [INT-15, SAF-13]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DraftRevisionInput" }
+      responses:
+        "200":
+          description: The draft, now in review.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/IngredientDraft" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+
+  /v1/admin/reference/ingredient-drafts/{draftId}/decision:
+    parameters:
+      - $ref: "#/components/parameters/DraftId"
+    post:
+      tags: [Admin]
+      operationId: decideIngredientDraft
+      summary: Approve or reject an ingredient draft
+      description: >-
+        The second step of the two-step approval (QUESTIONS #20): a safety
+        reviewer who is not the author approves or rejects a draft in
+        review. The author answers 409 `second_person_required`. An approved
+        change goes live with the next reference release, which records the
+        new data version (SAF-13, DAT-06, T-050); a rejected one goes back to
+        the author with the note.
+      security:
+        - staffAuth: []
+      x-staff-roles: [safety_reviewer]
+      x-server-task: T-050
+      x-requirements: [INT-15, SAF-13, DAT-06]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DraftDecisionInput" }
+      responses:
+        "200":
+          description: The decided draft.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/IngredientDraft" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+
+  /v1/admin/library-images:
+    post:
+      tags: [Admin]
+      operationId: uploadLibraryImage
+      summary: Upload a recipe image
+      description: >-
+        A content editor uploads a food photo for a recipe (LIB-03, LIB-11).
+        Never a photo of a person. The server strips metadata, stores a
+        fixed-size copy and returns its ID for `AdminRecipeContent.imageIds`.
+        Size and dimension limits come from configuration (400 otherwise).
+      security:
+        - staffAuth: []
+      x-staff-roles: [content_editor]
+      x-server-task: T-041
+      x-requirements: [LIB-03, LIB-11]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          image/webp:
+            schema:
+              type: string
+              format: binary
+          image/jpeg:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "201":
+          description: Stored.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LibraryImage" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+
+  /v1/admin/recipes:
+    get:
+      tags: [Admin]
+      operationId: listAdminRecipes
+      summary: List library recipes with their versions
+      description: Published and retired library recipes (LIB-11), newest change first.
+      security:
+        - staffAuth: []
+      x-staff-roles: [content_editor, safety_reviewer, nutrition_reviewer, admin]
+      x-server-task: T-041
+      x-requirements: [LIB-11]
+      parameters:
+        - $ref: "#/components/parameters/RecipeStatusFilter"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/PageLimit"
+      responses:
+        "200":
+          description: One page of recipes.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminRecipeList" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+
+  /v1/admin/recipes/{recipeId}:
+    parameters:
+      - $ref: "#/components/parameters/RecipeId"
+    get:
+      tags: [Admin]
+      operationId: getAdminRecipe
+      summary: Get a library recipe with every published version
+      security:
+        - staffAuth: []
+      x-staff-roles: [content_editor, safety_reviewer, nutrition_reviewer, admin]
+      x-server-task: T-041
+      x-requirements: [LIB-11, LIB-01, NFR-23]
+      responses:
+        "200":
+          description: The recipe.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminRecipe" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+
+  /v1/admin/recipes/{recipeId}/retire:
+    parameters:
+      - $ref: "#/components/parameters/RecipeId"
+    post:
+      tags: [Admin]
+      operationId: retireRecipe
+      summary: Retire a library recipe
+      description: >-
+        Takes a published recipe out of the library without an app release
+        (LIB-11): it is no longer searched, suggested or opened (404 for
+        households). Its versions stay for the audit trail and the safety
+        log. A newer version than `expectedVersion` answers 409
+        `draft_changed`.
+      security:
+        - staffAuth: []
+      x-staff-roles: [content_editor, admin]
+      x-server-task: T-041
+      x-requirements: [LIB-11, NFR-20]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RecipeRetireInput" }
+      responses:
+        "200":
+          description: The retired recipe.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminRecipe" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+
+  /v1/admin/recipe-drafts:
+    get:
+      tags: [Admin]
+      operationId: listRecipeDrafts
+      summary: List recipe drafts
+      description: Drafts of new recipes and new recipe versions, newest first, optionally by status (LIB-11).
+      security:
+        - staffAuth: []
+      x-staff-roles: [content_editor, safety_reviewer, admin]
+      x-server-task: T-041
+      x-requirements: [LIB-11]
+      parameters:
+        - $ref: "#/components/parameters/DraftStatusFilter"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/PageLimit"
+      responses:
+        "200":
+          description: One page of drafts.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecipeDraftList" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+    post:
+      tags: [Admin]
+      operationId: createRecipeDraft
+      summary: Start a new recipe or a new version of one
+      description: >-
+        A content editor drafts a new library recipe, or a new version of a
+        published one (`recipeId`), with the LIB-03 fields, regional variant
+        link (LIB-04), and content-team substitutions and variants (SAF-11).
+        Halal status and nutrition are never entered: halal comes from Cek
+        Aman's ingredient data (LIB-05) and nutrition from the reviewed
+        calculation (T-042). A draft is never served to households.
+      security:
+        - staffAuth: []
+      x-staff-roles: [content_editor]
+      x-server-task: T-041
+      x-requirements: [LIB-11, LIB-03, LIB-04, SAF-11]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RecipeDraftCreate" }
+      responses:
+        "201":
+          description: Draft created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecipeDraft" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+
+  /v1/admin/recipe-drafts/{draftId}:
+    parameters:
+      - $ref: "#/components/parameters/DraftId"
+    get:
+      tags: [Admin]
+      operationId: getRecipeDraft
+      summary: Get a recipe draft
+      security:
+        - staffAuth: []
+      x-staff-roles: [content_editor, safety_reviewer, admin]
+      x-server-task: T-041
+      x-requirements: [LIB-11]
+      responses:
+        "200":
+          description: The draft.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecipeDraft" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+    put:
+      tags: [Admin]
+      operationId: updateRecipeDraft
+      summary: Replace a recipe draft's content
+      description: >-
+        As for ingredient drafts: author only, while `draft` or `rejected`,
+        with `expectedRevision` (409 `draft_not_editable`, 409
+        `draft_changed`). Changing the content clears a recorded test, which
+        must be recorded again for the changed recipe (LIB-01).
+      security:
+        - staffAuth: []
+      x-staff-roles: [content_editor]
+      x-server-task: T-041
+      x-requirements: [LIB-11, LIB-01]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RecipeDraftUpdate" }
+      responses:
+        "200":
+          description: The updated draft.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecipeDraft" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+    delete:
+      tags: [Admin]
+      operationId: discardRecipeDraft
+      summary: Discard a recipe draft
+      description: The author discards a draft that is not published (409 `draft_not_editable` otherwise). It is kept as `discarded` for the audit trail.
+      security:
+        - staffAuth: []
+      x-staff-roles: [content_editor]
+      x-server-task: T-041
+      x-requirements: [LIB-11]
+      responses:
+        "204":
+          description: Discarded.
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+
+  /v1/admin/recipe-drafts/{draftId}/test-record:
+    parameters:
+      - $ref: "#/components/parameters/DraftId"
+    put:
+      tags: [Admin]
+      operationId: recordRecipeTest
+      summary: Record the cook's test of a recipe draft
+      description: >-
+        A content editor records who tested this exact draft revision in a
+        real kitchen and when (LIB-01, NFR-23), from the cook's sign-off.
+        Staff accounts only: no household client, service or AI can call it,
+        and a recipe is never published without this record and a second
+        person's approval. It records a fact; it never marks anything safe.
+      security:
+        - staffAuth: []
+      x-staff-roles: [content_editor]
+      x-server-task: T-041
+      x-requirements: [LIB-01, NFR-23, LIB-11]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RecipeTestRecordInput" }
+      responses:
+        "200":
+          description: The draft with its test record.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecipeDraft" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+
+  /v1/admin/recipe-drafts/{draftId}/submit:
+    parameters:
+      - $ref: "#/components/parameters/DraftId"
+    post:
+      tags: [Admin]
+      operationId: submitRecipeDraft
+      summary: Send a recipe draft for review
+      description: >-
+        The author sends a valid draft for approval (`in_review`). It needs
+        a test record for the current revision (409 `recipe_not_tested`) and
+        every ingredient line resolved to a reference ingredient (409
+        `recipe_ingredients_unresolved`); a newer revision answers 409
+        `draft_changed`.
+      security:
+        - staffAuth: []
+      x-staff-roles: [content_editor]
+      x-server-task: T-041
+      x-requirements: [LIB-11, LIB-01]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DraftRevisionInput" }
+      responses:
+        "200":
+          description: The draft, now in review.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecipeDraft" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+
+  /v1/admin/recipe-drafts/{draftId}/decision:
+    parameters:
+      - $ref: "#/components/parameters/DraftId"
+    post:
+      tags: [Admin]
+      operationId: decideRecipeDraft
+      summary: Approve and publish, or reject, a recipe draft
+      description: >-
+        A safety reviewer who is not the author (409
+        `second_person_required`, QUESTIONS #81)
+        approves or rejects a draft in review. Approval publishes it as the
+        recipe's next version at once, without an app release (LIB-11,
+        NFR-20); households get it on their next request, each check
+        recording the recipe version (DAT-06). Approval needs the test
+        record (409 `recipe_not_tested`, LIB-01).
+      security:
+        - staffAuth: []
+      x-staff-roles: [safety_reviewer]
+      x-server-task: T-041
+      x-requirements: [LIB-11, LIB-01, NFR-20, NFR-23, DAT-06]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DraftDecisionInput" }
+      responses:
+        "200":
+          description: The decided draft.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecipeDraft" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+
+  /v1/admin/safety-reports:
+    get:
+      tags: [Admin]
+      operationId: listSafetyReports
+      summary: List wrong-result reports for review
+      description: >-
+        The content team's review queue (SAF-15), oldest open report first.
+        Reports show rule types and pseudonymous member labels, never names,
+        household or member IDs.
+      security:
+        - staffAuth: []
+      x-staff-roles: [safety_reviewer]
+      x-server-task: T-049
+      x-requirements: [SAF-15, SAF-14]
+      parameters:
+        - $ref: "#/components/parameters/ReportStatusFilter"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/PageLimit"
+      responses:
+        "200":
+          description: One page of reports.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminSafetyReportList" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+
+  /v1/admin/safety-reports/{reportId}:
+    parameters:
+      - $ref: "#/components/parameters/ReportId"
+    get:
+      tags: [Admin]
+      operationId: getSafetyReport
+      summary: Get one wrong-result report
+      security:
+        - staffAuth: []
+      x-staff-roles: [safety_reviewer]
+      x-server-task: T-049
+      x-requirements: [SAF-15, SAF-14]
+      responses:
+        "200":
+          description: The report.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminSafetyReport" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+
+  /v1/admin/safety-reports/{reportId}/review:
+    parameters:
+      - $ref: "#/components/parameters/ReportId"
+    post:
+      tags: [Admin]
+      operationId: reviewSafetyReport
+      summary: Confirm or reject a wrong-result report
+      description: >-
+        A safety reviewer marks an open report confirmed or rejected and may
+        name the fix (for example an ingredient draft). A confirmed report
+        adds a case to the Cek Aman regression suite (NFR-07). A reviewed
+        report answers 409 `report_already_reviewed`. Reviewing changes no
+        safety result: only a published data or rule-set change does.
+      security:
+        - staffAuth: []
+      x-staff-roles: [safety_reviewer]
+      x-server-task: T-049
+      x-requirements: [SAF-15, NFR-07]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SafetyReportReviewInput" }
+      responses:
+        "200":
+          description: The reviewed report.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminSafetyReport" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+
 components:
   securitySchemes:
     bearerAuth:
       type: http
       scheme: bearer
       description: Short-lived access token from `Session.tokens.accessToken`.
+    staffAuth:
+      type: http
+      scheme: bearer
+      description: >-
+        Staff access token for the internal admin tool only (INT-15,
+        QUESTIONS #20): issued to a named staff account after sign-in with
+        MFA, carrying its staff roles. Never issued to household accounts,
+        services or agents. A household token is refused on admin routes and
+        a staff token on every other route (403 `forbidden`).
 
   parameters:
     ProfileId:
@@ -1191,6 +2371,87 @@ components:
       required: true
       description: An ingredient set in the session's household.
       schema: { $ref: "#/components/schemas/Id" }
+    RecipeId:
+      name: recipeId
+      in: path
+      required: true
+      description: A library recipe (stable across its versions).
+      schema: { $ref: "#/components/schemas/ReferenceId" }
+    ImageId:
+      name: imageId
+      in: path
+      required: true
+      description: A library recipe image.
+      schema: { $ref: "#/components/schemas/Id" }
+    SuggestionSetId:
+      name: suggestionSetId
+      in: path
+      required: true
+      description: A suggestion set of the session's household.
+      schema: { $ref: "#/components/schemas/Id" }
+    MealId:
+      name: mealId
+      in: path
+      required: true
+      description: >-
+        A cooked meal of the session's household. The phone makes it (a
+        random UUID in lower case) when cooking ends, so the record can be
+        sent again safely.
+      schema: { $ref: "#/components/schemas/Id" }
+    DraftId:
+      name: draftId
+      in: path
+      required: true
+      description: A staff draft of reference data or of a recipe.
+      schema: { $ref: "#/components/schemas/Id" }
+    ReportId:
+      name: reportId
+      in: path
+      required: true
+      schema: { $ref: "#/components/schemas/Id" }
+    IfNoneMatch:
+      name: If-None-Match
+      in: header
+      required: false
+      description: The `ETag` of the copy the client already has.
+      schema:
+        type: string
+        maxLength: 200
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: >-
+        `nextCursor` of the previous page; absent for the first page. Opaque
+        and issued by the server, never text a user typed.
+      schema: { $ref: "#/components/schemas/PageCursor" }
+    PageLimit:
+      name: limit
+      in: query
+      required: false
+      description: Items per page (default and upper limit from configuration).
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+    DraftStatusFilter:
+      name: status
+      in: query
+      required: false
+      description: Only drafts in this state.
+      schema: { $ref: "#/components/schemas/DraftStatus" }
+    RecipeStatusFilter:
+      name: status
+      in: query
+      required: false
+      description: Only recipes in this state.
+      schema: { $ref: "#/components/schemas/RecipeLifecycleStatus" }
+    ReportStatusFilter:
+      name: status
+      in: query
+      required: false
+      description: Only reports in this state.
+      schema: { $ref: "#/components/schemas/SafetyReportStatus" }
     IdempotencyKey:
       name: Idempotency-Key
       in: header
@@ -1218,6 +2479,12 @@ components:
       description: >-
         `private, no-cache`: only the phone may keep a copy, and it checks
         with `If-None-Match` before using it.
+      schema:
+        type: string
+    ImageCacheControl:
+      description: >-
+        `private, max-age=31536000, immutable`: an image ID never changes
+        its bytes, so the phone may keep it.
       schema:
         type: string
 
@@ -1396,6 +2663,15 @@ components:
         - idempotency_key_reused
         - kitchen_item_limit_reached
         - ingredient_set_limit_reached
+        - adaptation_expired
+        - substitution_not_available
+        - suggestion_set_expired
+        - draft_changed
+        - draft_not_editable
+        - second_person_required
+        - recipe_not_tested
+        - recipe_ingredients_unresolved
+        - report_already_reviewed
         # 429
         - rate_limited
         # 5xx
@@ -3059,3 +4335,2225 @@ components:
           description: The confirmed items, each now available.
           type: array
           items: { $ref: "#/components/schemas/KitchenItem" }
+
+    # ------------------------------------------------------------ Paging
+    PageCursor:
+      description: Opaque page position issued by the server, never text a user typed.
+      x-data-sensitivity: public
+      type: string
+      pattern: "^[A-Za-z0-9_-]{1,512}$"
+
+    # ------------------------------------------------------------ Reference versions
+    ReferenceVersions:
+      description: >-
+        DAT-06 versions in use now. `refreshWithinHours` is the SAF-13
+        target (24 hours, from configuration): phones refresh cached
+        reference data and check cached safety results again within it.
+      x-data-sensitivity: public
+      type: object
+      additionalProperties: false
+      required: [ruleSetVersion, referenceVersion, libraryVersion, refreshWithinHours]
+      properties:
+        ruleSetVersion:
+          description: Cek Aman rule-set version.
+          type: string
+        referenceVersion:
+          description: Version and content hash of the verified reference ingredient data.
+          type: string
+        libraryVersion:
+          description: Version of the published recipe library; changes whenever a recipe is published or retired.
+          type: string
+        refreshWithinHours:
+          type: integer
+          minimum: 1
+
+    # ------------------------------------------------------------ Who is eating
+    EaterMode:
+      description: >-
+        PRF-09: `only_me` is the manager's own profile, `whole_family` every
+        profile in the household, `selected` the profiles in `memberIds`.
+      x-data-sensitivity: public
+      type: string
+      enum: [only_me, whole_family, selected]
+
+    EaterSelection:
+      description: >-
+        Who is eating (PRF-09). Only these members' hard rules and
+        preferences are used, for ranking and for Cek Aman (PRF-11).
+        `memberIds` lists the profiles for `selected` (at least one) and is
+        empty for the other modes. The request carries member IDs only:
+        never rules, conditions or names. The server reads the members'
+        rules itself.
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required: [mode, memberIds]
+      properties:
+        mode: { $ref: "#/components/schemas/EaterMode" }
+        memberIds:
+          type: array
+          maxItems: 50
+          uniqueItems: true
+          items: { $ref: "#/components/schemas/Id" }
+
+    # ------------------------------------------------------------ Cek Aman results
+    SafetyStatus:
+      description: >-
+        SAF-04 per-member result from Cek Aman, the only component that
+        assigns one (SAF-01). Clients render it and never compute, upgrade
+        or default it. An unknown value means no result: the item is hidden,
+        never shown as safe.
+      x-data-sensitivity: public
+      type: string
+      enum: [safe, not_safe, check_label]
+
+    SafetyReasonKind:
+      description: >-
+        `contains` and `component` come with `not_safe`; the other kinds with
+        `check_label`. The member's `status` always decides the badge.
+      x-data-sensitivity: public
+      type: string
+      enum: [contains, component, unknown, brand_uncertain, unmapped_rule]
+
+    SafetyReasonCode:
+      description: >-
+        Reason codes from the Cek Aman engine (`packages/cek-aman`). Like
+        `ErrorCode`, codes may be added: a client that does not know a code
+        still renders the member's `status` and shows the generic
+        missing-data line, and never hides a Not safe result or shows it as
+        safe. Until the app decodes unknown codes that way, new codes come
+        with a version bump (QUESTIONS #82).
+      x-data-sensitivity: public
+      type: string
+      enum:
+        - allergen_contains
+        - halal_not_halal
+        - diet_not_suitable
+        - excluded_ingredient
+        - no_ingredients
+        - ingredient_unresolved
+        - ingredient_not_in_reference
+        - components_unverified
+        - component_not_in_reference
+        - component_cycle
+        - allergens_unverified
+        - allergen_may_contain
+        - allergen_related
+        - allergen_unrecognized
+        - halal_uncertain
+        - diet_uncertain
+        - brand_not_recorded
+        - brand_unverified
+        - component_brand_varies
+        - rule_unmapped
+        - rule_mapping_unconfirmed
+        - rule_mapping_unknown_ingredient
+        - rule_invalid
+
+    SafetyRuleRef:
+      description: >-
+        The member's hard rule a reason is about, for the rule label
+        ("alergi udang", "aturan halal"). `freeText` is the rule's own text
+        for `free_text` and `medical_exclusion` rules, shown only to the
+        household. Never a member name.
+      x-data-sensitivity: sensitive_health
+      type: object
+      additionalProperties: false
+      required: [ruleId, type, allergen, freeText]
+      properties:
+        ruleId: { $ref: "#/components/schemas/Id" }
+        type: { $ref: "#/components/schemas/HardRuleType" }
+        allergen:
+          oneOf:
+            - $ref: "#/components/schemas/StandardAllergen"
+            - type: "null"
+        freeText:
+          type: [string, "null"]
+          maxLength: 200
+
+    SafetyIngredientRef:
+      description: >-
+        The recipe ingredient a reason is about. `displayName` is the
+        localized reference name (QUESTIONS #44), null for an unresolved or
+        custom ingredient, which shows `rawName`. `lineId` points at the
+        ingredient line of the recipe, or of the replacement for a
+        substitution; null when the reason is not about one line.
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required: [lineId, ingredientId, displayName, rawName, isCustom]
+      properties:
+        lineId:
+          oneOf:
+            - $ref: "#/components/schemas/Id"
+            - type: "null"
+        ingredientId:
+          oneOf:
+            - $ref: "#/components/schemas/ReferenceId"
+            - type: "null"
+        displayName:
+          oneOf:
+            - $ref: "#/components/schemas/LocalizedText"
+            - type: "null"
+        rawName:
+          type: string
+          minLength: 1
+          maxLength: 120
+        isCustom:
+          description: A custom ingredient from Dapur Saya (KIT-05); shown with the custom-ingredient reason.
+          type: boolean
+
+    SafetyComponentRef:
+      description: A hidden component, for example the shrimp inside terasi (SAF-03, SAF-06).
+      x-data-sensitivity: public
+      type: object
+      additionalProperties: false
+      required: [ingredientId, displayName]
+      properties:
+        ingredientId: { $ref: "#/components/schemas/ReferenceId" }
+        displayName:
+          oneOf:
+            - $ref: "#/components/schemas/LocalizedText"
+            - type: "null"
+
+    SafetyBrandRef:
+      description: The verified brand variant whose data Cek Aman used (SAF-07).
+      x-data-sensitivity: public
+      type: object
+      additionalProperties: false
+      required: [brandId, name]
+      properties:
+        brandId: { $ref: "#/components/schemas/ReferenceId" }
+        name: { type: string }
+
+    SafetyReason:
+      description: >-
+        One reason from Cek Aman (SAF-04). For Not safe it names the
+        ingredient, any hidden component (`componentPath`, from the recipe
+        ingredient down to the one concerned) and the rule. For Check the
+        label it gives the reason code. `ingredient` is null only for a
+        reason about the rule itself or an empty ingredient list. `detail` is
+        the allergen code, non-halal source, diet or excluded ingredient ID
+        when relevant.
+      x-data-sensitivity: sensitive_health
+      type: object
+      additionalProperties: false
+      required: [kind, code, rule, ingredient, componentPath, brand, detail]
+      properties:
+        kind: { $ref: "#/components/schemas/SafetyReasonKind" }
+        code: { $ref: "#/components/schemas/SafetyReasonCode" }
+        rule: { $ref: "#/components/schemas/SafetyRuleRef" }
+        ingredient:
+          oneOf:
+            - $ref: "#/components/schemas/SafetyIngredientRef"
+            - type: "null"
+        componentPath:
+          type: array
+          items: { $ref: "#/components/schemas/SafetyComponentRef" }
+        brand:
+          oneOf:
+            - $ref: "#/components/schemas/SafetyBrandRef"
+            - type: "null"
+        detail:
+          type: [string, "null"]
+          maxLength: 100
+
+    MemberSafetyResult:
+      description: >-
+        One selected member's Cek Aman result, by member ID only, never a
+        name (SAF-04, SAF-05). `rulesConsent` is the member's health-data
+        consent state when the check ran (QUESTIONS #36, #48, #52): unless
+        it is `given`, the member's rules were not checked and clients show
+        the neutral "rules not saved" or "not filled in" chip, never Safe,
+        whatever `status` says. A result without `rulesConsent`, or with a
+        value the client does not know, is treated the same way.
+      x-data-sensitivity: sensitive_health
+      type: object
+      additionalProperties: false
+      required: [memberId, rulesConsent, status, reasons]
+      properties:
+        memberId: { $ref: "#/components/schemas/Id" }
+        rulesConsent: { $ref: "#/components/schemas/RulesConsentStatus" }
+        status: { $ref: "#/components/schemas/SafetyStatus" }
+        reasons:
+          description: Empty for `safe`; at least one for the other states.
+          type: array
+          items: { $ref: "#/components/schemas/SafetyReason" }
+
+    HalalStatus:
+      description: >-
+        LIB-05 recipe halal status, derived by Cek Aman from its ingredient
+        data, never from AI: `not_halal` when an ingredient or component is
+        alcohol, pork or a non-halal animal; `check_label` when any item is
+        uncertain or unverified (SAF-08). Not a per-member result. An unknown
+        value hides the row; it is never shown as halal.
+      x-data-sensitivity: public
+      type: string
+      enum: [halal, not_halal, check_label]
+
+    SafetyFinding:
+      description: >-
+        A Cek Aman finding without a member rule: used for the recipe halal
+        status and in the staff review queue.
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required: [kind, code, ingredient, componentPath, brand, detail]
+      properties:
+        kind: { $ref: "#/components/schemas/SafetyReasonKind" }
+        code: { $ref: "#/components/schemas/SafetyReasonCode" }
+        ingredient:
+          oneOf:
+            - $ref: "#/components/schemas/SafetyIngredientRef"
+            - type: "null"
+        componentPath:
+          type: array
+          items: { $ref: "#/components/schemas/SafetyComponentRef" }
+        brand:
+          oneOf:
+            - $ref: "#/components/schemas/SafetyBrandRef"
+            - type: "null"
+        detail:
+          type: [string, "null"]
+          maxLength: 100
+
+    RecipeHalalStatus:
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required: [status, findings]
+      properties:
+        status: { $ref: "#/components/schemas/HalalStatus" }
+        findings:
+          description: The ingredients behind `not_halal` or `check_label`; empty for `halal`.
+          type: array
+          items: { $ref: "#/components/schemas/SafetyFinding" }
+
+    RecipeSafety:
+      description: >-
+        The completed Cek Aman result for one food item (SAF-02). Required on
+        every food item the API returns: an item without one is never
+        returned. `members` holds exactly the selected eaters, in the order
+        of the selection, and nobody else (PRF-11). `checkId` names the
+        logged check with its rule set and data versions (SAF-14, DAT-06);
+        a wrong-result report quotes it. The phone may cache the result
+        with the recipe (CKM-07) and must check again when any version
+        changes or a selected member's rules or consent change.
+      x-data-sensitivity: sensitive_health
+      type: object
+      additionalProperties: false
+      required: [checkId, checkedAt, ruleSetVersion, referenceVersion, members, halalStatus]
+      properties:
+        checkId: { $ref: "#/components/schemas/Id" }
+        checkedAt:
+          type: string
+          format: date-time
+        ruleSetVersion: { type: string }
+        referenceVersion: { type: string }
+        members:
+          type: array
+          minItems: 1
+          items: { $ref: "#/components/schemas/MemberSafetyResult" }
+        halalStatus: { $ref: "#/components/schemas/RecipeHalalStatus" }
+
+    # ------------------------------------------------------------ Recipe content
+    MealType:
+      description: >-
+        SUG-02 meal types. `sahur` and `buka` are plain meal types in V1 with
+        no Ramadan logic (QUESTIONS #25).
+      x-data-sensitivity: public
+      type: string
+      enum: [breakfast, lunch, dinner, snack, sahur, buka]
+
+    TimeAvailable:
+      description: SUG-02 time available, in minutes. `over_60` has no upper limit.
+      x-data-sensitivity: public
+      type: string
+      enum: [up_to_15, up_to_30, up_to_60, over_60]
+
+    Cuisine:
+      description: >-
+        SUG-03. V1 serves `indonesian` only; a request for another cuisine
+        answers 400 until V3 adds those collections (LIB-10).
+      x-data-sensitivity: public
+      type: string
+      enum: [indonesian, japanese, chinese, fusion]
+
+    RecipeDifficulty:
+      x-data-sensitivity: public
+      type: string
+      enum: [easy, medium, hard]
+
+    RecipeSpiceLevel:
+      description: LIB-03 spice level tag of a recipe.
+      x-data-sensitivity: public
+      type: string
+      enum: [not_spicy, medium, spicy]
+
+    RecipeOrigin:
+      description: >-
+        Where the recipe text comes from. `library`: a published library
+        recipe. `adapted_library`: a library recipe adapted for these eaters
+        (LIB-06), labeled "Diadaptasi". `family` (Resep Keluarga) and
+        `generated` (AI-02, labeled as generated) are not served in V1. Only
+        `library` may be presented as a tested recipe (LIB-07); clients
+        treat an unknown value like `generated`.
+      x-data-sensitivity: public
+      type: string
+      enum: [library, adapted_library, family, generated]
+
+    RecipeRegion:
+      description: A region of the library (LIB-04, LIB-08); names come from the content team.
+      x-data-sensitivity: public
+      type: object
+      additionalProperties: false
+      required: [regionId, displayName]
+      properties:
+        regionId: { $ref: "#/components/schemas/ReferenceId" }
+        displayName: { $ref: "#/components/schemas/LocalizedText" }
+
+    LibraryRegionList:
+      x-data-sensitivity: public
+      type: object
+      additionalProperties: false
+      required: [libraryVersion, items]
+      properties:
+        libraryVersion: { type: string }
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/RecipeRegion" }
+
+    RecipeTags:
+      description: LIB-03 tags. Not safety data and not health claims.
+      x-data-sensitivity: public
+      type: object
+      additionalProperties: false
+      required: [fried, santan, spiceLevel]
+      properties:
+        fried: { type: boolean }
+        santan: { type: boolean }
+        spiceLevel: { $ref: "#/components/schemas/RecipeSpiceLevel" }
+
+    RecipeImage:
+      description: A food photo or illustration from the content team, fetched with `getLibraryImage`.
+      x-data-sensitivity: public
+      type: object
+      additionalProperties: false
+      required: [imageId, width, height, alt]
+      properties:
+        imageId: { $ref: "#/components/schemas/Id" }
+        width:
+          type: integer
+          minimum: 1
+        height:
+          type: integer
+          minimum: 1
+        alt: { $ref: "#/components/schemas/LocalizedText" }
+
+    RecipeTestRecord:
+      description: >-
+        LIB-01, NFR-23: the Indonesian cook's test of this recipe version,
+        recorded by staff in the admin tool. `testedBy` is the label the
+        content team publishes for the tester (QUESTIONS #79). Clients show
+        "Resep teruji" only for `origin: library` with this record; it never
+        means safe.
+      x-data-sensitivity: public
+      type: object
+      additionalProperties: false
+      required: [testedBy, testedOn]
+      properties:
+        testedBy:
+          type: string
+          minLength: 1
+          maxLength: 80
+        testedOn:
+          type: string
+          format: date
+
+    RecipeSummary:
+      description: >-
+        LIB-03 fields of a recipe as a card or list row shows them. Content
+        only: the API returns it only inside a food item that carries its
+        Cek Aman result. `version` changes with every published change (LIB-11,
+        DAT-06). `testRecord` belongs to the library version: for
+        `adapted_library` it is the base recipe's test, not a test of the
+        adapted text (LIB-07). `baseRecipeId` links a regional variant to
+        its base dish (LIB-04). `totalMinutes` is prep plus cook time.
+      x-data-sensitivity: public
+      x-food-content: true
+      type: object
+      additionalProperties: false
+      required:
+        - recipeId
+        - version
+        - name
+        - description
+        - cuisine
+        - region
+        - mealTypes
+        - prepMinutes
+        - cookMinutes
+        - totalMinutes
+        - difficulty
+        - baseServings
+        - tags
+        - images
+        - origin
+        - testRecord
+        - baseRecipeId
+      properties:
+        recipeId: { $ref: "#/components/schemas/ReferenceId" }
+        version:
+          type: integer
+          minimum: 1
+        name: { $ref: "#/components/schemas/LocalizedText" }
+        description: { $ref: "#/components/schemas/LocalizedText" }
+        cuisine: { $ref: "#/components/schemas/Cuisine" }
+        region:
+          oneOf:
+            - $ref: "#/components/schemas/RecipeRegion"
+            - type: "null"
+        mealTypes:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: { $ref: "#/components/schemas/MealType" }
+        prepMinutes:
+          type: integer
+          minimum: 0
+        cookMinutes:
+          type: integer
+          minimum: 0
+        totalMinutes:
+          type: integer
+          minimum: 0
+        difficulty: { $ref: "#/components/schemas/RecipeDifficulty" }
+        baseServings:
+          description: Servings the quantities are written for.
+          type: integer
+          minimum: 1
+        tags: { $ref: "#/components/schemas/RecipeTags" }
+        images:
+          description: First image first; empty when the recipe has none (the app shows an illustration).
+          type: array
+          items: { $ref: "#/components/schemas/RecipeImage" }
+        origin: { $ref: "#/components/schemas/RecipeOrigin" }
+        testRecord:
+          oneOf:
+            - $ref: "#/components/schemas/RecipeTestRecord"
+            - type: "null"
+        baseRecipeId:
+          oneOf:
+            - $ref: "#/components/schemas/ReferenceId"
+            - type: "null"
+
+    IngredientQuantity:
+      description: >-
+        LIB-03 quantity and unit. `amount` is null for "to taste"
+        (secukupnya). `unitCode` and `unitLabel` come from the content
+        team's unit list (local measures follow QUESTIONS #10). Amounts
+        scale linearly with servings on the phone (CKM-05).
+      x-data-sensitivity: public
+      type: object
+      additionalProperties: false
+      required: [amount, unitCode, unitLabel]
+      properties:
+        amount:
+          type: [number, "null"]
+          exclusiveMinimum: 0
+        unitCode:
+          type: [string, "null"]
+          pattern: "^[a-z0-9_]{1,32}$"
+        unitLabel:
+          oneOf:
+            - $ref: "#/components/schemas/LocalizedText"
+            - type: "null"
+
+    KitchenAvailability:
+      description: >-
+        CKM-01: whether the household's saved kitchen has the ingredient
+        ("Ada" or "Belum ada"). Clients treat an unknown value as `missing`.
+      x-data-sensitivity: public
+      type: string
+      enum: [available, missing]
+
+    RecipeIngredientLine:
+      description: >-
+        One ingredient line, with quantities for `servings` of the item it
+        belongs to. `ingredientId` is null for a line that does not resolve
+        to a reference ingredient, which Cek Aman treats as unknown (Check
+        the label, SAF-09).
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required:
+        [lineId, ingredientId, displayName, rawName, quantity, isOptional, groupLabel, inKitchen]
+      properties:
+        lineId: { $ref: "#/components/schemas/Id" }
+        ingredientId:
+          oneOf:
+            - $ref: "#/components/schemas/ReferenceId"
+            - type: "null"
+        displayName:
+          oneOf:
+            - $ref: "#/components/schemas/LocalizedText"
+            - type: "null"
+        rawName:
+          description: The name as written in the recipe.
+          type: string
+          minLength: 1
+          maxLength: 120
+        quantity: { $ref: "#/components/schemas/IngredientQuantity" }
+        isOptional: { type: boolean }
+        groupLabel:
+          description: A group heading such as "Bumbu halus", or null.
+          oneOf:
+            - $ref: "#/components/schemas/LocalizedText"
+            - type: "null"
+        inKitchen: { $ref: "#/components/schemas/KitchenAvailability" }
+
+    RecipeStep:
+      description: >-
+        One step (CKM-02). `timerSeconds` offers a timer (CKM-03).
+        `ingredientLineIds` are the lines the step uses (CKM-06).
+      x-data-sensitivity: public
+      type: object
+      additionalProperties: false
+      required: [stepId, text, timerSeconds, ingredientLineIds]
+      properties:
+        stepId: { $ref: "#/components/schemas/Id" }
+        text: { $ref: "#/components/schemas/LocalizedText" }
+        timerSeconds:
+          type: [integer, "null"]
+          minimum: 1
+        ingredientLineIds:
+          type: array
+          uniqueItems: true
+          items: { $ref: "#/components/schemas/Id" }
+
+    MissingIngredient:
+      description: >-
+        SUG-10: an ingredient the kitchen does not have, for the note the
+        user can copy as plain text. No quantity, price or shop: there are no
+        shopping lists.
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required: [lineId, ingredientId, displayName, rawName]
+      properties:
+        lineId: { $ref: "#/components/schemas/Id" }
+        ingredientId:
+          oneOf:
+            - $ref: "#/components/schemas/ReferenceId"
+            - type: "null"
+        displayName:
+          oneOf:
+            - $ref: "#/components/schemas/LocalizedText"
+            - type: "null"
+        rawName:
+          type: string
+          minLength: 1
+          maxLength: 120
+
+    KitchenMatch:
+      description: >-
+        SUG-05, SUG-09, CKM-01: how the recipe fits the saved kitchen.
+        Optional lines are not counted as missing.
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required: [availableCount, missingCount, missing]
+      properties:
+        availableCount:
+          type: integer
+          minimum: 0
+        missingCount:
+          type: integer
+          minimum: 0
+        missing:
+          type: array
+          items: { $ref: "#/components/schemas/MissingIngredient" }
+
+    NutrientCode:
+      description: NUT-04 nutrients.
+      x-data-sensitivity: public
+      type: string
+      enum: [energy, protein, carbohydrate, fat, saturated_fat, fiber, sugar, sodium]
+
+    NutrientUnit:
+      x-data-sensitivity: public
+      type: string
+      enum: [kcal, g, mg]
+
+    NutritionStatus:
+      description: >-
+        `estimate`: ranges from the reviewed calculation, always labeled
+        "perkiraan" (estimate). `unavailable`: no reviewed values, shown as
+        "nutrition unavailable" or not at all. V1 always sends
+        `unavailable` and the app shows no nutrition (QUESTIONS #15).
+        Clients treat an unknown value as `unavailable`.
+      x-data-sensitivity: public
+      type: string
+      enum: [estimate, unavailable]
+
+    NutrientRange:
+      description: >-
+        NUT-05: a range, never a single number; `high` is greater than
+        `low`. Values come only from the reviewed nutrition calculation
+        (T-042), never from AI and never entered by hand in this API.
+      x-data-sensitivity: public
+      type: object
+      additionalProperties: false
+      required: [nutrient, low, high, unit]
+      properties:
+        nutrient: { $ref: "#/components/schemas/NutrientCode" }
+        low:
+          type: number
+          minimum: 0
+        high:
+          type: number
+          exclusiveMinimum: 0
+        unit: { $ref: "#/components/schemas/NutrientUnit" }
+
+    NutritionPerServing:
+      description: >-
+        LIB-03 nutrition per serving as estimate ranges (NUT-05). `ranges` is
+        empty when `status` is `unavailable`. No calorie targets, no
+        per-person judgement (NUT-19, NUT-20).
+      x-data-sensitivity: public
+      type: object
+      additionalProperties: false
+      required: [status, ranges]
+      properties:
+        status: { $ref: "#/components/schemas/NutritionStatus" }
+        ranges:
+          type: array
+          items: { $ref: "#/components/schemas/NutrientRange" }
+
+    # ------------------------------------------------------------ Library
+    LibrarySearchRequest:
+      description: >-
+        LIB-08 browse and search. All filters are optional; together they
+        narrow the list. `query` matches names and ingredients (local names
+        included) and is never stored or logged; hidden or control
+        characters are refused (400). `timeAvailable` keeps recipes whose
+        total time fits.
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required: [eaters]
+      properties:
+        eaters: { $ref: "#/components/schemas/EaterSelection" }
+        query:
+          type: string
+          minLength: 1
+          maxLength: 60
+        regionIds:
+          type: array
+          maxItems: 20
+          uniqueItems: true
+          items: { $ref: "#/components/schemas/ReferenceId" }
+        mealTypes:
+          type: array
+          uniqueItems: true
+          items: { $ref: "#/components/schemas/MealType" }
+        timeAvailable: { $ref: "#/components/schemas/TimeAvailable" }
+        includeNotSafe:
+          description: >-
+            Also list recipes that are Not safe for a selected member, with
+            that result ("Tampilkan"). Default false.
+          type: boolean
+        cursor:
+          oneOf:
+            - $ref: "#/components/schemas/PageCursor"
+            - type: "null"
+        limit:
+          description: Items per page (default and upper limit from configuration).
+          type: integer
+          minimum: 1
+          maximum: 50
+
+    LibraryRecipeListItem:
+      description: A library recipe with its Cek Aman result for the selected eaters.
+      x-data-sensitivity: sensitive_health
+      x-food-item: true
+      type: object
+      additionalProperties: false
+      required: [recipe, safety]
+      properties:
+        recipe: { $ref: "#/components/schemas/RecipeSummary" }
+        safety: { $ref: "#/components/schemas/RecipeSafety" }
+
+    HiddenNotSafe:
+      description: >-
+        Recipes left out because they are Not safe for a selected member
+        (`library.hiddenNotSafe`): how many and for whom. Zero when
+        `includeNotSafe` was true.
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required: [count, memberIds]
+      properties:
+        count:
+          type: integer
+          minimum: 0
+        memberIds:
+          type: array
+          uniqueItems: true
+          items: { $ref: "#/components/schemas/Id" }
+
+    LibrarySearchResult:
+      x-data-sensitivity: sensitive_health
+      type: object
+      additionalProperties: false
+      required: [items, nextCursor, totalCount, hiddenNotSafe, libraryVersion]
+      properties:
+        items:
+          description: Best match first; empty when nothing matched.
+          type: array
+          items: { $ref: "#/components/schemas/LibraryRecipeListItem" }
+        nextCursor:
+          oneOf:
+            - $ref: "#/components/schemas/PageCursor"
+            - type: "null"
+        totalCount:
+          description: Matching recipes that are listed (hidden ones not counted).
+          type: integer
+          minimum: 0
+        hiddenNotSafe: { $ref: "#/components/schemas/HiddenNotSafe" }
+        libraryVersion: { type: string }
+
+    # ------------------------------------------------------------ Recipe detail
+    RecipeDetailRequest:
+      description: >-
+        Who is eating, and optionally the adaptation, substitutions or
+        variant to open the recipe with. The response quantities are for
+        servings scaled to the eaters; the phone rescales them (CKM-05).
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required: [eaters]
+      properties:
+        eaters: { $ref: "#/components/schemas/EaterSelection" }
+        adaptationId:
+          description: The `adaptation.adaptationId` a suggestion returned (LIB-06).
+          allOf:
+            - $ref: "#/components/schemas/Id"
+        substitutionIds:
+          description: Checked substitutions to use (SAF-11, CKM-09), from `listRecipeSubstitutions`.
+          type: array
+          maxItems: 20
+          uniqueItems: true
+          items: { $ref: "#/components/schemas/Id" }
+        variantId:
+          description: A checked content-team variant (SAF-11).
+          allOf:
+            - $ref: "#/components/schemas/Id"
+
+    AdaptationInfo:
+      description: >-
+        LIB-06: the recipe was adapted (scaled, substituted or simplified)
+        and is labeled "Diadaptasi", with one line per change ("Disesuaikan:
+        {change}"). `aiAdapted` is true when the AI service made the change;
+        the adapted recipe went through Cek Aman again like any other
+        (AI-01). Change lines never state a safety result. `adaptationId`
+        and `expiresAt` are set for an AI adaptation the server keeps for a
+        configured time.
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required: [adaptationId, aiAdapted, changes, expiresAt]
+      properties:
+        adaptationId:
+          oneOf:
+            - $ref: "#/components/schemas/Id"
+            - type: "null"
+        aiAdapted: { type: boolean }
+        changes:
+          type: array
+          maxItems: 10
+          items: { $ref: "#/components/schemas/LocalizedText" }
+        expiresAt:
+          type: [string, "null"]
+          format: date-time
+
+    AppliedVariant:
+      description: >-
+        SAF-11: a content-team variant in use, for example "Pisahkan porsi
+        {names} sebelum menambah terasi". The app fills `{names}` from
+        `separatedMemberIds`; those members' portion is set aside before
+        `separateBeforeStepId`, and Cek Aman checked their portion without
+        the ingredients added from that step on.
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required: [variantId, label, separatedMemberIds, separateBeforeStepId]
+      properties:
+        variantId: { $ref: "#/components/schemas/Id" }
+        label: { $ref: "#/components/schemas/LocalizedText" }
+        separatedMemberIds:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: { $ref: "#/components/schemas/Id" }
+        separateBeforeStepId: { $ref: "#/components/schemas/Id" }
+
+    TradeOffKind:
+      description: >-
+        PRF-12 trade-off templates (`suggest.tradeoff.*`). A hard rule is
+        never a trade-off. Clients show no line for an unknown value.
+      x-data-sensitivity: public
+      type: string
+      enum: [spice_separate, less_santan, not_fried, less_salt, less_sugar, dislike_skipped, other]
+
+    TradeOff:
+      description: >-
+        PRF-12: the one line explaining how the eaters' soft preferences were
+        balanced. `memberIds` are the members the change is for (for
+        `spice_separate`, those who get it mild) and `otherMemberIds` the
+        others (sambal on the side). `ingredient` is set for
+        `dislike_skipped`; `text` for `other`. Never a safety word.
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required: [kind, memberIds, otherMemberIds, ingredient, text]
+      properties:
+        kind: { $ref: "#/components/schemas/TradeOffKind" }
+        memberIds:
+          type: array
+          uniqueItems: true
+          items: { $ref: "#/components/schemas/Id" }
+        otherMemberIds:
+          type: array
+          uniqueItems: true
+          items: { $ref: "#/components/schemas/Id" }
+        ingredient:
+          oneOf:
+            - $ref: "#/components/schemas/LocalizedText"
+            - type: "null"
+        text:
+          oneOf:
+            - $ref: "#/components/schemas/LocalizedText"
+            - type: "null"
+
+    AiAvailability:
+      description: >-
+        AI-08: `available`; `off` (the household has not turned AI features
+        on, SET-09); `unavailable` (down, out of quota or too slow, so only
+        library recipes and content-team options are used). Never affects a
+        safety result. Clients treat an unknown value as `unavailable`.
+      x-data-sensitivity: public
+      type: string
+      enum: [available, "off", unavailable]
+
+    RecipeDetail:
+      description: >-
+        The recipe screen (CKM-01) for the selected eaters. `servings` is
+        scaled to the eaters' portion sizes (SUG-16) and the ingredient
+        quantities are for it. `regionalVariants` are the other regional
+        versions of the dish (LIB-04), each with its own result.
+        `appliedSubstitutionIds` lists the substitutions in use.
+      x-data-sensitivity: sensitive_health
+      x-food-item: true
+      type: object
+      additionalProperties: false
+      required:
+        - recipe
+        - ingredients
+        - steps
+        - servings
+        - kitchenMatch
+        - safety
+        - adaptation
+        - variant
+        - appliedSubstitutionIds
+        - regionalVariants
+        - nutritionPerServing
+        - tradeOff
+        - aiAvailability
+      properties:
+        recipe: { $ref: "#/components/schemas/RecipeSummary" }
+        ingredients:
+          type: array
+          items: { $ref: "#/components/schemas/RecipeIngredientLine" }
+        steps:
+          type: array
+          items: { $ref: "#/components/schemas/RecipeStep" }
+        servings:
+          type: integer
+          minimum: 1
+        kitchenMatch: { $ref: "#/components/schemas/KitchenMatch" }
+        safety: { $ref: "#/components/schemas/RecipeSafety" }
+        adaptation:
+          oneOf:
+            - $ref: "#/components/schemas/AdaptationInfo"
+            - type: "null"
+        variant:
+          oneOf:
+            - $ref: "#/components/schemas/AppliedVariant"
+            - type: "null"
+        appliedSubstitutionIds:
+          type: array
+          uniqueItems: true
+          items: { $ref: "#/components/schemas/Id" }
+        regionalVariants:
+          type: array
+          items: { $ref: "#/components/schemas/LibraryRecipeListItem" }
+        nutritionPerServing: { $ref: "#/components/schemas/NutritionPerServing" }
+        tradeOff:
+          oneOf:
+            - $ref: "#/components/schemas/TradeOff"
+            - type: "null"
+        aiAvailability: { $ref: "#/components/schemas/AiAvailability" }
+
+    # ------------------------------------------------------------ Substitutions
+    SubstitutionRequest:
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required: [eaters]
+      properties:
+        eaters: { $ref: "#/components/schemas/EaterSelection" }
+        adaptationId:
+          description: Substitutions for the adapted version a suggestion returned.
+          allOf:
+            - $ref: "#/components/schemas/Id"
+
+    SubstitutionSource:
+      description: >-
+        `content_team`: defined and reviewed by the content team (QUESTIONS
+        #21). `ai`: proposed by the AI service and then checked by Cek Aman
+        like any other option (AI-01); never a safety verdict.
+      x-data-sensitivity: public
+      type: string
+      enum: [content_team, ai]
+
+    SubstitutionOption:
+      description: >-
+        One substitution for an ingredient line (CKM-09). `safety` is the Cek
+        Aman result of the replacement ingredients for the selected eaters;
+        an option that is Not safe for any of them is never listed.
+        `removesConflictFor` are the members whose Not safe result for the
+        recipe goes away with this option, as Cek Aman found by checking the
+        whole recipe with it (QUESTIONS #83). Quantities are for the item's
+        servings.
+      x-data-sensitivity: sensitive_health
+      x-food-item: true
+      type: object
+      additionalProperties: false
+      required:
+        [substitutionId, lineId, source, replacements, effectNote, removesConflictFor, safety]
+      properties:
+        substitutionId: { $ref: "#/components/schemas/Id" }
+        lineId: { $ref: "#/components/schemas/Id" }
+        source: { $ref: "#/components/schemas/SubstitutionSource" }
+        replacements:
+          type: array
+          minItems: 1
+          items: { $ref: "#/components/schemas/RecipeIngredientLine" }
+        effectNote:
+          description: One line on how it changes the dish, from content.
+          oneOf:
+            - $ref: "#/components/schemas/LocalizedText"
+            - type: "null"
+        removesConflictFor:
+          type: array
+          uniqueItems: true
+          items: { $ref: "#/components/schemas/Id" }
+        safety: { $ref: "#/components/schemas/RecipeSafety" }
+
+    SubstitutionLine:
+      x-data-sensitivity: sensitive_health
+      type: object
+      additionalProperties: false
+      required: [lineId, options]
+      properties:
+        lineId: { $ref: "#/components/schemas/Id" }
+        options:
+          type: array
+          minItems: 1
+          items: { $ref: "#/components/schemas/SubstitutionOption" }
+
+    RecipeVariant:
+      description: >-
+        SAF-11: a content-team variant ("Cara lain"), with the Cek Aman
+        result of the whole recipe cooked that way for the selected eaters.
+        Listed only when it is not Not safe for any of them.
+      x-data-sensitivity: sensitive_health
+      x-food-item: true
+      type: object
+      additionalProperties: false
+      required: [variant, safety]
+      properties:
+        variant: { $ref: "#/components/schemas/AppliedVariant" }
+        safety: { $ref: "#/components/schemas/RecipeSafety" }
+
+    SubstitutionList:
+      x-data-sensitivity: sensitive_health
+      type: object
+      additionalProperties: false
+      required: [recipeId, recipeVersion, lines, variants, hiddenCount, aiAvailability]
+      properties:
+        recipeId: { $ref: "#/components/schemas/ReferenceId" }
+        recipeVersion:
+          type: integer
+          minimum: 1
+        lines:
+          description: Only lines that have at least one listed option.
+          type: array
+          items: { $ref: "#/components/schemas/SubstitutionLine" }
+        variants:
+          type: array
+          items: { $ref: "#/components/schemas/RecipeVariant" }
+        hiddenCount:
+          description: Options left out because they are Not safe or could not be checked (`subs.hidden`).
+          type: integer
+          minimum: 0
+        aiAvailability: { $ref: "#/components/schemas/AiAvailability" }
+
+    # ------------------------------------------------------------ Suggestions
+    SuggestionRequest:
+      description: >-
+        SUG-02 inputs. The available ingredients are the household's saved
+        kitchen. `cuisine` defaults to `indonesian` (SUG-03).
+        `onlyWhatIHave` keeps recipes with no missing ingredient (SUG-12).
+        Member IDs only: never rules, conditions or names.
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required: [eaters, mealType, timeAvailable]
+      properties:
+        eaters: { $ref: "#/components/schemas/EaterSelection" }
+        mealType: { $ref: "#/components/schemas/MealType" }
+        timeAvailable: { $ref: "#/components/schemas/TimeAvailable" }
+        cuisine: { $ref: "#/components/schemas/Cuisine" }
+        onlyWhatIHave: { type: boolean }
+
+    SuggestionMoreRequest:
+      x-data-sensitivity: public
+      type: object
+      additionalProperties: false
+      required: [page]
+      properties:
+        page:
+          description: The page wanted; the first "Show others" asks for page 2.
+          type: integer
+          minimum: 2
+          maximum: 50
+
+    Suggestion:
+      description: >-
+        A suggestion card (SUG-09): dish, image, time, servings scaled to the
+        eaters' portions (SUG-16), kitchen match with the missing
+        ingredients (SUG-10), the per-member Cek Aman result (SAF-05), and
+        the trade-off line (PRF-12). `adaptation` is set for an adapted
+        recipe (LIB-06) and `variant` when the card is the recipe cooked
+        with a checked variant (SAF-11). `withinTimeAvailable` is false only
+        for a closest option that needs more time (SUG-17).
+      x-data-sensitivity: sensitive_health
+      x-food-item: true
+      type: object
+      additionalProperties: false
+      required:
+        [
+          itemId,
+          recipe,
+          servings,
+          kitchenMatch,
+          safety,
+          tradeOff,
+          adaptation,
+          variant,
+          withinTimeAvailable,
+        ]
+      properties:
+        itemId: { $ref: "#/components/schemas/Id" }
+        recipe: { $ref: "#/components/schemas/RecipeSummary" }
+        servings:
+          type: integer
+          minimum: 1
+        kitchenMatch: { $ref: "#/components/schemas/KitchenMatch" }
+        safety: { $ref: "#/components/schemas/RecipeSafety" }
+        tradeOff:
+          oneOf:
+            - $ref: "#/components/schemas/TradeOff"
+            - type: "null"
+        adaptation:
+          oneOf:
+            - $ref: "#/components/schemas/AdaptationInfo"
+            - type: "null"
+        variant:
+          oneOf:
+            - $ref: "#/components/schemas/AppliedVariant"
+            - type: "null"
+        withinTimeAvailable: { type: boolean }
+
+    SafetyConflict:
+      description: >-
+        SUG-17: why recipes were not safe, as a text line ("Udang (alergi
+        Kakak)"), never as a recipe card (QUESTIONS #28). From the Cek Aman
+        results of the recipes that were left out.
+      x-data-sensitivity: sensitive_health
+      type: object
+      additionalProperties: false
+      required: [memberId, rule, ingredient, componentPath]
+      properties:
+        memberId: { $ref: "#/components/schemas/Id" }
+        rule: { $ref: "#/components/schemas/SafetyRuleRef" }
+        ingredient: { $ref: "#/components/schemas/SafetyIngredientRef" }
+        componentPath:
+          type: array
+          items: { $ref: "#/components/schemas/SafetyComponentRef" }
+
+    NoSafeRecipe:
+      description: >-
+        SUG-17: no recipe passed Cek Aman for the selected eaters with these
+        inputs. `closestOptions` passed Cek Aman for every selected eater
+        (Safe or Check the label) but need missing ingredients or more time,
+        or are a checked variant; they are never Not safe recipes
+        (QUESTIONS #28). Either list may be empty.
+      x-data-sensitivity: sensitive_health
+      type: object
+      additionalProperties: false
+      required: [closestOptions, conflicts]
+      properties:
+        closestOptions:
+          type: array
+          maxItems: 3
+          items: { $ref: "#/components/schemas/Suggestion" }
+        conflicts:
+          type: array
+          maxItems: 3
+          items: { $ref: "#/components/schemas/SafetyConflict" }
+
+    SuggestionSet:
+      description: >-
+        One page of suggestions for a request (SUG-01). `items` has up to
+        three; fewer means fewer passed Cek Aman. Empty `items` with
+        `noSafeRecipe` set is the SUG-17 state; empty `items` without it and
+        `onlyWhatIHave` true means nothing fits with only what the kitchen
+        has (SUG-12). `poolExhausted` says "Show others" has nothing more.
+        `memberIds` are the eaters the set was checked for, and
+        `libraryVersion` the library it was ranked from (DAT-06).
+      x-data-sensitivity: sensitive_health
+      type: object
+      additionalProperties: false
+      required:
+        [
+          id,
+          page,
+          inputs,
+          memberIds,
+          items,
+          poolExhausted,
+          noSafeRecipe,
+          aiAvailability,
+          libraryVersion,
+          expiresAt,
+        ]
+      properties:
+        id: { $ref: "#/components/schemas/Id" }
+        page:
+          type: integer
+          minimum: 1
+        inputs: { $ref: "#/components/schemas/SuggestionRequest" }
+        memberIds:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: { $ref: "#/components/schemas/Id" }
+        items:
+          type: array
+          maxItems: 3
+          items: { $ref: "#/components/schemas/Suggestion" }
+        poolExhausted: { type: boolean }
+        noSafeRecipe:
+          oneOf:
+            - $ref: "#/components/schemas/NoSafeRecipe"
+            - type: "null"
+        aiAvailability: { $ref: "#/components/schemas/AiAvailability" }
+        libraryVersion: { type: string }
+        expiresAt:
+          description: Until when "Show others" works for this set.
+          type: string
+          format: date-time
+
+    # ------------------------------------------------------------ Meals and feedback
+    MealRating:
+      description: 'PRF-13 "Semua suka?": Ya, suka · Campur · Kurang suka.'
+      x-data-sensitivity: public
+      type: string
+      enum: ["yes", mixed, "no"]
+
+    MemberMealRating:
+      description: "PRF-13 per person: Suka · Biasa · Kurang suka."
+      x-data-sensitivity: public
+      type: string
+      enum: [liked, ok, disliked]
+
+    MemberMealFeedback:
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required: [memberId, rating]
+      properties:
+        memberId: { $ref: "#/components/schemas/Id" }
+        rating: { $ref: "#/components/schemas/MemberMealRating" }
+
+    MealFeedbackInput:
+      description: SRS 18.1 Feedback. `members` is optional per-person feedback, only for members who ate.
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required: [overall, members]
+      properties:
+        overall: { $ref: "#/components/schemas/MealRating" }
+        members:
+          type: array
+          maxItems: 50
+          items: { $ref: "#/components/schemas/MemberMealFeedback" }
+
+    CookedMealInput:
+      description: >-
+        SRS 18.1 Meal, minimal for V1 (QUESTIONS #19): what was cooked, when
+        (the household's local date), for which meal, who ate and how many
+        servings, and the feedback or null when skipped. No nutrition, no oil
+        or santan answer in V1 (QUESTIONS #14, #15).
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required:
+        [
+          recipeId,
+          recipeVersion,
+          adaptationId,
+          variantId,
+          substitutionIds,
+          cookedOn,
+          mealType,
+          eaterMemberIds,
+          servings,
+          feedback,
+        ]
+      properties:
+        recipeId: { $ref: "#/components/schemas/ReferenceId" }
+        recipeVersion:
+          type: integer
+          minimum: 1
+        adaptationId:
+          oneOf:
+            - $ref: "#/components/schemas/Id"
+            - type: "null"
+        variantId:
+          oneOf:
+            - $ref: "#/components/schemas/Id"
+            - type: "null"
+        substitutionIds:
+          type: array
+          maxItems: 20
+          uniqueItems: true
+          items: { $ref: "#/components/schemas/Id" }
+        cookedOn:
+          type: string
+          format: date
+        mealType: { $ref: "#/components/schemas/MealType" }
+        eaterMemberIds:
+          type: array
+          minItems: 1
+          maxItems: 50
+          uniqueItems: true
+          items: { $ref: "#/components/schemas/Id" }
+        servings:
+          type: integer
+          minimum: 1
+          maximum: 100
+        feedback:
+          oneOf:
+            - $ref: "#/components/schemas/MealFeedbackInput"
+            - type: "null"
+
+    CookedMeal:
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required:
+        [
+          id,
+          recipeId,
+          recipeVersion,
+          adaptationId,
+          variantId,
+          substitutionIds,
+          cookedOn,
+          mealType,
+          eaterMemberIds,
+          servings,
+          feedback,
+          createdAt,
+          updatedAt,
+        ]
+      properties:
+        id: { $ref: "#/components/schemas/Id" }
+        recipeId: { $ref: "#/components/schemas/ReferenceId" }
+        recipeVersion:
+          type: integer
+          minimum: 1
+        adaptationId:
+          oneOf:
+            - $ref: "#/components/schemas/Id"
+            - type: "null"
+        variantId:
+          oneOf:
+            - $ref: "#/components/schemas/Id"
+            - type: "null"
+        substitutionIds:
+          type: array
+          items: { $ref: "#/components/schemas/Id" }
+        cookedOn:
+          type: string
+          format: date
+        mealType: { $ref: "#/components/schemas/MealType" }
+        eaterMemberIds:
+          type: array
+          items: { $ref: "#/components/schemas/Id" }
+        servings:
+          type: integer
+          minimum: 1
+        feedback:
+          oneOf:
+            - $ref: "#/components/schemas/MealFeedbackInput"
+            - type: "null"
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    # ------------------------------------------------------------ Safety reports
+    SafetySubjectKind:
+      description: >-
+        SAF-02 kinds of food item a check is about, matching the Cek Aman
+        safety log. V1 reports concern `library_recipe`, `suggestion` and
+        `substitution`.
+      x-data-sensitivity: public
+      type: string
+      enum:
+        [
+          library_recipe,
+          suggestion,
+          substitution,
+          taste_tweak_fix,
+          planned_meal,
+          family_recipe,
+          leftover_remake,
+        ]
+
+    SafetyReportType:
+      description: What the user says is wrong (`report.type.*`).
+      x-data-sensitivity: public
+      type: string
+      enum: [marked_safe_wrong, marked_not_safe_wrong, check_label_wrong, wrong_ingredient, other]
+
+    SafetyReportSubject:
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required: [kind, recipeId, recipeVersion, adaptationId, substitutionId, variantId]
+      properties:
+        kind: { $ref: "#/components/schemas/SafetySubjectKind" }
+        recipeId: { $ref: "#/components/schemas/ReferenceId" }
+        recipeVersion:
+          type: integer
+          minimum: 1
+        adaptationId:
+          oneOf:
+            - $ref: "#/components/schemas/Id"
+            - type: "null"
+        substitutionId:
+          oneOf:
+            - $ref: "#/components/schemas/Id"
+            - type: "null"
+        variantId:
+          oneOf:
+            - $ref: "#/components/schemas/Id"
+            - type: "null"
+
+    SafetyReportCreate:
+      description: >-
+        SAF-15 with minimum data. `checkId`, `ruleSetVersion` and
+        `referenceVersion` come from the `RecipeSafety` the user saw (cached
+        ones included). The server keeps only the reported members' rule
+        types from that check, never names or rule wording. `note` is
+        optional; control characters are refused.
+      x-data-sensitivity: sensitive_health
+      type: object
+      additionalProperties: false
+      required:
+        [
+          subject,
+          checkId,
+          ruleSetVersion,
+          referenceVersion,
+          memberIds,
+          reportType,
+          ingredientLineId,
+          note,
+        ]
+      properties:
+        subject: { $ref: "#/components/schemas/SafetyReportSubject" }
+        checkId: { $ref: "#/components/schemas/Id" }
+        ruleSetVersion:
+          type: string
+          maxLength: 200
+        referenceVersion:
+          type: string
+          maxLength: 200
+        memberIds:
+          description: The members the report is about, from the check's members.
+          type: array
+          minItems: 1
+          maxItems: 50
+          uniqueItems: true
+          items: { $ref: "#/components/schemas/Id" }
+        reportType: { $ref: "#/components/schemas/SafetyReportType" }
+        ingredientLineId:
+          oneOf:
+            - $ref: "#/components/schemas/Id"
+            - type: "null"
+        note:
+          type: [string, "null"]
+          maxLength: 300
+
+    SafetyReportReceipt:
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required: [reportId, receivedAt]
+      properties:
+        reportId: { $ref: "#/components/schemas/Id" }
+        receivedAt:
+          type: string
+          format: date-time
+
+    # ------------------------------------------------------------ Admin (staff only)
+    StaffRole:
+      description: >-
+        Staff roles for the internal admin tool (INT-15, QUESTIONS #20).
+        Operations list the roles they allow in `x-staff-roles`. Staff never
+        read household data.
+      x-data-sensitivity: public
+      type: string
+      enum: [content_editor, safety_reviewer, nutrition_reviewer, admin]
+
+    DraftStatus:
+      description: >-
+        `draft` (being edited) → `in_review` (sent for the second person) →
+        `approved` (reference data waiting for a release) or `published`
+        (live) · `rejected` (back to the author) · `discarded`. The admin tool
+        treats an unknown value as not editable and not approvable.
+      x-data-sensitivity: public
+      type: string
+      enum: [draft, in_review, approved, rejected, published, discarded]
+
+    DraftOperation:
+      x-data-sensitivity: public
+      type: string
+      enum: [create, update, retire]
+
+    DraftDecision:
+      x-data-sensitivity: public
+      type: string
+      enum: [approve, reject]
+
+    DraftReview:
+      description: The second person's decision. `reviewerStaffId` is never the author.
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required: [decision, reviewerStaffId, decidedAt, note]
+      properties:
+        decision: { $ref: "#/components/schemas/DraftDecision" }
+        reviewerStaffId: { $ref: "#/components/schemas/Id" }
+        decidedAt:
+          type: string
+          format: date-time
+        note:
+          type: [string, "null"]
+          maxLength: 500
+
+    DraftRevisionInput:
+      x-data-sensitivity: public
+      type: object
+      additionalProperties: false
+      required: [expectedRevision]
+      properties:
+        expectedRevision:
+          description: The draft revision the staff member was shown (409 `draft_changed` when it moved).
+          type: integer
+          minimum: 1
+
+    DraftDecisionInput:
+      x-data-sensitivity: public
+      type: object
+      additionalProperties: false
+      required: [expectedRevision, decision, note]
+      properties:
+        expectedRevision:
+          type: integer
+          minimum: 1
+        decision: { $ref: "#/components/schemas/DraftDecision" }
+        note:
+          description: Required when rejecting.
+          type: [string, "null"]
+          maxLength: 500
+
+    IngredientDraftContent:
+      description: >-
+        One reference ingredient record exactly as `data/schema/ingredient.schema.json`
+        defines it (components, allergens, halal, diet, brand variants). The
+        server validates it against that schema; this contract does not
+        repeat the schema, so the two cannot drift. Values are entered by
+        the content team only.
+      x-data-sensitivity: public
+      x-json-schema: ingredient.schema.json
+      type: object
+      additionalProperties: true
+
+    IngredientDraftCreate:
+      description: >-
+        `ingredientId` names the ingredient (for `create`, the new ID, which
+        must equal `content.id`). `content` is required for `create` and
+        `update` and absent for `retire`.
+      x-data-sensitivity: public
+      type: object
+      additionalProperties: false
+      required: [operation, ingredientId]
+      properties:
+        operation: { $ref: "#/components/schemas/DraftOperation" }
+        ingredientId: { $ref: "#/components/schemas/ReferenceId" }
+        content: { $ref: "#/components/schemas/IngredientDraftContent" }
+
+    IngredientDraftUpdate:
+      x-data-sensitivity: public
+      type: object
+      additionalProperties: false
+      required: [expectedRevision, content]
+      properties:
+        expectedRevision:
+          type: integer
+          minimum: 1
+        content: { $ref: "#/components/schemas/IngredientDraftContent" }
+
+    IngredientDraft:
+      description: >-
+        A staff draft of one ingredient change, attributed and versioned
+        (DAT-06). `validationErrors` lists schema problems in `content`
+        (pointers into it); a draft with errors cannot be submitted.
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - operation
+        - ingredientId
+        - status
+        - revision
+        - content
+        - baseReferenceVersion
+        - validationErrors
+        - authorStaffId
+        - createdAt
+        - updatedAt
+        - submittedAt
+        - review
+        - publishedReferenceVersion
+      properties:
+        id: { $ref: "#/components/schemas/Id" }
+        operation: { $ref: "#/components/schemas/DraftOperation" }
+        ingredientId: { $ref: "#/components/schemas/ReferenceId" }
+        status: { $ref: "#/components/schemas/DraftStatus" }
+        revision:
+          type: integer
+          minimum: 1
+        content:
+          oneOf:
+            - $ref: "#/components/schemas/IngredientDraftContent"
+            - type: "null"
+        baseReferenceVersion:
+          description: The reference data version the draft was started from.
+          type: string
+        validationErrors:
+          type: array
+          items: { $ref: "#/components/schemas/FieldError" }
+        authorStaffId: { $ref: "#/components/schemas/Id" }
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        submittedAt:
+          type: [string, "null"]
+          format: date-time
+        review:
+          oneOf:
+            - $ref: "#/components/schemas/DraftReview"
+            - type: "null"
+        publishedReferenceVersion:
+          description: The release that published the change, once published.
+          type: [string, "null"]
+
+    IngredientDraftList:
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/IngredientDraft" }
+        nextCursor:
+          oneOf:
+            - $ref: "#/components/schemas/PageCursor"
+            - type: "null"
+
+    LibraryImage:
+      x-data-sensitivity: public
+      type: object
+      additionalProperties: false
+      required: [imageId, width, height]
+      properties:
+        imageId: { $ref: "#/components/schemas/Id" }
+        width:
+          type: integer
+          minimum: 1
+        height:
+          type: integer
+          minimum: 1
+
+    AdminIngredientLine:
+      description: >-
+        A recipe ingredient line as the content team writes it. A line
+        without `ingredientId` blocks submission (409
+        `recipe_ingredients_unresolved`), so every published line resolves.
+      x-data-sensitivity: public
+      type: object
+      additionalProperties: false
+      required: [lineId, ingredientId, rawName, quantity, isOptional, groupLabel]
+      properties:
+        lineId: { $ref: "#/components/schemas/Id" }
+        ingredientId:
+          oneOf:
+            - $ref: "#/components/schemas/ReferenceId"
+            - type: "null"
+        rawName:
+          type: string
+          minLength: 1
+          maxLength: 120
+        quantity: { $ref: "#/components/schemas/IngredientQuantity" }
+        isOptional: { type: boolean }
+        groupLabel:
+          oneOf:
+            - $ref: "#/components/schemas/LocalizedText"
+            - type: "null"
+
+    AdminSubstitution:
+      description: A content-team substitution for one line (SAF-11, CKM-09, QUESTIONS #21).
+      x-data-sensitivity: public
+      type: object
+      additionalProperties: false
+      required: [substitutionId, lineId, replacements, effectNote]
+      properties:
+        substitutionId: { $ref: "#/components/schemas/Id" }
+        lineId: { $ref: "#/components/schemas/Id" }
+        replacements:
+          type: array
+          minItems: 1
+          items: { $ref: "#/components/schemas/AdminIngredientLine" }
+        effectNote:
+          oneOf:
+            - $ref: "#/components/schemas/LocalizedText"
+            - type: "null"
+
+    AdminRecipeVariant:
+      description: >-
+        A content-team variant (SAF-11): a portion set aside before
+        `separateBeforeStepId`, without `omittedLineIds`. `label` may hold a
+        `{names}` placeholder the app fills in.
+      x-data-sensitivity: public
+      type: object
+      additionalProperties: false
+      required: [variantId, label, separateBeforeStepId, omittedLineIds]
+      properties:
+        variantId: { $ref: "#/components/schemas/Id" }
+        label: { $ref: "#/components/schemas/LocalizedText" }
+        separateBeforeStepId: { $ref: "#/components/schemas/Id" }
+        omittedLineIds:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: { $ref: "#/components/schemas/Id" }
+
+    AdminRecipeContent:
+      description: >-
+        LIB-03 recipe content as the content team edits it. There is no
+        halal field (derived by Cek Aman, LIB-05), no nutrition field
+        (calculated and reviewed, T-042), no tested flag (only a test record,
+        LIB-01) and no safety field.
+      x-data-sensitivity: public
+      type: object
+      additionalProperties: false
+      required:
+        - name
+        - description
+        - cuisine
+        - regionId
+        - mealTypes
+        - baseServings
+        - prepMinutes
+        - cookMinutes
+        - difficulty
+        - ingredients
+        - steps
+        - tags
+        - imageIds
+        - baseRecipeId
+        - substitutions
+        - variants
+      properties:
+        name: { $ref: "#/components/schemas/LocalizedText" }
+        description: { $ref: "#/components/schemas/LocalizedText" }
+        cuisine: { $ref: "#/components/schemas/Cuisine" }
+        regionId:
+          oneOf:
+            - $ref: "#/components/schemas/ReferenceId"
+            - type: "null"
+        mealTypes:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: { $ref: "#/components/schemas/MealType" }
+        baseServings:
+          type: integer
+          minimum: 1
+          maximum: 50
+        prepMinutes:
+          type: integer
+          minimum: 0
+        cookMinutes:
+          type: integer
+          minimum: 0
+        difficulty: { $ref: "#/components/schemas/RecipeDifficulty" }
+        ingredients:
+          type: array
+          minItems: 1
+          maxItems: 60
+          items: { $ref: "#/components/schemas/AdminIngredientLine" }
+        steps:
+          type: array
+          minItems: 1
+          maxItems: 60
+          items: { $ref: "#/components/schemas/RecipeStep" }
+        tags: { $ref: "#/components/schemas/RecipeTags" }
+        imageIds:
+          type: array
+          maxItems: 10
+          uniqueItems: true
+          items: { $ref: "#/components/schemas/Id" }
+        baseRecipeId:
+          description: For a regional variant, the base dish (LIB-04).
+          oneOf:
+            - $ref: "#/components/schemas/ReferenceId"
+            - type: "null"
+        substitutions:
+          type: array
+          items: { $ref: "#/components/schemas/AdminSubstitution" }
+        variants:
+          type: array
+          items: { $ref: "#/components/schemas/AdminRecipeVariant" }
+
+    AdminRecipeTestRecord:
+      description: >-
+        LIB-01, NFR-23: who tested the recipe, when, and which staff member
+        recorded it for which draft revision.
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required: [testedBy, testedOn, notes, recordedByStaffId, recordedAt, draftRevision]
+      properties:
+        testedBy:
+          type: string
+          minLength: 1
+          maxLength: 80
+        testedOn:
+          type: string
+          format: date
+        notes:
+          type: [string, "null"]
+          maxLength: 1000
+        recordedByStaffId: { $ref: "#/components/schemas/Id" }
+        recordedAt:
+          type: string
+          format: date-time
+        draftRevision:
+          type: integer
+          minimum: 1
+
+    RecipeTestRecordInput:
+      description: >-
+        The cook's test of the current draft revision. `testedOn` may not be
+        in the future (400).
+      x-data-sensitivity: public
+      type: object
+      additionalProperties: false
+      required: [expectedRevision, testedBy, testedOn]
+      properties:
+        expectedRevision:
+          type: integer
+          minimum: 1
+        testedBy:
+          type: string
+          minLength: 1
+          maxLength: 80
+        testedOn:
+          type: string
+          format: date
+        notes:
+          type: string
+          maxLength: 1000
+
+    RecipeDraftCreate:
+      description: Omit `recipeId` for a new recipe; give it for a new version of a published one.
+      x-data-sensitivity: public
+      type: object
+      additionalProperties: false
+      required: [content]
+      properties:
+        recipeId: { $ref: "#/components/schemas/ReferenceId" }
+        content: { $ref: "#/components/schemas/AdminRecipeContent" }
+
+    RecipeDraftUpdate:
+      x-data-sensitivity: public
+      type: object
+      additionalProperties: false
+      required: [expectedRevision, content]
+      properties:
+        expectedRevision:
+          type: integer
+          minimum: 1
+        content: { $ref: "#/components/schemas/AdminRecipeContent" }
+
+    RecipeDraft:
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - recipeId
+        - baseVersion
+        - status
+        - revision
+        - content
+        - validationErrors
+        - testRecord
+        - authorStaffId
+        - createdAt
+        - updatedAt
+        - submittedAt
+        - review
+        - publishedVersion
+      properties:
+        id: { $ref: "#/components/schemas/Id" }
+        recipeId:
+          description: The recipe this draft becomes or changes.
+          allOf:
+            - $ref: "#/components/schemas/ReferenceId"
+        baseVersion:
+          description: The published version a new version starts from; null for a new recipe.
+          type: [integer, "null"]
+          minimum: 1
+        status: { $ref: "#/components/schemas/DraftStatus" }
+        revision:
+          type: integer
+          minimum: 1
+        content: { $ref: "#/components/schemas/AdminRecipeContent" }
+        validationErrors:
+          type: array
+          items: { $ref: "#/components/schemas/FieldError" }
+        testRecord:
+          description: Null until recorded, and cleared when the content changes.
+          oneOf:
+            - $ref: "#/components/schemas/AdminRecipeTestRecord"
+            - type: "null"
+        authorStaffId: { $ref: "#/components/schemas/Id" }
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        submittedAt:
+          type: [string, "null"]
+          format: date-time
+        review:
+          oneOf:
+            - $ref: "#/components/schemas/DraftReview"
+            - type: "null"
+        publishedVersion:
+          type: [integer, "null"]
+          minimum: 1
+
+    RecipeDraftList:
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/RecipeDraft" }
+        nextCursor:
+          oneOf:
+            - $ref: "#/components/schemas/PageCursor"
+            - type: "null"
+
+    RecipeLifecycleStatus:
+      x-data-sensitivity: public
+      type: string
+      enum: [published, retired]
+
+    AdminRecipeVersion:
+      description: One published version, with its test record and approval (LIB-01, LIB-11, NFR-23).
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required:
+        [
+          version,
+          publishedAt,
+          authorStaffId,
+          approvedByStaffId,
+          testRecord,
+          content,
+          nutritionPerServing,
+        ]
+      properties:
+        version:
+          type: integer
+          minimum: 1
+        publishedAt:
+          type: string
+          format: date-time
+        authorStaffId: { $ref: "#/components/schemas/Id" }
+        approvedByStaffId: { $ref: "#/components/schemas/Id" }
+        testRecord: { $ref: "#/components/schemas/AdminRecipeTestRecord" }
+        content: { $ref: "#/components/schemas/AdminRecipeContent" }
+        nutritionPerServing: { $ref: "#/components/schemas/NutritionPerServing" }
+
+    AdminRecipe:
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required: [recipeId, status, currentVersion, name, versions, retiredAt, retiredByStaffId]
+      properties:
+        recipeId: { $ref: "#/components/schemas/ReferenceId" }
+        status: { $ref: "#/components/schemas/RecipeLifecycleStatus" }
+        currentVersion:
+          type: integer
+          minimum: 1
+        name: { $ref: "#/components/schemas/LocalizedText" }
+        versions:
+          description: Newest first.
+          type: array
+          minItems: 1
+          items: { $ref: "#/components/schemas/AdminRecipeVersion" }
+        retiredAt:
+          type: [string, "null"]
+          format: date-time
+        retiredByStaffId:
+          oneOf:
+            - $ref: "#/components/schemas/Id"
+            - type: "null"
+
+    AdminRecipeListItem:
+      x-data-sensitivity: public
+      type: object
+      additionalProperties: false
+      required: [recipeId, status, currentVersion, name, updatedAt]
+      properties:
+        recipeId: { $ref: "#/components/schemas/ReferenceId" }
+        status: { $ref: "#/components/schemas/RecipeLifecycleStatus" }
+        currentVersion:
+          type: integer
+          minimum: 1
+        name: { $ref: "#/components/schemas/LocalizedText" }
+        updatedAt:
+          type: string
+          format: date-time
+
+    AdminRecipeList:
+      x-data-sensitivity: public
+      type: object
+      additionalProperties: false
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/AdminRecipeListItem" }
+        nextCursor:
+          oneOf:
+            - $ref: "#/components/schemas/PageCursor"
+            - type: "null"
+
+    RecipeRetireInput:
+      x-data-sensitivity: public
+      type: object
+      additionalProperties: false
+      required: [expectedVersion, note]
+      properties:
+        expectedVersion:
+          type: integer
+          minimum: 1
+        note:
+          type: [string, "null"]
+          maxLength: 500
+
+    SafetyReportStatus:
+      description: Review state of a report. The admin tool treats an unknown value as `open`.
+      x-data-sensitivity: public
+      type: string
+      enum: [open, confirmed, rejected]
+
+    SafetyReportOutcome:
+      x-data-sensitivity: public
+      type: string
+      enum: [confirmed, rejected]
+
+    AdminRuleSummary:
+      description: A rule type, without its wording (QUESTIONS #40).
+      x-data-sensitivity: sensitive_health
+      type: object
+      additionalProperties: false
+      required: [type, allergen]
+      properties:
+        type: { $ref: "#/components/schemas/HardRuleType" }
+        allergen:
+          oneOf:
+            - $ref: "#/components/schemas/StandardAllergen"
+            - type: "null"
+
+    AdminReportMember:
+      description: >-
+        A reported member as staff see them: a label local to the report
+        (`m1`, `m2`), the logged result, rule types and findings. Never a
+        name, member ID or household ID. `status` is null when the logged
+        check is past its retention (DAT-05).
+      x-data-sensitivity: sensitive_health
+      type: object
+      additionalProperties: false
+      required: [memberLabel, status, rules, findings]
+      properties:
+        memberLabel:
+          type: string
+          pattern: "^m[0-9]{1,2}$"
+        status:
+          oneOf:
+            - $ref: "#/components/schemas/SafetyStatus"
+            - type: "null"
+        rules:
+          type: array
+          items: { $ref: "#/components/schemas/AdminRuleSummary" }
+        findings:
+          type: array
+          items: { $ref: "#/components/schemas/SafetyFinding" }
+
+    SafetyReportReview:
+      x-data-sensitivity: personal
+      type: object
+      additionalProperties: false
+      required: [outcome, reviewerStaffId, reviewedAt, note, fixReference]
+      properties:
+        outcome: { $ref: "#/components/schemas/SafetyReportOutcome" }
+        reviewerStaffId: { $ref: "#/components/schemas/Id" }
+        reviewedAt:
+          type: string
+          format: date-time
+        note:
+          type: [string, "null"]
+          maxLength: 500
+        fixReference:
+          description: What fixed it, for example an ingredient draft ID.
+          type: [string, "null"]
+          maxLength: 100
+
+    AdminSafetyReport:
+      x-data-sensitivity: sensitive_health
+      type: object
+      additionalProperties: false
+      required:
+        [
+          id,
+          receivedAt,
+          status,
+          subject,
+          reportType,
+          ingredient,
+          note,
+          ruleSetVersion,
+          referenceVersion,
+          members,
+          review,
+        ]
+      properties:
+        id: { $ref: "#/components/schemas/Id" }
+        receivedAt:
+          type: string
+          format: date-time
+        status: { $ref: "#/components/schemas/SafetyReportStatus" }
+        subject: { $ref: "#/components/schemas/SafetyReportSubject" }
+        reportType: { $ref: "#/components/schemas/SafetyReportType" }
+        ingredient:
+          oneOf:
+            - $ref: "#/components/schemas/SafetyIngredientRef"
+            - type: "null"
+        note:
+          type: [string, "null"]
+          maxLength: 300
+        ruleSetVersion: { type: string }
+        referenceVersion: { type: string }
+        members:
+          type: array
+          items: { $ref: "#/components/schemas/AdminReportMember" }
+        review:
+          oneOf:
+            - $ref: "#/components/schemas/SafetyReportReview"
+            - type: "null"
+
+    AdminSafetyReportList:
+      x-data-sensitivity: sensitive_health
+      type: object
+      additionalProperties: false
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/AdminSafetyReport" }
+        nextCursor:
+          oneOf:
+            - $ref: "#/components/schemas/PageCursor"
+            - type: "null"
+
+    SafetyReportReviewInput:
+      x-data-sensitivity: public
+      type: object
+      additionalProperties: false
+      required: [outcome, note, fixReference]
+      properties:
+        outcome: { $ref: "#/components/schemas/SafetyReportOutcome" }
+        note:
+          type: [string, "null"]
+          maxLength: 500
+        fixReference:
+          type: [string, "null"]
+          maxLength: 100

@@ -37,6 +37,15 @@ enum ErrorCode {
   idempotencyKeyReused._(r'idempotency_key_reused'),
   kitchenItemLimitReached._(r'kitchen_item_limit_reached'),
   ingredientSetLimitReached._(r'ingredient_set_limit_reached'),
+  adaptationExpired._(r'adaptation_expired'),
+  substitutionNotAvailable._(r'substitution_not_available'),
+  suggestionSetExpired._(r'suggestion_set_expired'),
+  draftChanged._(r'draft_changed'),
+  draftNotEditable._(r'draft_not_editable'),
+  secondPersonRequired._(r'second_person_required'),
+  recipeNotTested._(r'recipe_not_tested'),
+  recipeIngredientsUnresolved._(r'recipe_ingredients_unresolved'),
+  reportAlreadyReviewed._(r'report_already_reviewed'),
   rateLimited._(r'rate_limited'),
   rulesUnavailable._(r'rules_unavailable'),
   referenceDataUnavailable._(r'reference_data_unavailable'),
@@ -127,6 +136,15 @@ class ErrorCodeTypeTransformer {
         case r'idempotency_key_reused': return ErrorCode.idempotencyKeyReused;
         case r'kitchen_item_limit_reached': return ErrorCode.kitchenItemLimitReached;
         case r'ingredient_set_limit_reached': return ErrorCode.ingredientSetLimitReached;
+        case r'adaptation_expired': return ErrorCode.adaptationExpired;
+        case r'substitution_not_available': return ErrorCode.substitutionNotAvailable;
+        case r'suggestion_set_expired': return ErrorCode.suggestionSetExpired;
+        case r'draft_changed': return ErrorCode.draftChanged;
+        case r'draft_not_editable': return ErrorCode.draftNotEditable;
+        case r'second_person_required': return ErrorCode.secondPersonRequired;
+        case r'recipe_not_tested': return ErrorCode.recipeNotTested;
+        case r'recipe_ingredients_unresolved': return ErrorCode.recipeIngredientsUnresolved;
+        case r'report_already_reviewed': return ErrorCode.reportAlreadyReviewed;
         case r'rate_limited': return ErrorCode.rateLimited;
         case r'rules_unavailable': return ErrorCode.rulesUnavailable;
         case r'reference_data_unavailable': return ErrorCode.referenceDataUnavailable;
