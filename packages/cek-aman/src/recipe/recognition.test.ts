@@ -7,16 +7,40 @@ import type { RecipeIngredientInput } from "../types.js";
 import { deriveRecipeHalal, type RecipeLineInput } from "./halal.js";
 import { ingredientFromRecognition, type RecognitionOutput } from "./recognition.js";
 
-const recognized: RecognitionOutput = {
+/**
+ * Contract 0.3 `RecognizedItem` as generated (packages/contracts). Copied here
+ * because this package has no dependencies; the regression suite checks the
+ * generated type itself.
+ */
+interface ContractRecognizedItem {
+  id: string;
+  label: string;
+  ingredientId: string | null;
+  displayName: { id: string; en: string } | null;
+  confidence: "high" | "medium" | "low";
+  options: { ingredientId: string; displayName: { id: string; en: string } }[];
+  kitchenItemId: string | null;
+}
+
+/** The API matched the label to a verified, halal, allergen-free ingredient, unconfirmed. */
+const recognized: ContractRecognizedItem = {
+  id: "fx-recognized-1",
   label: "tahu",
+  ingredientId: "fx-plain",
+  displayName: { id: "Fiksi tahu", en: "Fiction tofu" },
   confidence: "high",
-  modelId: "fx-model-1",
-  proposedIngredientId: "fx-plain",
+  options: [{ ingredientId: "fx-plain", displayName: { id: "Fiksi", en: "Fiction" } }],
+  kitchenItemId: null,
 };
 
 describe("REC-06 recognized items enter Cek Aman unresolved", () => {
-  it("REC-06 keeps only the label, as the name shown, and drops confidence, model and proposed ID", () => {
-    expect(ingredientFromRecognition(recognized)).toEqual({ ingredientId: null, rawName: "tahu" });
+  it("REC-06 accepts the contract RecognizedItem as it is and drops its ingredientId, options, confidence and IDs", () => {
+    const asOutput: RecognitionOutput = recognized;
+    expect(ingredientFromRecognition(asOutput)).toEqual({ ingredientId: null, rawName: "tahu" });
+    expect(ingredientFromRecognition({ ...recognized, modelId: "fx-model-1" })).toEqual({
+      ingredientId: null,
+      rawName: "tahu",
+    });
   });
 
   it("REC-06 a missing, inherited or non-string label gives an empty name", () => {
@@ -37,7 +61,7 @@ describe("REC-06 recognized items enter Cek Aman unresolved", () => {
     expect(ingredientFromRecognition(null as unknown as RecognitionOutput).rawName).toBe("");
   });
 
-  it("REC-06 SAF-10 a recognized item that proposes a verified, halal, allergen-free ID is never safe", () => {
+  it("REC-06 SAF-10 a recognized item matched to a verified, halal, allergen-free ID is never safe", () => {
     const reference = [ing("fx-plain")];
     const result = evaluate({
       ...input({
@@ -55,20 +79,26 @@ describe("REC-06 recognized items enter Cek Aman unresolved", () => {
 
   it("REC-06 recognition fields cannot be put on an engine ingredient or a recipe line", () => {
     // @ts-expect-error REC-06: a recognized item is not an engine ingredient
-    const spread: RecipeIngredientInput = {
-      ...recognized,
-      ingredientId: "fx-plain",
-      rawName: "tahu",
-    };
+    const spread: RecipeIngredientInput = { ...recognized, rawName: "tahu" };
     const withConfidence: RecipeLineInput = {
       lineId: "l1",
       ingredientId: "fx-plain",
       // @ts-expect-error REC-06: a confidence never travels with a line
-      confidence: 1,
+      confidence: "high",
     };
-    // Even when forced past the types, the extra fields are not read.
+    // The converter's output wins over anything spread with it at run time.
+    const converted: RecipeIngredientInput = {
+      ...(recognized as object),
+      ...ingredientFromRecognition(recognized),
+    };
     const reference = [ing("fx-plain")];
     const members = [member("m", rules.halal())];
+    expect(
+      evaluate({ ...input({ reference, recipe: [], members }), ingredients: [converted] })
+        .perMember[0]!.status,
+    ).toBe("check_label");
+    // Forced past the types, the recognition fields themselves are not read; the
+    // ingredientId is, which is why only the converter may bring an item in.
     expect(
       evaluate({ ...input({ reference, recipe: [], members }), ingredients: [spread] }),
     ).toEqual(evaluate(input({ reference, recipe: ["fx-plain"], members })));

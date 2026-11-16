@@ -12,6 +12,7 @@ import {
   type RecognitionOutput,
 } from "@keluargamakan/cek-aman";
 
+import type { components } from "../../packages/contracts/src/generated/schema.js";
 import { fixtureMembers } from "../../data/fixtures/cek-aman/members.fixture.js";
 import {
   fixtureIngredients,
@@ -72,17 +73,34 @@ const labels: readonly string[] = [
   " ",
 ];
 
-/** One random recognized item: any label, confidence, model and proposed reference ID. */
+/** Contract `RecognizedItem`, as generated from openapi.yaml (unchanged from 0.2 to 0.3). */
+type RecognizedItem = components["schemas"]["RecognizedItem"];
+
+/**
+ * One random recognized item in the contract shape: any label, confidence, API
+ * name match (`ingredientId`), options and kitchen item, sometimes with an AI
+ * service `modelId` or a confidence outside the contract values.
+ */
 function recognition(): RecognitionOutput {
-  const item = {
+  const reference = (): { ingredientId: string; displayName: { id: string; en: string } } => ({
+    ingredientId: pick(fixtureIds),
+    displayName: { id: randomText(), en: randomText() },
+  });
+  const item: RecognizedItem = {
+    id: `fx-recognized-${Math.floor(next() * 1000)}`,
     label: next() < 0.7 ? pick(labels) : randomText(),
-    confidence: next() < 0.8 ? pick(confidences) : next() * 4 - 2,
-    modelId: next() < 0.5 ? pick(["fx-model-a", "fx-model-b", ""]) : randomText(),
+    ingredientId: next() < 0.7 ? pick(fixtureIds) : null,
+    displayName: next() < 0.5 ? { id: pick(labels), en: pick(labels) } : null,
+    confidence: pick(["high", "medium", "low"] as const),
+    options: Array.from({ length: Math.floor(next() * 4) }, reference),
+    kitchenItemId: next() < 0.3 ? `fx-kitchen-${Math.floor(next() * 100)}` : null,
   };
-  const proposal = next();
-  if (proposal < 0.6) return { ...item, proposedIngredientId: pick(fixtureIds) };
-  if (proposal < 0.8) return { ...item, proposedIngredientId: null };
-  return item;
+  // The contract type is accepted as it is, without a cast (REC-06).
+  const output: RecognitionOutput = item;
+  const extra = next();
+  if (extra < 0.3) return { ...output, confidence: pick(confidences) };
+  if (extra < 0.5) return { ...output, modelId: pick(["fx-model-a", "fx-model-b", ""]) };
+  return output;
 }
 
 /** Everything that decides safety, without the display name (the label is only ever shown). */
@@ -118,17 +136,41 @@ function smuggled(input: CekAmanInput, item: RecognitionOutput): CekAmanInput {
 }
 
 describe("REC-06 SAF-10 recognition output never changes an allergen or halal result", () => {
-  it("REC-06 SAF-10 property: any label, confidence, model or proposed ID gives the same decisions as a plain unresolved item", () => {
+  it("REC-06 the contract RecognizedItem cannot be spread into an engine input", () => {
+    const item: RecognizedItem = {
+      id: "fx-recognized-1",
+      label: "tahu",
+      ingredientId: "fx_tahu",
+      displayName: null,
+      confidence: "low",
+      options: [],
+      kitchenItemId: null,
+    };
+    // @ts-expect-error REC-06: recognition output is not an engine ingredient
+    const spread: CekAmanInput["ingredients"][number] = { ...item, rawName: item.label };
+    expect(spread.ingredientId).toBe("fx_tahu");
+    expect(ingredientFromRecognition(item)).toEqual({ ingredientId: null, rawName: "tahu" });
+  });
+
+  it("REC-06 SAF-10 property: any contract-shaped recognized item, its ingredientId included, gives the same decisions as a plain unresolved item", () => {
     for (let i = 0; i < ITERATIONS; i += 1) {
       const testCase = regressionCases[i % regressionCases.length]!;
       const a = recognition();
       const b = recognition();
-      const plain = withRecognized(toInput(testCase), { label: "", confidence: null, modelId: "" });
+      const plain = withRecognized(toInput(testCase), { label: "" });
       const baseline = decisions(evaluate(plain));
       const context = `${testCase.id} ${JSON.stringify([a, b])}`;
       expect(decisions(evaluate(withRecognized(toInput(testCase), a))), context).toEqual(baseline);
       expect(decisions(evaluate(withRecognized(toInput(testCase), b))), context).toEqual(baseline);
-      // On resolved ingredients too, extra recognition fields are never read.
+      // Spread at run time together with the converter's output, the item stays
+      // unresolved: the converter's ingredientId: null wins over the API's match.
+      const spreadWithConverter = {
+        ...toInput(testCase),
+        members: allMembers,
+        ingredients: [...toInput(testCase).ingredients, { ...a, ...ingredientFromRecognition(a) }],
+      } as unknown as CekAmanInput;
+      expect(decisions(evaluate(spreadWithConverter)), context).toEqual(baseline);
+      // On resolved ingredients too, the other recognition fields are never read.
       expect(evaluate(smuggled(plain, a)), context).toEqual(evaluate(plain));
     }
   });
