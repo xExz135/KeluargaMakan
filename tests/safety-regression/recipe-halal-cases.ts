@@ -222,4 +222,57 @@ export const recipeHalalCases: readonly RecipeHalalCase[] = [
     lines: [...base, ["fx_kecap_manis", "fx_brand_kecap_a", "fx_brand_kecap_c"]],
     expect: ["not_halal", "halal_not_halal"],
   },
+  // QA review T-025: further cases for SAF-06 ingredients, brands and line mixes.
+  {
+    id: "HAL-026",
+    requirements: ["LIB-05", "SAF-09", "KIT-05"],
+    title: "a recipe whose lines are all custom gives check_label",
+    lines: [null, null, null],
+    expect: ["check_label", "ingredient_unresolved"],
+  },
+  {
+    id: "HAL-027",
+    requirements: ["LIB-05", "SAF-07"],
+    title: "kecap manis with another ingredient's verified brand gives check_label",
+    lines: [...base, ["fx_kecap_manis", "fx_brand_tiram_a"]],
+    expect: ["check_label", "brand_unverified"],
+  },
+  {
+    id: "HAL-028",
+    requirements: ["LIB-05", "SAF-04", "SAF-07", "SAF-08"],
+    title: "three recorded kecap brands (halal, unverified, alcohol) give not_halal",
+    lines: [
+      ...base,
+      ["fx_kecap_manis", "fx_brand_kecap_a", "fx_brand_kecap_b", "fx_brand_kecap_c"],
+    ],
+    expect: ["not_halal", "halal_not_halal", "brand_unverified"],
+  },
+  {
+    id: "HAL-029",
+    requirements: ["LIB-05", "SAF-06", "SAF-07", "SAF-08"],
+    title: "gelatin with a recorded brand that has no verified data gives check_label",
+    lines: [...base, ["fx_gelatin", "fx_brand_kecap_a"]],
+    expect: ["check_label", "brand_unverified"],
+  },
+  {
+    id: "HAL-030",
+    requirements: ["LIB-05", "SAF-06", "SAF-07", "SAF-08"],
+    title: "bouillon with a recorded brand that has no verified data gives check_label",
+    lines: [...base, ["fx_kaldu_bubuk", "fx_brand_kecap_a"]],
+    expect: ["check_label", "brand_unverified", "components_unverified"],
+  },
+  {
+    id: "HAL-031",
+    requirements: ["LIB-05", "SAF-06", "SAF-08"],
+    title: "angciu and mirin with a verified halal kecap brand still give not_halal",
+    lines: [...base, ["fx_kecap_manis", "fx_brand_kecap_a"], "fx_mirin", "fx_angciu"],
+    expect: ["not_halal", "halal_not_halal"],
+  },
+  {
+    id: "HAL-032",
+    requirements: ["LIB-05", "SAF-09", "KIT-05"],
+    title: "custom lines around otherwise halal lines give check_label",
+    lines: [null, ...base, "fx_ayam", null],
+    expect: ["check_label", "ingredient_unresolved"],
+  },
 ];
