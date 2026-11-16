@@ -18,7 +18,7 @@ class LibraryApi {
 
   /// Get a library recipe image
   ///
-  /// The image bytes of a published recipe image (LIB-03, SUG-09). Recipe images are food photos from the content team, never photos of people. An image ID never changes its bytes, but an image can be withdrawn: the phone checks again with `If-None-Match` before each use (304 while it is current), a withdrawn or retired image answers 404, and the phone drops cached images that the current `libraryVersion` no longer uses. No JSON schema in this contract carries an image, a URL or a link.
+  /// The image bytes of a published recipe image (LIB-03, SUG-09). Recipe images are food photos from the content team, never photos of people. An image ID never changes its bytes, but an image can be withdrawn: the phone checks again with `If-None-Match` before each use (304 while it is current), a withdrawn or retired image answers 404, and the phone drops cached images that the current `libraryVersion` no longer uses. A phone without a connection still shows its cached copy, so an opened recipe works offline (CKM-07, AI-08). No JSON schema in this contract carries an image, a URL or a link.
   ///
   /// Note: This method returns the HTTP [Response].
   ///
@@ -62,7 +62,7 @@ class LibraryApi {
 
   /// Get a library recipe image
   ///
-  /// The image bytes of a published recipe image (LIB-03, SUG-09). Recipe images are food photos from the content team, never photos of people. An image ID never changes its bytes, but an image can be withdrawn: the phone checks again with `If-None-Match` before each use (304 while it is current), a withdrawn or retired image answers 404, and the phone drops cached images that the current `libraryVersion` no longer uses. No JSON schema in this contract carries an image, a URL or a link.
+  /// The image bytes of a published recipe image (LIB-03, SUG-09). Recipe images are food photos from the content team, never photos of people. An image ID never changes its bytes, but an image can be withdrawn: the phone checks again with `If-None-Match` before each use (304 while it is current), a withdrawn or retired image answers 404, and the phone drops cached images that the current `libraryVersion` no longer uses. A phone without a connection still shows its cached copy, so an opened recipe works offline (CKM-07, AI-08). No JSON schema in this contract carries an image, a URL or a link.
   ///
   /// Parameters:
   ///

@@ -93,7 +93,12 @@ info:
     client that cannot show the condition next to the badge shows Check the
     label, never a bare Safe. Consent never hides a Not safe result: a
     member whose consent is not `given` shows the neutral chip only in
-    place of Safe.
+    place of Safe. Until QUESTIONS #85 is decided, an unknown condition
+    kind hides the item, and a surface that cannot show a known condition
+    hides the item or shows Not safe "as written", never a Check the label
+    without a reason. The strict decoder hides an item whose `condition` is
+    missing or malformed, and no variant is served while
+    `safety.variantsServed` is false (until T-054 and T-055 ship).
 
 
     AI-written text (AI-01, SAF-10): adaptation change lines, trade-off
@@ -1387,7 +1392,9 @@ paths:
         withdrawn: the phone checks again with `If-None-Match` before each
         use (304 while it is current), a withdrawn or retired image answers
         404, and the phone drops cached images that the current
-        `libraryVersion` no longer uses. No JSON schema in this contract
+        `libraryVersion` no longer uses. A phone without a connection still
+        shows its cached copy, so an opened recipe works offline (CKM-07,
+        AI-08). No JSON schema in this contract
         carries an image, a URL or a link.
       security:
         - bearerAuth: []
@@ -1731,8 +1738,10 @@ paths:
         A report never changes a result on any phone. It may be queued
         offline, so `Idempotency-Key` is required; a replay returns the
         first receipt and does not count against the rate limit (429). The
-        note is optional and short; the app asks not to put personal
-        details in it, and staff only see a redacted copy.
+        note is opt-in and short; the app shows the warning against personal
+        details before the field. The raw note is never stored: the server
+        redacts it with deterministic rules on arrival, never through the AI
+        service, and keeps only the redacted copy.
       security:
         - bearerAuth: []
       x-permission: safety_report:write
@@ -4528,9 +4537,11 @@ components:
         assigns one (SAF-01). Clients render it and never compute, upgrade
         or default it. An unknown value means no result: the item is hidden,
         never shown as safe. A `safe` or `check_label` result that comes with
-        a `condition` holds only if the cook follows that condition: a client
-        that cannot show the condition next to the badge shows Check the
-        label, never a bare Safe (SAF-11, QUESTIONS #85).
+        a `condition` holds only if the cook follows that condition: a
+        surface that cannot show the condition next to the badge hides the
+        item, or shows the member as Not safe "as written" with the omitted
+        line as the reason; it never shows a bare Safe, and never a Check
+        the label without a reason (SAF-11, QUESTIONS #85).
       x-data-sensitivity: public
       type: string
       enum: [safe, not_safe, check_label]
@@ -4539,8 +4550,9 @@ components:
       description: >-
         `separate_portion`: the member's portion is set aside before a step
         and some ingredient lines never go into it (SAF-11). A client that
-        does not know the value shows Check the label for the member, never
-        a bare Safe.
+        does not know the value hides the item, as for an unknown status: it
+        never shows a bare Safe, and never a Check the label without a
+        reason.
       x-data-sensitivity: public
       type: string
       enum: [separate_portion]
@@ -4552,11 +4564,14 @@ components:
         `separateBeforeStepId`, and the ingredient lines `omittedLineIds`
         never go into it. Clients show the condition next to the member's
         badge on every surface (card, recipe screen, Mode Masak) and show
-        the separation at that step in Mode Masak. A client that cannot
-        show the condition next to the badge, or does not know `kind`, shows
-        Check the label for the member, never a bare Safe (QUESTIONS #85). A
-        cached result with a condition is reused only together with its
-        variant.
+        the separation at that step in Mode Masak. A client that does not
+        know `kind` hides the item. A surface that cannot show a known
+        condition next to the badge hides the item, or shows the member as
+        Not safe "as written" with the omitted line as the reason; never a
+        bare Safe, and never a Check the label without a reason (QUESTIONS
+        #85). The strict decoder hides the item when `omittedLineIds` is
+        missing, null or empty. A cached result with a condition is reused
+        only together with its variant.
       x-data-sensitivity: personal
       type: object
       additionalProperties: false
@@ -4735,12 +4750,14 @@ components:
         are, whatever the consent state, and the client logs such a pair as
         an error: consent never hides a Not safe result. A missing or
         unknown `rulesConsent` counts as not `given`. `condition` is set when
-        the result holds only if the cook follows a variant (SAF-11) and is
-        null for `not_safe`; a client that cannot show the condition next
-        to the badge shows Check the label, never a bare Safe (QUESTIONS
-        #85). A `safe` result with reasons, or a `not_safe` or
-        `check_label` result without any, is inconsistent and hides the
-        item.
+        the result holds only if the cook follows a variant (SAF-11). Only an
+        explicit `null` means "no condition": the strict decoder hides the
+        item when the `condition` key is missing or is not an object or
+        null, and when a `not_safe` result carries a condition. A surface
+        that cannot show a condition next to the badge hides the item or
+        shows Not safe "as written"; never a bare Safe (QUESTIONS #85). A
+        `safe` result with reasons, or a `not_safe` or `check_label` result
+        without any, is inconsistent and hides the item.
       x-data-sensitivity: sensitive_health
       type: object
       additionalProperties: false
@@ -4824,7 +4841,12 @@ components:
         Food items are read with a strict decoder that drops a bad item on
         its own (T-054, T-055). On an item with a `variant`, exactly the
         members in `variant.separatedMemberIds` carry that variant as their
-        `condition` (SAF-11).
+        `condition` (SAF-11). The strict decoder hides the item when the
+        members that carry a condition are not exactly
+        `variant.separatedMemberIds`, when a condition's `variantId` is not
+        `variant.variantId`, or when a member carries a condition on an item
+        without a `variant`; also on every `condition` rule of
+        `MemberSafetyResult` and `SafetyCondition`.
       x-data-sensitivity: sensitive_health
       type: object
       additionalProperties: false
@@ -5388,7 +5410,13 @@ components:
         Aman checked their portion without those lines, and each of them
         carries this variant as the `condition` of their result. The server
         only publishes variants whose omitted lines are first added at or
-        after the separation step (`AdminRecipeVariant`).
+        after the separation step (`AdminRecipeVariant`). Gate (security
+        review T-040 N1): no item with a variant is served (no `variant` on
+        a suggestion or recipe screen, no `variants` in a substitution list,
+        no variant among SUG-17 closest options) while the server setting
+        `safety.variantsServed` is false. It is false by default and stays
+        false until the app's strict food-item decoder ships (T-054,
+        T-055); T-044 and T-048 add the setting and its test.
       x-data-sensitivity: personal
       type: object
       additionalProperties: false
@@ -5548,7 +5576,8 @@ components:
         Aman result of the replacement ingredients only, for the selected
         eaters; an option that is Not safe for any of them is never listed.
         `recipeSafetyWith` is the whole recipe checked with this one option
-        applied, with its own `checkId` (SAF-14): the option resolves a
+        applied (for an adapted recipe, the adapted version with the option
+        applied), with its own `checkId` (SAF-14): the option resolves a
         member's conflict only when that member is not `not_safe` there.
         Clients draw whole-recipe badges only from a whole-recipe result
         (`recipeSafetyWith`, or `getRecipeDetail`), never from `safety`, and
@@ -5847,10 +5876,12 @@ components:
         or santan answer in V1 (QUESTIONS #14, #15). `ageMs` dates the
         record: the server places it at its own time minus `ageMs`, never
         later, as the kitchen sync does (KIT-16), and keeps the latest: a
-        copy dated before the stored one is ignored and the stored record is
-        returned, so a late older copy never overwrites a newer edit. An
-        `ageMs` below 0 or older than the server's limit (configured, at
-        most 30 days) answers 400. A member rated twice answers 400
+        copy dated before the stored one, or at the same time, is ignored and
+        the stored record is returned, so a late older copy never overwrites
+        a newer edit. An `ageMs` below 0 or older than the server's limit
+        (configured, at most 30 days) answers 400 `validation_failed` at
+        `/ageMs`, which is final: the phone drops that copy with a message
+        and does not retry it. A member rated twice answers 400
         `duplicate`.
       x-data-sensitivity: personal
       x-retention:
@@ -6042,15 +6073,21 @@ components:
         session household's, or is past its retention, answers 404
         `not_found`, and every member in `memberIds` must be in that check
         (400). Only the reported members' rule types are kept, never names
-        or rule wording. `note` is optional and empty by default; control
-        characters are refused, and staff only ever see a redacted copy.
+        or rule wording. `note` is opt-in: the app hides the field behind
+        "Tambah catatan" and shows the warning against personal details
+        before it, and it is empty by default (QUESTIONS #84 asks whether V1
+        needs it at all). Control characters are refused. The raw note is
+        never stored or logged: when the report arrives, the server redacts
+        it with deterministic local rules (never the AI service, AI-03) and
+        keeps only the redacted copy, which is all staff and the export
+        ever see.
       x-data-sensitivity: sensitive_health
       x-retention:
         period: report retention from configuration, no longer than DAT-05 (QUESTIONS #84)
-        memberDeletion: the member's rows (rule types, findings) are deleted, or the report is anonymized by dropping `checkId` and the household link; only a de-identified case stays for the regression suite
-        consentWithdrawal: the rule types and findings stored for that member are deleted
-        accountDeletion: the household link and `checkId` are dropped within the SET-08 window; only de-identified cases stay
-        export: the household's own reports are included in the export (SET-06, T-069)
+        memberDeletion: the member's rows (rule types, findings) and the report's note are deleted, or the report is anonymized by dropping `checkId`, the household link and the note; only a de-identified case with no note stays for the regression suite
+        consentWithdrawal: the rule types and findings stored for that member, and the report's note, are deleted
+        accountDeletion: the household link, `checkId` and the note are dropped within the SET-08 window; only de-identified cases with no note stay
+        export: the household's own reports are included in the export with the redacted note only (SET-06, T-069)
       type: object
       additionalProperties: false
       required: [subject, checkId, memberIds, reportType, ingredientLineId, note]
@@ -6751,12 +6788,25 @@ components:
         What the report is about, without household-held IDs. For an
         adapted recipe, `adaptedIngredients` is the snapshot of the adapted
         ingredient lines taken when the report was filed (adaptations
-        expire); empty otherwise.
+        expire); empty otherwise. A substitution is shown by its
+        `substitutionSource` and `replacementIngredients`, the snapshot of
+        its replacement lines taken when the report was filed, never by an
+        ID (AI substitution IDs are household-bound and expire); both are
+        null and empty when no substitution was used.
       x-data-sensitivity: public
       type: object
       additionalProperties: false
       required:
-        [kind, recipeId, recipeVersion, adapted, adaptedIngredients, substitutionId, variantId]
+        [
+          kind,
+          recipeId,
+          recipeVersion,
+          adapted,
+          adaptedIngredients,
+          substitutionSource,
+          replacementIngredients,
+          variantId,
+        ]
       properties:
         kind: { $ref: "#/components/schemas/SafetySubjectKind" }
         recipeId: { $ref: "#/components/schemas/ReferenceId" }
@@ -6767,11 +6817,15 @@ components:
         adaptedIngredients:
           type: array
           items: { $ref: "#/components/schemas/AdminIngredientRef" }
-        substitutionId:
+        substitutionSource:
           oneOf:
-            - $ref: "#/components/schemas/Id"
+            - $ref: "#/components/schemas/SubstitutionSource"
             - type: "null"
+        replacementIngredients:
+          type: array
+          items: { $ref: "#/components/schemas/AdminIngredientRef" }
         variantId:
+          description: The content-team variant, a content ID.
           oneOf:
             - $ref: "#/components/schemas/Id"
             - type: "null"
@@ -6827,15 +6881,16 @@ components:
         by a label (`AdminIngredientRef`), and `redactedNote` is the user's
         optional note after the server replaced phone numbers, email
         addresses, handles, links, the household's member names and custom
-        ingredient names with fixed labels. Versions come from the logged
-        check.
+        ingredient names with fixed labels, with deterministic rules when
+        the report arrived (never the AI service); the raw note was never
+        stored. Versions come from the logged check.
       x-data-sensitivity: sensitive_health
       x-retention:
         period: report retention from configuration, no longer than DAT-05 (QUESTIONS #84)
-        memberDeletion: the member's rows (rule types, findings) are deleted, or the report is anonymized by dropping `checkId` and the household link; only a de-identified case stays for the regression suite
-        consentWithdrawal: the rule types and findings stored for that member are deleted
-        accountDeletion: the household link and `checkId` are dropped within the SET-08 window; only de-identified cases stay
-        export: the household's own reports are included in the export (SET-06, T-069)
+        memberDeletion: the member's rows (rule types, findings) and the report's note are deleted, or the report is anonymized by dropping `checkId`, the household link and the note; only a de-identified case with no note stays for the regression suite
+        consentWithdrawal: the rule types and findings stored for that member, and the report's note, are deleted
+        accountDeletion: the household link, `checkId` and the note are dropped within the SET-08 window; only de-identified cases with no note stay
+        export: the household's own reports are included in the export with the redacted note only (SET-06, T-069)
       type: object
       additionalProperties: false
       required:

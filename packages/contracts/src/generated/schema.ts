@@ -686,7 +686,7 @@ export interface paths {
         };
         /**
          * Get a library recipe image
-         * @description The image bytes of a published recipe image (LIB-03, SUG-09). Recipe images are food photos from the content team, never photos of people. An image ID never changes its bytes, but an image can be withdrawn: the phone checks again with `If-None-Match` before each use (304 while it is current), a withdrawn or retired image answers 404, and the phone drops cached images that the current `libraryVersion` no longer uses. No JSON schema in this contract carries an image, a URL or a link.
+         * @description The image bytes of a published recipe image (LIB-03, SUG-09). Recipe images are food photos from the content team, never photos of people. An image ID never changes its bytes, but an image can be withdrawn: the phone checks again with `If-None-Match` before each use (304 while it is current), a withdrawn or retired image answers 404, and the phone drops cached images that the current `libraryVersion` no longer uses. A phone without a connection still shows its cached copy, so an opened recipe works offline (CKM-07, AI-08). No JSON schema in this contract carries an image, a URL or a link.
          */
         get: operations["getLibraryImage"];
         put?: never;
@@ -820,7 +820,7 @@ export interface paths {
         put?: never;
         /**
          * Report a wrong Cek Aman result
-         * @description From the recipe screen (SAF-15). The report names the recipe, the check it is about (`checkId`), the members it concerns and what is wrong. The server takes the rule set and data versions, the result and the rule types from its own log of that check (SAF-14), never from the phone. A `checkId` of another household, or one past its retention, answers 404 `not_found`; a member who is not in the check answers 400. Only the members' rule types are kept, never their names, and the content team reviews the report in the admin queue. A report never changes a result on any phone. It may be queued offline, so `Idempotency-Key` is required; a replay returns the first receipt and does not count against the rate limit (429). The note is optional and short; the app asks not to put personal details in it, and staff only see a redacted copy.
+         * @description From the recipe screen (SAF-15). The report names the recipe, the check it is about (`checkId`), the members it concerns and what is wrong. The server takes the rule set and data versions, the result and the rule types from its own log of that check (SAF-14), never from the phone. A `checkId` of another household, or one past its retention, answers 404 `not_found`; a member who is not in the check answers 400. Only the members' rule types are kept, never their names, and the content team reviews the report in the admin queue. A report never changes a result on any phone. It may be queued offline, so `Idempotency-Key` is required; a replay returns the first receipt and does not count against the rate limit (429). The note is opt-in and short; the app shows the warning against personal details before the field. The raw note is never stored: the server redacts it with deterministic rules on arrival, never through the AI service, and keeps only the redacted copy.
          */
         post: operations["createSafetyReport"];
         delete?: never;
@@ -1965,16 +1965,16 @@ export interface components {
             memberIds: components["schemas"]["Id"][];
         };
         /**
-         * @description SAF-04 per-member result from Cek Aman, the only component that assigns one (SAF-01). Clients render it and never compute, upgrade or default it. An unknown value means no result: the item is hidden, never shown as safe. A `safe` or `check_label` result that comes with a `condition` holds only if the cook follows that condition: a client that cannot show the condition next to the badge shows Check the label, never a bare Safe (SAF-11, QUESTIONS #85).
+         * @description SAF-04 per-member result from Cek Aman, the only component that assigns one (SAF-01). Clients render it and never compute, upgrade or default it. An unknown value means no result: the item is hidden, never shown as safe. A `safe` or `check_label` result that comes with a `condition` holds only if the cook follows that condition: a surface that cannot show the condition next to the badge hides the item, or shows the member as Not safe "as written" with the omitted line as the reason; it never shows a bare Safe, and never a Check the label without a reason (SAF-11, QUESTIONS #85).
          * @enum {string}
          */
         SafetyStatus: "safe" | "not_safe" | "check_label";
         /**
-         * @description `separate_portion`: the member's portion is set aside before a step and some ingredient lines never go into it (SAF-11). A client that does not know the value shows Check the label for the member, never a bare Safe.
+         * @description `separate_portion`: the member's portion is set aside before a step and some ingredient lines never go into it (SAF-11). A client that does not know the value hides the item, as for an unknown status: it never shows a bare Safe, and never a Check the label without a reason.
          * @enum {string}
          */
         SafetyConditionKind: "separate_portion";
-        /** @description SAF-11: the member's result holds only if the cook follows this. For `separate_portion`, the member's portion is set aside before `separateBeforeStepId`, and the ingredient lines `omittedLineIds` never go into it. Clients show the condition next to the member's badge on every surface (card, recipe screen, Mode Masak) and show the separation at that step in Mode Masak. A client that cannot show the condition next to the badge, or does not know `kind`, shows Check the label for the member, never a bare Safe (QUESTIONS #85). A cached result with a condition is reused only together with its variant. */
+        /** @description SAF-11: the member's result holds only if the cook follows this. For `separate_portion`, the member's portion is set aside before `separateBeforeStepId`, and the ingredient lines `omittedLineIds` never go into it. Clients show the condition next to the member's badge on every surface (card, recipe screen, Mode Masak) and show the separation at that step in Mode Masak. A client that does not know `kind` hides the item. A surface that cannot show a known condition next to the badge hides the item, or shows the member as Not safe "as written" with the omitted line as the reason; never a bare Safe, and never a Check the label without a reason (QUESTIONS #85). The strict decoder hides the item when `omittedLineIds` is missing, null or empty. A cached result with a condition is reused only together with its variant. */
         SafetyCondition: {
             kind: components["schemas"]["SafetyConditionKind"];
             variantId: components["schemas"]["Id"];
@@ -2027,7 +2027,7 @@ export interface components {
             brand: components["schemas"]["SafetyBrandRef"] | null;
             detail: string | null;
         };
-        /** @description One selected member's Cek Aman result, by member ID only, never a name (SAF-04, SAF-05). `rulesConsent` is the member's health-data consent state when the check ran (QUESTIONS #36, #48, #52). When it is not `given`, the member's rules were not checked: a `safe` status is shown as the neutral "rules not saved" or "not filled in" chip, never as Safe. `not_safe` and `check_label` are always shown as they are, whatever the consent state, and the client logs such a pair as an error: consent never hides a Not safe result. A missing or unknown `rulesConsent` counts as not `given`. `condition` is set when the result holds only if the cook follows a variant (SAF-11) and is null for `not_safe`; a client that cannot show the condition next to the badge shows Check the label, never a bare Safe (QUESTIONS #85). A `safe` result with reasons, or a `not_safe` or `check_label` result without any, is inconsistent and hides the item. */
+        /** @description One selected member's Cek Aman result, by member ID only, never a name (SAF-04, SAF-05). `rulesConsent` is the member's health-data consent state when the check ran (QUESTIONS #36, #48, #52). When it is not `given`, the member's rules were not checked: a `safe` status is shown as the neutral "rules not saved" or "not filled in" chip, never as Safe. `not_safe` and `check_label` are always shown as they are, whatever the consent state, and the client logs such a pair as an error: consent never hides a Not safe result. A missing or unknown `rulesConsent` counts as not `given`. `condition` is set when the result holds only if the cook follows a variant (SAF-11). Only an explicit `null` means "no condition": the strict decoder hides the item when the `condition` key is missing or is not an object or null, and when a `not_safe` result carries a condition. A surface that cannot show a condition next to the badge hides the item or shows Not safe "as written"; never a bare Safe (QUESTIONS #85). A `safe` result with reasons, or a `not_safe` or `check_label` result without any, is inconsistent and hides the item. */
         MemberSafetyResult: {
             memberId: components["schemas"]["Id"];
             rulesConsent: components["schemas"]["RulesConsentStatus"];
@@ -2055,7 +2055,7 @@ export interface components {
             /** @description The ingredients behind `not_halal` or `check_label`; empty for `halal`. */
             findings: components["schemas"]["SafetyFinding"][];
         };
-        /** @description The completed Cek Aman result for one food item (SAF-02). Required on every food item the API returns: an item without one is never returned. `members` holds exactly the selected eaters, in the order of the selection, and nobody else (PRF-11). `checkId` names the logged check with its rule set and data versions (SAF-14, DAT-06); a wrong-result report quotes it. The phone may cache the result with the recipe (CKM-07) and must check again when any version changes or a selected member's rules or consent change. Clients check that `members` holds exactly the eaters they asked for (the member IDs of the selection; for `whole_family`, the household's profiles), each once: a missing, extra or repeated member, or an unknown status, hides that item, never the other items on the page. Food items are read with a strict decoder that drops a bad item on its own (T-054, T-055). On an item with a `variant`, exactly the members in `variant.separatedMemberIds` carry that variant as their `condition` (SAF-11). */
+        /** @description The completed Cek Aman result for one food item (SAF-02). Required on every food item the API returns: an item without one is never returned. `members` holds exactly the selected eaters, in the order of the selection, and nobody else (PRF-11). `checkId` names the logged check with its rule set and data versions (SAF-14, DAT-06); a wrong-result report quotes it. The phone may cache the result with the recipe (CKM-07) and must check again when any version changes or a selected member's rules or consent change. Clients check that `members` holds exactly the eaters they asked for (the member IDs of the selection; for `whole_family`, the household's profiles), each once: a missing, extra or repeated member, or an unknown status, hides that item, never the other items on the page. Food items are read with a strict decoder that drops a bad item on its own (T-054, T-055). On an item with a `variant`, exactly the members in `variant.separatedMemberIds` carry that variant as their `condition` (SAF-11). The strict decoder hides the item when the members that carry a condition are not exactly `variant.separatedMemberIds`, when a condition's `variantId` is not `variant.variantId`, or when a member carries a condition on an item without a `variant`; also on every `condition` rule of `MemberSafetyResult` and `SafetyCondition`. */
         RecipeSafety: {
             checkId: components["schemas"]["Id"];
             /** Format: date-time */
@@ -2269,7 +2269,7 @@ export interface components {
             /** Format: date-time */
             expiresAt: string | null;
         };
-        /** @description SAF-11: a content-team variant in use, for example "Pisahkan porsi {names} sebelum menambah terasi". The app fills `{names}` from `separatedMemberIds`; those members' portion is set aside before `separateBeforeStepId`, and the lines in `omittedLineIds` never go into it, so Mode Masak can say so at each step that adds one. Cek Aman checked their portion without those lines, and each of them carries this variant as the `condition` of their result. The server only publishes variants whose omitted lines are first added at or after the separation step (`AdminRecipeVariant`). */
+        /** @description SAF-11: a content-team variant in use, for example "Pisahkan porsi {names} sebelum menambah terasi". The app fills `{names}` from `separatedMemberIds`; those members' portion is set aside before `separateBeforeStepId`, and the lines in `omittedLineIds` never go into it, so Mode Masak can say so at each step that adds one. Cek Aman checked their portion without those lines, and each of them carries this variant as the `condition` of their result. The server only publishes variants whose omitted lines are first added at or after the separation step (`AdminRecipeVariant`). Gate (security review T-040 N1): no item with a variant is served (no `variant` on a suggestion or recipe screen, no `variants` in a substitution list, no variant among SUG-17 closest options) while the server setting `safety.variantsServed` is false. It is false by default and stays false until the app's strict food-item decoder ships (T-054, T-055); T-044 and T-048 add the setting and its test. */
         AppliedVariant: {
             variantId: components["schemas"]["Id"];
             label: components["schemas"]["LocalizedText"];
@@ -2321,7 +2321,7 @@ export interface components {
          * @enum {string}
          */
         SubstitutionSource: "content_team" | "ai";
-        /** @description One substitution for an ingredient line (CKM-09). `safety` is the Cek Aman result of the replacement ingredients only, for the selected eaters; an option that is Not safe for any of them is never listed. `recipeSafetyWith` is the whole recipe checked with this one option applied, with its own `checkId` (SAF-14): the option resolves a member's conflict only when that member is not `not_safe` there. Clients draw whole-recipe badges only from a whole-recipe result (`recipeSafetyWith`, or `getRecipeDetail`), never from `safety`, and show several options used together only after `getRecipeDetail` returns their combined result (QUESTIONS #83). Quantities are for the item's servings. */
+        /** @description One substitution for an ingredient line (CKM-09). `safety` is the Cek Aman result of the replacement ingredients only, for the selected eaters; an option that is Not safe for any of them is never listed. `recipeSafetyWith` is the whole recipe checked with this one option applied (for an adapted recipe, the adapted version with the option applied), with its own `checkId` (SAF-14): the option resolves a member's conflict only when that member is not `not_safe` there. Clients draw whole-recipe badges only from a whole-recipe result (`recipeSafetyWith`, or `getRecipeDetail`), never from `safety`, and show several options used together only after `getRecipeDetail` returns their combined result (QUESTIONS #83). Quantities are for the item's servings. */
         SubstitutionOption: {
             substitutionId: components["schemas"]["Id"];
             lineId: components["schemas"]["Id"];
@@ -2423,7 +2423,7 @@ export interface components {
             overall: components["schemas"]["MealRating"];
             members: components["schemas"]["MemberMealFeedback"][];
         };
-        /** @description SRS 18.1 Meal, minimal for V1 (QUESTIONS #19): what was cooked, when (the household's local date), for which meal, who ate and how many servings, and the feedback or null when skipped. No nutrition, no oil or santan answer in V1 (QUESTIONS #14, #15). `ageMs` dates the record: the server places it at its own time minus `ageMs`, never later, as the kitchen sync does (KIT-16), and keeps the latest: a copy dated before the stored one is ignored and the stored record is returned, so a late older copy never overwrites a newer edit. An `ageMs` below 0 or older than the server's limit (configured, at most 30 days) answers 400. A member rated twice answers 400 `duplicate`. */
+        /** @description SRS 18.1 Meal, minimal for V1 (QUESTIONS #19): what was cooked, when (the household's local date), for which meal, who ate and how many servings, and the feedback or null when skipped. No nutrition, no oil or santan answer in V1 (QUESTIONS #14, #15). `ageMs` dates the record: the server places it at its own time minus `ageMs`, never later, as the kitchen sync does (KIT-16), and keeps the latest: a copy dated before the stored one, or at the same time, is ignored and the stored record is returned, so a late older copy never overwrites a newer edit. An `ageMs` below 0 or older than the server's limit (configured, at most 30 days) answers 400 `validation_failed` at `/ageMs`, which is final: the phone drops that copy with a message and does not retry it. A member rated twice answers 400 `duplicate`. */
         CookedMealInput: {
             /** @description Milliseconds from the edit to sending, measured on the phone (as `KitchenChange.ageMs`). */
             ageMs: number;
@@ -2478,7 +2478,7 @@ export interface components {
             substitutionId: components["schemas"]["Id"] | null;
             variantId: components["schemas"]["Id"] | null;
         };
-        /** @description SAF-15 with minimum data. `checkId` is the `RecipeSafety.checkId` the user saw (cached ones included). The server takes the rule set and data versions, the result and the members' rule types from its own logged check, never from the phone: a `checkId` that is not the session household's, or is past its retention, answers 404 `not_found`, and every member in `memberIds` must be in that check (400). Only the reported members' rule types are kept, never names or rule wording. `note` is optional and empty by default; control characters are refused, and staff only ever see a redacted copy. */
+        /** @description SAF-15 with minimum data. `checkId` is the `RecipeSafety.checkId` the user saw (cached ones included). The server takes the rule set and data versions, the result and the members' rule types from its own logged check, never from the phone: a `checkId` that is not the session household's, or is past its retention, answers 404 `not_found`, and every member in `memberIds` must be in that check (400). Only the reported members' rule types are kept, never names or rule wording. `note` is opt-in: the app hides the field behind "Tambah catatan" and shows the warning against personal details before it, and it is empty by default (QUESTIONS #84 asks whether V1 needs it at all). Control characters are refused. The raw note is never stored or logged: when the report arrives, the server redacts it with deterministic local rules (never the AI service, AI-03) and keeps only the redacted copy, which is all staff and the export ever see. */
         SafetyReportCreate: {
             subject: components["schemas"]["SafetyReportSubject"];
             /** @description Household-bound (see Conventions). */
@@ -2736,14 +2736,16 @@ export interface components {
             brand: components["schemas"]["SafetyBrandRef"] | null;
             detail: string | null;
         };
-        /** @description What the report is about, without household-held IDs. For an adapted recipe, `adaptedIngredients` is the snapshot of the adapted ingredient lines taken when the report was filed (adaptations expire); empty otherwise. */
+        /** @description What the report is about, without household-held IDs. For an adapted recipe, `adaptedIngredients` is the snapshot of the adapted ingredient lines taken when the report was filed (adaptations expire); empty otherwise. A substitution is shown by its `substitutionSource` and `replacementIngredients`, the snapshot of its replacement lines taken when the report was filed, never by an ID (AI substitution IDs are household-bound and expire); both are null and empty when no substitution was used. */
         AdminReportSubject: {
             kind: components["schemas"]["SafetySubjectKind"];
             recipeId: components["schemas"]["ReferenceId"];
             recipeVersion: number;
             adapted: boolean;
             adaptedIngredients: components["schemas"]["AdminIngredientRef"][];
-            substitutionId: components["schemas"]["Id"] | null;
+            substitutionSource: components["schemas"]["SubstitutionSource"] | null;
+            replacementIngredients: components["schemas"]["AdminIngredientRef"][];
+            /** @description The content-team variant, a content ID. */
             variantId: components["schemas"]["Id"] | null;
         };
         /** @description A reported member as staff see them: a label local to the report (`m1`, `m2`), the logged result, rule types and findings. Never a name, member ID or household ID. `status` is null when the logged check is past its retention (DAT-05). */
@@ -2762,7 +2764,7 @@ export interface components {
             /** @description What fixed it, for example an ingredient draft ID. */
             fixReference: string | null;
         };
-        /** @description A report in the staff queue (SAF-15). Staff never see household-typed text verbatim (QUESTIONS #84): custom ingredient names are replaced by a label (`AdminIngredientRef`), and `redactedNote` is the user's optional note after the server replaced phone numbers, email addresses, handles, links, the household's member names and custom ingredient names with fixed labels. Versions come from the logged check. */
+        /** @description A report in the staff queue (SAF-15). Staff never see household-typed text verbatim (QUESTIONS #84): custom ingredient names are replaced by a label (`AdminIngredientRef`), and `redactedNote` is the user's optional note after the server replaced phone numbers, email addresses, handles, links, the household's member names and custom ingredient names with fixed labels, with deterministic rules when the report arrived (never the AI service); the raw note was never stored. Versions come from the logged check. */
         AdminSafetyReport: {
             id: components["schemas"]["Id"];
             /** Format: date-time */

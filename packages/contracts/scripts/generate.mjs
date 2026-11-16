@@ -152,6 +152,7 @@ function reachableComponents(spec, roots) {
 }
 
 const ADMIN_TAG = "Admin";
+const ADMIN_SCHEMAS_BY_NAME = ["StaffRole"];
 const METHODS = ["get", "put", "post", "patch", "delete"];
 
 /** The spec without the staff-only admin API (see the header comment). */
@@ -183,6 +184,9 @@ export function mobileSpec(source) {
     const [, , kind, name] = ref.split("/");
     delete spec.components[kind][name];
   }
+  // Named only by the `x-staff-roles` extension, so reachability cannot see
+  // it (security review T-040 N5).
+  for (const name of ADMIN_SCHEMAS_BY_NAME) delete spec.components.schemas[name];
   return spec;
 }
 

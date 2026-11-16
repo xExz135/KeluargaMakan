@@ -59,10 +59,10 @@ describe("T-040 security review fixes", () => {
       "SafetyCondition",
       "MemberSafetyResult",
     ]) {
-      expect(flat(schema(name).description), name).toMatch(/Check the label/);
-      expect(flat(schema(name).description), name).toMatch(/never a bare Safe/);
+      expect(flat(schema(name).description), name).toMatch(/hides the item/);
+      expect(flat(schema(name).description), name).toMatch(/never (shows )?a bare Safe/);
     }
-    expect(info).toMatch(/never a bare Safe/);
+    expect(info).toMatch(/never (shows )?a bare Safe/);
     expect(flat(schema("SafetyCondition").description)).toMatch(
       /reused only together with its variant/,
     );
@@ -256,5 +256,85 @@ describe("T-040 security review fixes", () => {
     expect(flat(range.description)).toMatch(/treats a range with `low >= high` as `unavailable`/);
     const example = range["example"] as { low: number; high: number };
     expect(example.low).toBeLessThan(example.high);
+  });
+});
+
+describe("T-040 security re-check fixes", () => {
+  it("N1 the strict decoder hides an item whose condition is missing or malformed", () => {
+    const member = flat(schema("MemberSafetyResult").description);
+    expect(member).toMatch(/Only an explicit `null` means "no condition"/);
+    expect(member).toMatch(
+      /hides the item when the `condition` key is missing or is not an object/,
+    );
+    expect(member).toMatch(/when a `not_safe` result carries a condition/);
+    expect(flat(schema("SafetyCondition").description)).toMatch(
+      /hides the item when `omittedLineIds` is missing, null or empty/,
+    );
+    const recipe = flat(schema("RecipeSafety").description);
+    expect(recipe).toMatch(
+      /members that carry a condition are not exactly `variant.separatedMemberIds`/,
+    );
+    expect(recipe).toMatch(/condition's `variantId` is not `variant.variantId`/);
+    expect(recipe).toMatch(/a condition on an item without a `variant`/);
+  });
+
+  it("N1 no variant is served until the strict decoder ships, behind a named setting", () => {
+    const gate = flat(schema("AppliedVariant").description);
+    expect(gate).toMatch(/while the server setting `safety.variantsServed` is false/);
+    expect(gate).toMatch(/false by default/);
+    expect(gate).toMatch(/T-054, T-055/);
+    expect(gate).toMatch(/T-044 and T-048/);
+    expect(info).toMatch(/`safety.variantsServed`/);
+  });
+
+  it("N2 an unknown condition hides the item; never a Check the label without a reason", () => {
+    expect(flat(schema("SafetyConditionKind").description)).toMatch(
+      /does not know the value hides the item/,
+    );
+    for (const name of ["SafetyStatus", "SafetyCondition"]) {
+      const text = flat(schema(name).description);
+      expect(text, name).toMatch(/Not safe "as written"/);
+      expect(text, name).toMatch(/never a Check the label without a reason/);
+    }
+  });
+
+  it("N3 the note is opt-in, redacted on arrival without AI, and only the redacted copy is kept", () => {
+    const report = flat(schema("SafetyReportCreate").description);
+    expect(report).toMatch(/`note` is opt-in/);
+    expect(report).toMatch(/Tambah catatan/);
+    expect(report).toMatch(/raw note is never stored or logged/);
+    expect(report).toMatch(/deterministic local rules \(never the AI service, AI-03\)/);
+    expect(report).toMatch(/keeps only the redacted copy/);
+    for (const name of ["SafetyReportCreate", "AdminSafetyReport"]) {
+      const retention = ext(name)["x-retention"] as Record<string, string>;
+      for (const key of ["memberDeletion", "consentWithdrawal", "accountDeletion"]) {
+        expect(retention[key], `${name} ${key}`).toMatch(/note/);
+      }
+      expect(retention["export"], name).toMatch(/redacted note only/);
+    }
+  });
+
+  it("N4 the staff subject shows a substitution as a snapshot, never by its ID", () => {
+    expect(props("AdminReportSubject")).not.toContain("substitutionId");
+    expect(props("AdminReportSubject")).toEqual(
+      expect.arrayContaining(["substitutionSource", "replacementIngredients"]),
+    );
+    expect(schema("AdminReportSubject").properties?.replacementIngredients?.items?.$ref).toBe(
+      "#/components/schemas/AdminIngredientRef",
+    );
+  });
+
+  it("M1 L4 L8 notes: adapted recipes, ties and too-old meals, offline images", () => {
+    expect(flat(schema("SubstitutionOption").description)).toMatch(
+      /for an adapted recipe, the adapted version with the option applied/,
+    );
+    const meal = flat(schema("CookedMealInput").description);
+    expect(meal).toMatch(/or at the same time, is ignored/);
+    expect(meal).toMatch(
+      /which is final: the phone drops that copy with a message and does not retry/,
+    );
+    expect(flat(operation("getLibraryImage").operation.description)).toMatch(
+      /still shows its cached copy/,
+    );
   });
 });

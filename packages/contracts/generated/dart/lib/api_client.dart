@@ -507,8 +507,6 @@ class ApiClient {
           return SoftPreferencesInput.fromJson(value);
         case 'SpiceLevel':
           return SpiceLevelTypeTransformer().decode(value);
-        case 'StaffRole':
-          return StaffRoleTypeTransformer().decode(value);
         case 'StandardAllergen':
           return StandardAllergenTypeTransformer().decode(value);
         case 'StandardAllergenList':

@@ -205,7 +205,6 @@ part 'model/sign_in_method.dart';
 part 'model/soft_preferences.dart';
 part 'model/soft_preferences_input.dart';
 part 'model/spice_level.dart';
-part 'model/staff_role.dart';
 part 'model/standard_allergen.dart';
 part 'model/standard_allergen_list.dart';
 part 'model/substitution_line.dart';
