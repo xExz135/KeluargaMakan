@@ -157,6 +157,11 @@ function readLines(raw: unknown): readonly CheckedLine[] {
 /**
  * Shared by `deriveRecipeHalal` and `deriveRecipeHalalWithLog`: the result and
  * the lines exactly as checked.
+ *
+ * @internal Engine internal (SAF-01, SAF-12): never import it from outside
+ * packages/cek-aman. It skips the input checks of the public entry points, so
+ * a hand-built argument can give "Safe". Only the package root is public;
+ * scripts/check-engine-imports.mjs and the lint rule refuse a deep import.
  */
 export function deriveWithLines(input: RecipeHalalInput): {
   readonly result: RecipeHalalResult;
