@@ -31,6 +31,9 @@ describe("SAF-01 Cek Aman public surface", () => {
       cekAman.MAPPING_CONFIRMERS,
       cekAman.VERIFICATION_STATES,
       cekAman.SAFETY_SUBJECT_KINDS,
+      cekAman.SAFETY_STATUSES,
+      cekAman.REASON_KINDS,
+      cekAman.REASON_CODES,
     ]) {
       expect(new Set(list).size).toBe(list.length);
     }

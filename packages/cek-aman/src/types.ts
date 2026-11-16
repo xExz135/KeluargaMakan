@@ -3,6 +3,9 @@ import type {
   HalalValue,
   MappingConfirmer,
   NonHalalSource,
+  REASON_CODES,
+  REASON_KINDS,
+  SAFETY_STATUSES,
   StandardAllergen,
   Verification,
 } from "./vocabulary.js";
@@ -160,39 +163,14 @@ export interface CekAmanInput {
   readonly reference: ReferenceDataset;
 }
 
-export type SafetyStatus = "safe" | "not_safe" | "check_label";
+/** SAF-04 result per member; the values are `SAFETY_STATUSES`. */
+export type SafetyStatus = (typeof SAFETY_STATUSES)[number];
 
 /** `contains` and `component` mean "Not safe"; the other kinds mean "Check the label". */
-export type ReasonKind = "contains" | "component" | "unknown" | "brand_uncertain" | "unmapped_rule";
+export type ReasonKind = (typeof REASON_KINDS)[number];
 
-export type ReasonCode =
-  // Not safe
-  | "allergen_contains"
-  | "halal_not_halal"
-  | "diet_not_suitable"
-  | "excluded_ingredient"
-  // Check the label: missing or uncertain data
-  | "no_ingredients"
-  | "ingredient_unresolved"
-  | "ingredient_not_in_reference"
-  | "components_unverified"
-  | "component_not_in_reference"
-  | "component_cycle"
-  | "allergens_unverified"
-  | "allergen_may_contain"
-  | "allergen_related"
-  | "allergen_unrecognized"
-  | "halal_uncertain"
-  | "diet_uncertain"
-  // Check the label: brand uncertainty (SAF-07)
-  | "brand_not_recorded"
-  | "brand_unverified"
-  | "component_brand_varies"
-  // Check the label: rule cannot be evaluated (PRF-08, SAF-09)
-  | "rule_unmapped"
-  | "rule_mapping_unconfirmed"
-  | "rule_mapping_unknown_ingredient"
-  | "rule_invalid";
+/** Why a member got "Not safe" or "Check the label"; the values are `REASON_CODES`. */
+export type ReasonCode = (typeof REASON_CODES)[number];
 
 export interface RuleRef {
   readonly ruleId: string;

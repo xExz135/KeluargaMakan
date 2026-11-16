@@ -61,6 +61,54 @@ export type MappingStatus = (typeof MAPPING_STATUSES)[number];
 export const MAPPING_CONFIRMERS = ["content_team", "manager"] as const;
 export type MappingConfirmer = (typeof MAPPING_CONFIRMERS)[number];
 
+// ---------------------------------------------------------------------------
+// Result values (SAF-04). Contract 0.3 mirrors them as `SafetyStatus`,
+// `SafetyReasonKind` and `SafetyReasonCode`, and the packages/contracts tests
+// compare those enums with these lists. Changing a list is a rule-set change.
+// ---------------------------------------------------------------------------
+
+/** SAF-04 result per member: Safe, Not safe or Check the label. */
+export const SAFETY_STATUSES = ["safe", "not_safe", "check_label"] as const;
+
+/** `contains` and `component` mean "Not safe"; the other kinds mean "Check the label". */
+export const REASON_KINDS = [
+  "contains",
+  "component",
+  "unknown",
+  "brand_uncertain",
+  "unmapped_rule",
+] as const;
+
+export const REASON_CODES = [
+  // Not safe
+  "allergen_contains",
+  "halal_not_halal",
+  "diet_not_suitable",
+  "excluded_ingredient",
+  // Check the label: missing or uncertain data
+  "no_ingredients",
+  "ingredient_unresolved",
+  "ingredient_not_in_reference",
+  "components_unverified",
+  "component_not_in_reference",
+  "component_cycle",
+  "allergens_unverified",
+  "allergen_may_contain",
+  "allergen_related",
+  "allergen_unrecognized",
+  "halal_uncertain",
+  "diet_uncertain",
+  // Check the label: brand uncertainty (SAF-07)
+  "brand_not_recorded",
+  "brand_unverified",
+  "component_brand_varies",
+  // Check the label: rule cannot be evaluated (PRF-08, SAF-09)
+  "rule_unmapped",
+  "rule_mapping_unconfirmed",
+  "rule_mapping_unknown_ingredient",
+  "rule_invalid",
+] as const;
+
 /** Identifier pattern shared by ingredient, brand and rule IDs. */
 export const ID_PATTERN = "^[a-z0-9][a-z0-9_.-]{0,99}$";
 
