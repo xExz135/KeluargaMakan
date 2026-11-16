@@ -1,5 +1,5 @@
 // TEST FIXTURE: not real safety or nutrition data. Fictional IDs only.
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
@@ -209,8 +209,21 @@ describe("generated output covers the whole contract", () => {
       (name) => !(name in MOBILE.components.schemas),
     );
     expect(adminOnly).toEqual(
-      expect.arrayContaining(["IngredientDraft", "AdminRecipeContent", "AdminSafetyReport"]),
+      expect.arrayContaining([
+        "IngredientDraft",
+        "AdminRecipeContent",
+        "AdminSafetyReport",
+        "StaffRole",
+      ]),
     );
+    // N5: no generated file is named for an admin, staff or draft shape.
+    const files = (dir: URL): string[] =>
+      readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>
+        entry.isDirectory() ? files(new URL(`${entry.name}/`, dir)) : [entry.name],
+      );
+    expect(
+      files(new URL("lib/", dartDir)).filter((name) => /admin|staff|draft/i.test(name)),
+    ).toEqual([]);
     // Household shapes stay, including schemas no operation uses yet.
     expect(Object.keys(MOBILE.components.schemas)).toEqual(
       expect.arrayContaining(["RecipeSafety", "PhotoSession", "SafetyReportCreate", "PageCursor"]),
@@ -220,6 +233,10 @@ describe("generated output covers the whole contract", () => {
     }
     const apiClient = readFileSync(new URL("lib/api_client.dart", dartDir), "utf8");
     expect(apiClient).not.toContain("staffAuth");
+    expect(apiClient).not.toContain("StaffRole");
+    expect(readFileSync(new URL("lib/api_helper.dart", dartDir), "utf8")).not.toContain(
+      "StaffRole",
+    );
   });
 
   it("Dart enums have no catch-all member that could stand in for an unknown value", () => {

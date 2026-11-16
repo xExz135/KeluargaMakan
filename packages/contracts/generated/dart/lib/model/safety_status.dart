@@ -10,7 +10,7 @@
 
 part of keluargamakan_api;
 
-/// SAF-04 per-member result from Cek Aman, the only component that assigns one (SAF-01). Clients render it and never compute, upgrade or default it. An unknown value means no result: the item is hidden, never shown as safe. A `safe` or `check_label` result that comes with a `condition` holds only if the cook follows that condition: a client that cannot show the condition next to the badge shows Check the label, never a bare Safe (SAF-11, QUESTIONS #85).
+/// SAF-04 per-member result from Cek Aman, the only component that assigns one (SAF-01). Clients render it and never compute, upgrade or default it. An unknown value means no result: the item is hidden, never shown as safe. A `safe` or `check_label` result that comes with a `condition` holds only if the cook follows that condition: a surface that cannot show the condition next to the badge hides the item, or shows the member as Not safe \"as written\" with the omitted line as the reason; it never shows a bare Safe, and never a Check the label without a reason (SAF-11, QUESTIONS #85).
 enum SafetyStatus {
   safe._(r'safe'),
   notSafe._(r'not_safe'),

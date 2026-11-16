@@ -199,9 +199,6 @@ String parameterToString(dynamic value) {
   if (value is SpiceLevel) {
     return SpiceLevelTypeTransformer().encode(value).toString();
   }
-  if (value is StaffRole) {
-    return StaffRoleTypeTransformer().encode(value).toString();
-  }
   if (value is StandardAllergen) {
     return StandardAllergenTypeTransformer().encode(value).toString();
   }

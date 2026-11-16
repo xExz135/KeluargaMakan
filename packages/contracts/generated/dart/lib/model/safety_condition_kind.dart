@@ -10,7 +10,7 @@
 
 part of keluargamakan_api;
 
-/// `separate_portion`: the member's portion is set aside before a step and some ingredient lines never go into it (SAF-11). A client that does not know the value shows Check the label for the member, never a bare Safe.
+/// `separate_portion`: the member's portion is set aside before a step and some ingredient lines never go into it (SAF-11). A client that does not know the value hides the item, as for an unknown status: it never shows a bare Safe, and never a Check the label without a reason.
 enum SafetyConditionKind {
   separatePortion._(r'separate_portion'),
   ;
