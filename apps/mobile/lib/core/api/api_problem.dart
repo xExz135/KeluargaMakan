@@ -40,6 +40,18 @@ enum ApiErrorCode {
   idempotencyKeyReused('idempotency_key_reused'),
   kitchenItemLimitReached('kitchen_item_limit_reached'),
   ingredientSetLimitReached('ingredient_set_limit_reached'),
+  // Contract 0.3. The admin codes (draft_*, second_person_required,
+  // recipe_*, report_already_reviewed) are only sent to staff, never to the
+  // app; they are listed so every contract code stays known.
+  adaptationExpired('adaptation_expired'),
+  substitutionNotAvailable('substitution_not_available'),
+  suggestionSetExpired('suggestion_set_expired'),
+  draftChanged('draft_changed'),
+  draftNotEditable('draft_not_editable'),
+  secondPersonRequired('second_person_required'),
+  recipeNotTested('recipe_not_tested'),
+  recipeIngredientsUnresolved('recipe_ingredients_unresolved'),
+  reportAlreadyReviewed('report_already_reviewed'),
   rateLimited('rate_limited'),
   rulesUnavailable('rules_unavailable'),
   referenceDataUnavailable('reference_data_unavailable'),
