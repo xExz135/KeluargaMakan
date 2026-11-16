@@ -73,11 +73,11 @@ const reference: ReferenceDataset = {
 };
 
 let lineCount = 0;
-const line = (ingredientId: string | null, brandId?: string | null): RecipeLineInput => {
+const line = (ingredientId: string | null, ...brandIds: string[]): RecipeLineInput => {
   lineCount += 1;
-  return brandId === undefined
+  return brandIds.length === 0
     ? { lineId: `line-${lineCount}`, ingredientId }
-    : { lineId: `line-${lineCount}`, ingredientId, brandId };
+    : { lineId: `line-${lineCount}`, ingredientId, brandIds };
 };
 
 const derive = (...lines: RecipeLineInput[]): RecipeHalalResult =>
@@ -203,7 +203,9 @@ describe("LIB-05 recipe halal status derived from reference ingredient data", ()
     const result = derive(line("fx-sauce"));
     expect(result.status).toBe("check_label");
     expect(codes(result)).toEqual(["brand_not_recorded", "halal_uncertain"]);
-    expect(derive(line("fx-sauce", null)).status).toBe("check_label");
+    expect(derive({ lineId: "l", ingredientId: "fx-sauce", brandIds: [] }).status).toBe(
+      "check_label",
+    );
   });
 
   it("LIB-05 SAF-07 a verified brand variant replaces the generic data", () => {
@@ -233,7 +235,7 @@ describe("LIB-05 recipe halal status derived from reference ingredient data", ()
   it("LIB-05 SAF-07 a brand counts for its own line only, never for another line of the same ingredient", () => {
     const result = deriveRecipeHalal({
       lines: [
-        { lineId: "l-branded", ingredientId: "fx-sauce", brandId: "fx-brand-ok" },
+        { lineId: "l-branded", ingredientId: "fx-sauce", brandIds: ["fx-brand-ok"] },
         { lineId: "l-unbranded", ingredientId: "fx-sauce" },
       ],
       reference,
@@ -270,24 +272,82 @@ describe("LIB-05 recipe halal status derived from reference ingredient data", ()
     ]);
   });
 
-  it("LIB-05 SAF-08 the derivation matches the engine's halal rule for every single ingredient", () => {
+  it("LIB-05 SAF-07 SAF-08 the derivation matches the engine's halal rule for every ingredient and set of recorded brands", () => {
     const ids = [...reference.ingredients.map((i) => i.id), "fx-unknown"];
-    const brands = [undefined, "fx-brand-ok", "fx-brand-wine", "fx-brand-unverified"];
+    const brandSets = [
+      [],
+      ["fx-brand-ok"],
+      ["fx-brand-wine"],
+      ["fx-brand-unverified"],
+      ["fx-brand-ok", "fx-brand-wine"],
+      ["fx-brand-wine", "fx-brand-ok"],
+      ["fx-brand-ok", "fx-brand-unverified"],
+      ["fx-brand-ok", "fx-brand-ok"],
+    ];
     for (const id of [...ids, null]) {
-      for (const brandId of brands) {
+      for (const brandIds of brandSets) {
         const engine = evaluate({
           ingredients: [{ ingredientId: id, rawName: "" }],
           recordedBrands:
-            id !== null && brandId !== undefined ? [{ ingredientId: id, brandId }] : [],
+            id === null ? [] : brandIds.map((brandId) => ({ ingredientId: id, brandId })),
           members: [member("m", rules.halal())],
           reference,
         }).perMember[0]!;
-        const derived = derive(brandId === undefined ? line(id) : line(id, brandId));
+        const derived = derive(line(id, ...brandIds));
         const expected = { safe: "halal", not_safe: "not_halal", check_label: "check_label" };
-        expect(derived.status, `${id} ${brandId}`).toBe(expected[engine.status]);
-        expect(codes(derived), `${id} ${brandId}`).toEqual(engine.reasons.map((r) => r.code));
+        const context = `${id} ${brandIds.join("+")}`;
+        expect(derived.status, context).toBe(expected[engine.status]);
+        expect(
+          derived.findings.map((f) => [f.kind, f.code, f.componentPath, f.brandId, f.detail]),
+          context,
+        ).toEqual(
+          engine.reasons.map((r) => [r.kind, r.code, r.componentPath, r.brandId, r.detail]),
+        );
       }
     }
+  });
+
+  it("LIB-05 SAF-07 with several recorded brands the worst one wins", () => {
+    const both = derive(line("fx-sauce", "fx-brand-ok", "fx-brand-wine"));
+    expect(both.status).toBe("not_halal");
+    expect(both.findings[0]).toMatchObject({ code: "halal_not_halal", brandId: "fx-brand-wine" });
+    const unverified = derive(line("fx-sauce", "fx-brand-ok", "fx-brand-unverified"));
+    expect(unverified.status).toBe("check_label");
+    expect(codes(unverified)).toContain("brand_unverified");
+  });
+
+  it("LIB-05 SAF-07 malformed brand lists or entries are ignored, which fails closed", () => {
+    for (const brandIds of ["fx-brand-ok", { 0: "fx-brand-ok" }, [42, "", null]]) {
+      const result = deriveRecipeHalal({
+        lines: [{ lineId: "l", ingredientId: "fx-sauce", brandIds } as unknown as RecipeLineInput],
+        reference,
+      });
+      expect(result.status, JSON.stringify(brandIds)).toBe("check_label");
+      expect(codes(result)).toContain("brand_not_recorded");
+    }
+  });
+
+  it("LIB-05 DAT-06 the reference is read once per recipe and the versions come from that read", () => {
+    let versionReads = 0;
+    let listReads = 0;
+    const shifting = {
+      schema: reference.schema,
+      get version(): string {
+        versionReads += 1;
+        return `unit-fixture-v${versionReads}`;
+      },
+      get ingredients(): readonly ReferenceIngredient[] {
+        listReads += 1;
+        return reference.ingredients;
+      },
+    } as ReferenceDataset;
+    const result = deriveRecipeHalal({
+      lines: [line("fx-plain"), line("fx-plain-2"), line("fx-pork")],
+      reference: shifting,
+    });
+    expect([versionReads, listReads]).toEqual([1, 1]);
+    expect(result.referenceVersion).toBe("unit-fixture-v1");
+    expect(result.status).toBe("not_halal");
   });
 });
 
@@ -328,6 +388,9 @@ describe("LIB-05 the halal status is never typed in", () => {
     const withHalalStatus: RecipeHalalInput = { lines, reference, halalStatus: "halal" };
     // @ts-expect-error LIB-05: a line cannot carry a halal flag
     const lineWithHalal: RecipeLineInput = { lineId: "l2", ingredientId: "fx-pork", halal: true };
+    // @ts-expect-error SAF-07: a single chosen brand is not accepted; pass every brand in brandIds
+    const oneBrand: RecipeLineInput = { lineId: "l3", ingredientId: "fx-sauce", brandId: "x" };
+    expect(deriveRecipeHalal({ lines: [oneBrand], reference }).status).toBe("check_label");
     expect(deriveRecipeHalal(withStatus).status).toBe("halal");
     expect(deriveRecipeHalal(withHalalStatus).status).toBe("halal");
     expect(deriveRecipeHalal({ lines: [lineWithHalal], reference }).status).toBe("not_halal");
@@ -379,6 +442,20 @@ describe("LIB-05 input that cannot be read fails closed with no result", () => {
       CekAmanInputError,
     );
   });
+
+  it("LIB-05 AI-03 an error names the line position, never the caller's lineId", () => {
+    const lineId = "Sambal Bu Rina 0812-0000-0000";
+    const lines = [
+      { lineId, ingredientId: "fx-plain" },
+      { lineId, ingredientId: "fx-plain" },
+    ];
+    expect(() => deriveRecipeHalal({ lines, reference })).toThrow(
+      "recipe line 1 repeats an earlier lineId",
+    );
+    expect(() =>
+      deriveRecipeHalal({ lines: [{ lineId: "" } as RecipeLineInput], reference }),
+    ).toThrow("recipe line 0 needs a lineId");
+  });
 });
 
 describe("LIB-05 SAF-01 pure and deterministic", () => {
@@ -393,7 +470,7 @@ describe("LIB-05 SAF-01 pure and deterministic", () => {
     const input = deepFreeze(
       structuredClone({
         lines: [
-          { lineId: "l1", ingredientId: "fx-sauce", brandId: "fx-brand-ok" },
+          { lineId: "l1", ingredientId: "fx-sauce", brandIds: ["fx-brand-ok"] },
           { lineId: "l2", ingredientId: "fx-wine-sauce" },
           { lineId: "l3", ingredientId: null },
         ],
@@ -405,7 +482,7 @@ describe("LIB-05 SAF-01 pure and deterministic", () => {
 
   it("LIB-05 SAF-01 inherited line fields never stand in for missing ones", () => {
     const proto = Object.prototype as Record<string, unknown>;
-    const keys = { lineId: "fx-inherited", ingredientId: "fx-plain", brandId: "fx-brand-ok" };
+    const keys = { lineId: "fx-inherited", ingredientId: "fx-plain", brandIds: ["fx-brand-ok"] };
     for (const key of Object.keys(keys)) expect(Object.hasOwn(proto, key)).toBe(false);
     try {
       Object.assign(proto, keys);

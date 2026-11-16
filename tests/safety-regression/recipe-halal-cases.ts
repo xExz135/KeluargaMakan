@@ -14,8 +14,11 @@ import type {
 /** `[status, ...reason codes that must be present]` */
 export type HalalExpectation = readonly [RecipeHalalStatus, ...ReasonCode[]];
 
-/** A reference ID, `null` for an unresolved or custom line, or `[id, brandId]`. */
-export type CaseLine = string | null | readonly [ingredientId: string, brandId: string];
+/**
+ * A reference ID, `null` for an unresolved or custom line, or
+ * `[id, ...brandIds]` with every brand the household recorded for it.
+ */
+export type CaseLine = string | null | readonly [ingredientId: string, ...brandIds: string[]];
 
 export interface RecipeHalalCase {
   readonly id: string;
@@ -34,7 +37,8 @@ export function toLines(lines: readonly CaseLine[]): RecipeLineInput[] {
   return lines.map((entry, index) => {
     const lineId = `fx-line-${index + 1}`;
     if (entry === null || typeof entry === "string") return { lineId, ingredientId: entry };
-    return { lineId, ingredientId: entry[0], brandId: entry[1] };
+    const [ingredientId, ...brandIds] = entry;
+    return { lineId, ingredientId, brandIds };
   });
 }
 
@@ -202,6 +206,20 @@ export const recipeHalalCases: readonly RecipeHalalCase[] = [
     title: "data marked halal that lists a non-halal animal gives not_halal (contradictory record)",
     lines: [...base, "fx_bad_halal_with_animal"],
     malformed: true,
+    expect: ["not_halal", "halal_not_halal"],
+  },
+  {
+    id: "HAL-024",
+    requirements: ["LIB-05", "SAF-07"],
+    title: "two recorded kecap brands, one verified and one not, give check_label",
+    lines: [...base, ["fx_kecap_manis", "fx_brand_kecap_a", "fx_brand_kecap_b"]],
+    expect: ["check_label", "brand_unverified"],
+  },
+  {
+    id: "HAL-025",
+    requirements: ["LIB-05", "SAF-07", "SAF-08"],
+    title: "two recorded kecap brands, one halal and one with alcohol, give not_halal",
+    lines: [...base, ["fx_kecap_manis", "fx_brand_kecap_a", "fx_brand_kecap_c"]],
     expect: ["not_halal", "halal_not_halal"],
   },
 ];

@@ -1,9 +1,14 @@
 import { CekAmanInputError } from "../errors.js";
-import { NOT_SAFE_KINDS, evaluate } from "../evaluate.js";
+import {
+  analyzeIngredient,
+  evaluateMember,
+  indexBrands,
+  indexReference,
+  type PreparedMember,
+} from "../evaluate.js";
 import { isObject, own, ownItems } from "../normalize.js";
+import { RULE_SET_VERSION } from "../rule-set.js";
 import type {
-  CekAmanInput,
-  MemberRulesInput,
   ReasonCode,
   ReasonKind,
   RecognitionFieldsAbsent,
@@ -30,9 +35,9 @@ interface HalalStatusAbsent {
 }
 
 /**
- * One recipe ingredient line, as the recipe API (T-041) passes it. Quantity,
- * unit, name and optional flag play no part: the halal status depends on the
- * reference data of the line's ingredient only (LIB-05, REC-06).
+ * One recipe ingredient line, as the recipe API (T-041, T-043) passes it.
+ * Quantity, unit, name and optional flag play no part: the halal status depends
+ * on the reference data of the line's ingredient only (LIB-05, REC-06).
  */
 export interface RecipeLineInput extends HalalStatusAbsent, RecognitionFieldsAbsent {
   /** The recipe line ID, unique within the recipe; findings point back at it. */
@@ -44,12 +49,17 @@ export interface RecipeLineInput extends HalalStatusAbsent, RecognitionFieldsAbs
    */
   readonly ingredientId: string | null;
   /**
-   * The reference brand this line uses (SAF-07), or null or absent when none
-   * is known. Only a verified brand variant of the line's own ingredient
-   * replaces the generic data; any other brand gives "Check the label". It
-   * applies to this line only, never to another line of the same ingredient.
+   * SAF-07: every brand the household recorded for this line's ingredient, as
+   * `evaluate` gets them in `recordedBrands`: pass all of them, never a chosen
+   * one. Each brand is checked and the worst result wins. On an ingredient
+   * that varies by brand, only a verified variant of this ingredient replaces
+   * the generic data; any other brand gives "Check the label", and so does no
+   * brand at all. On an ingredient that does not vary by brand, brands are
+   * ignored. Brands apply to this line only.
    */
-  readonly brandId?: string | null;
+  readonly brandIds?: readonly string[];
+  /** Use `brandIds`: a single chosen brand could hide a worse one (SAF-07). */
+  readonly brandId?: never;
 }
 
 export interface RecipeHalalInput extends HalalStatusAbsent {
@@ -84,7 +94,8 @@ export interface RecipeHalalFinding {
 
 /**
  * LIB-05 result. It holds IDs, codes and versions only, no ingredient names or
- * free text, so it can be logged as it is (SAF-14, DAT-06).
+ * free text. To serve it, use `deriveRecipeHalalWithLog`, whose log record
+ * also keeps the brands each line was checked with (SAF-14, DAT-06).
  */
 export interface RecipeHalalResult {
   readonly status: RecipeHalalStatus;
@@ -94,15 +105,16 @@ export interface RecipeHalalResult {
   readonly referenceVersion: string;
 }
 
-interface PreparedLine {
-  readonly ref: RecipeLineRef;
-  readonly brandId: string | null;
+/** A line as checked: what the log record echoes. */
+export interface CheckedLine extends RecipeLineRef {
+  /** The brands the line was checked with, deduplicated, in input order. */
+  readonly brandIds: readonly string[];
 }
 
-/** The single halal rule the engine checks each line against. Internal; never returned. */
-const HALAL_CHECK: MemberRulesInput = {
+/** The one halal rule (SAF-08) each recipe is checked against. Internal; never returned. */
+const HALAL_CHECK: PreparedMember = {
   memberId: "recipe-halal",
-  hardRules: [{ ruleId: "recipe-halal", type: "halal" }],
+  rules: [{ kind: "halal", ref: { ruleId: "recipe-halal", type: "halal", allergen: null } }],
 };
 
 /** Same precedence as a member result (SAF-04, SAF-08). */
@@ -110,11 +122,6 @@ const HALAL_STATUS_OF: Readonly<Record<SafetyStatus, RecipeHalalStatus>> = {
   safe: "halal",
   not_safe: "not_halal",
   check_label: "check_label",
-};
-const RANK: Readonly<Record<RecipeHalalStatus, number>> = {
-  halal: 0,
-  check_label: 1,
-  not_halal: 2,
 };
 
 function nonEmptyString(value: unknown): value is string {
@@ -125,86 +132,100 @@ function fail(message: string): never {
   throw new CekAmanInputError(message);
 }
 
-function readLines(raw: unknown): readonly PreparedLine[] {
+function readLines(raw: unknown): readonly CheckedLine[] {
   const list = ownItems(raw);
   if (list === null) fail("recipe lines must be a list (LIB-05)");
   const seen = new Set<string>();
   return list.map((line, index) => {
     const lineId = isObject(line) ? own(line, "lineId") : undefined;
-    if (!isObject(line) || !nonEmptyString(lineId)) fail("every recipe line needs a lineId");
-    if (seen.has(lineId)) fail(`duplicate recipe lineId: ${lineId}`);
+    // The position only: a caller's ID never goes into an error message (AI-03).
+    if (!isObject(line) || !nonEmptyString(lineId)) fail(`recipe line ${index} needs a lineId`);
+    if (seen.has(lineId)) fail(`recipe line ${index} repeats an earlier lineId`);
     seen.add(lineId);
     const ingredientId = own(line, "ingredientId");
-    const brandId = own(line, "brandId");
+    // Malformed brand entries are ignored, as `evaluate` ignores them, which fails closed.
+    const brandIds = (ownItems(own(line, "brandIds")) ?? []).filter(nonEmptyString);
     return {
-      ref: { index, lineId, ingredientId: nonEmptyString(ingredientId) ? ingredientId : null },
-      brandId: nonEmptyString(brandId) ? brandId : null,
+      index,
+      lineId,
+      ingredientId: nonEmptyString(ingredientId) ? ingredientId : null,
+      brandIds: [...new Set(brandIds)],
     };
   });
 }
 
-/** Runs the engine's own halal check on one line, or on an empty recipe when `line` is null. */
-function checkLine(reference: unknown, line: PreparedLine | null): CekAmanInput {
-  const ingredientId = line?.ref.ingredientId ?? null;
-  const brandId = line?.brandId ?? null;
+/**
+ * Shared by `deriveRecipeHalal` and `deriveRecipeHalalWithLog`: the result and
+ * the lines exactly as checked.
+ */
+export function deriveWithLines(input: RecipeHalalInput): {
+  readonly result: RecipeHalalResult;
+  readonly lines: readonly CheckedLine[];
+} {
+  const raw: unknown = input;
+  if (!isObject(raw)) fail("input is required");
+  const lines = readLines(own(raw, "lines"));
+  // The reference is read and indexed once for the whole recipe (one snapshot, DAT-06).
+  const { version, records } = indexReference(own(raw, "reference"));
+  // Each line gets its own brands, so a brand never carries over to another line.
+  const analyses = lines.map((line) =>
+    analyzeIngredient(
+      { ingredientId: line.ingredientId, rawName: "" },
+      line.index,
+      records,
+      indexBrands(line.brandIds.map((brandId) => ({ ingredientId: line.ingredientId, brandId }))),
+    ),
+  );
+  // The engine's own halal check and precedence (SAF-04, SAF-08); no lines gives no_ingredients.
+  const verdict = evaluateMember(HALAL_CHECK, analyses);
+  const findings = verdict.reasons.map((reason): RecipeHalalFinding => ({
+    kind: reason.kind,
+    code: reason.code,
+    line:
+      reason.ingredient === null
+        ? null
+        : {
+            index: reason.ingredient.index,
+            // Analyses are built from `lines` with their own index, so this line exists.
+            lineId: lines[reason.ingredient.index]!.lineId,
+            ingredientId: reason.ingredient.ingredientId,
+          },
+    componentPath: reason.componentPath,
+    brandId: reason.brandId,
+    detail: reason.detail,
+  }));
   return {
-    ingredients: line === null ? [] : [{ ingredientId, rawName: "" }],
-    recordedBrands: ingredientId === null || brandId === null ? [] : [{ ingredientId, brandId }],
-    members: [HALAL_CHECK],
-    // Checked by evaluate(), which fails on a missing or malformed dataset.
-    reference: reference as ReferenceDataset,
+    result: {
+      status: HALAL_STATUS_OF[verdict.status],
+      findings,
+      ruleSetVersion: RULE_SET_VERSION,
+      referenceVersion: version,
+    },
+    lines,
   };
 }
 
 /**
  * LIB-05: derives a recipe's halal status from the reference ingredient data
  * only, through the same halal check Cek Aman applies to a member with a halal
- * rule (SAF-08), so the two can never disagree. Each line is checked on its
- * own, with its own brand, then the worst result wins:
+ * rule (SAF-08), so the two can never disagree:
  *
- * - any alcohol, pork or non-halal animal ingredient or component: `not_halal`
+ * - any alcohol, pork or non-halal animal ingredient or component, in the
+ *   generic data or in any brand the line lists: `not_halal`
  * - otherwise any uncertainty (unresolved, custom or unknown line, missing or
  *   unverified component or halal data, brand not known or not verified, or
  *   no lines at all): `check_label`, never `halal` (fail closed)
  * - otherwise `halal`
  *
  * Pure and deterministic, like `evaluate`. Any status in the input is ignored,
- * and recognition output never reaches it (REC-06, SAF-10).
+ * and recognition output never reaches it (REC-06, SAF-10). The reference is
+ * read once and the versions reported are those of that one read.
+ *
+ * To serve a result, use `deriveRecipeHalalWithLog` instead.
  *
  * @throws CekAmanInputError when the input is structurally unusable (no line
  *   list, a line without a lineId, a duplicate lineId, unusable reference data).
  */
 export function deriveRecipeHalal(input: RecipeHalalInput): RecipeHalalResult {
-  const raw: unknown = input;
-  if (!isObject(raw)) fail("input is required");
-  const lines = readLines(own(raw, "lines"));
-  const reference = own(raw, "reference");
-  let status: RecipeHalalStatus = "halal";
-  let ruleSetVersion = "";
-  let referenceVersion = "";
-  const findings: RecipeHalalFinding[] = [];
-  for (const line of lines.length === 0 ? [null] : lines) {
-    const result = evaluate(checkLine(reference, line));
-    ruleSetVersion = result.ruleSetVersion;
-    referenceVersion = result.referenceVersion;
-    for (const verdict of result.perMember) {
-      const lineStatus = HALAL_STATUS_OF[verdict.status];
-      if (RANK[lineStatus] > RANK[status]) status = lineStatus;
-      for (const reason of verdict.reasons) {
-        findings.push({
-          kind: reason.kind,
-          code: reason.code,
-          line: line === null ? null : line.ref,
-          componentPath: reason.componentPath,
-          brandId: reason.brandId,
-          detail: reason.detail,
-        });
-      }
-    }
-  }
-  // Stable sort: "Not halal" findings first, otherwise line order.
-  const severity = (finding: RecipeHalalFinding): number =>
-    NOT_SAFE_KINDS.includes(finding.kind) ? 0 : 1;
-  findings.sort((a, b) => severity(a) - severity(b));
-  return { status, findings, ruleSetVersion, referenceVersion };
+  return deriveWithLines(input).result;
 }

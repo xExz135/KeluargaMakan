@@ -46,13 +46,14 @@ interface GeneralIssue {
   readonly detail: string | null;
 }
 
-interface IngredientAnalysis {
+/** One recipe ingredient analyzed against the reference data, before any rule is applied. */
+export interface IngredientAnalysis {
   readonly ref: IngredientRef;
   readonly findings: readonly Finding[];
   readonly issues: readonly GeneralIssue[];
 }
 
-interface PreparedMember {
+export interface PreparedMember {
   readonly memberId: string;
   readonly rules: readonly ClassifiedRule[];
 }
@@ -60,8 +61,7 @@ interface PreparedMember {
 /** Reason without the rule it was evaluated against. */
 type PartialReason = Omit<SafetyReason, "rule" | "ingredient">;
 
-/** Reason kinds that mean "Not safe"; shared with the recipe halal derivation (LIB-05). */
-export const NOT_SAFE_KINDS: readonly ReasonKind[] = ["contains", "component"];
+const NOT_SAFE_KINDS: readonly ReasonKind[] = ["contains", "component"];
 
 function nonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value !== "";
@@ -75,7 +75,17 @@ function fail(message: string): never {
 // Input preparation
 // ---------------------------------------------------------------------------
 
-function indexReference(raw: unknown): { version: string; records: ReadonlyMap<string, Obj> } {
+export interface IndexedReference {
+  readonly version: string;
+  readonly records: ReadonlyMap<string, Obj>;
+}
+
+/**
+ * Reads and indexes the reference dataset once. Internal to the package: the
+ * recipe halal derivation (LIB-05) reuses it so a recipe is checked against
+ * one snapshot, read once (DAT-06).
+ */
+export function indexReference(raw: unknown): IndexedReference {
   if (!isObject(raw)) fail("reference data is required");
   const version = own(raw, "version");
   if (!nonEmptyString(version)) fail("reference data version is required (DAT-06)");
@@ -112,7 +122,7 @@ function prepareMembers(
 }
 
 /** Recorded brands per ingredient ID. Malformed entries are ignored, which fails closed. */
-function indexBrands(raw: unknown): ReadonlyMap<string, readonly string[]> {
+export function indexBrands(raw: unknown): ReadonlyMap<string, readonly string[]> {
   const list = ownItems(raw);
   if (list === null) fail("recordedBrands must be a list (may be empty)");
   const brands = new Map<string, string[]>();
@@ -168,7 +178,7 @@ function brandViews(
   return views;
 }
 
-function analyzeIngredient(
+export function analyzeIngredient(
   raw: unknown,
   index: number,
   records: ReadonlyMap<string, Obj>,
@@ -349,7 +359,7 @@ function deriveStatus(reasons: readonly SafetyReason[]): SafetyStatus {
   return reasons.length > 0 ? "check_label" : "safe";
 }
 
-function evaluateMember(
+export function evaluateMember(
   member: PreparedMember,
   analyses: readonly IngredientAnalysis[],
 ): MemberSafetyResult {
