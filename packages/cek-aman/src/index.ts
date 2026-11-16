@@ -18,8 +18,14 @@ export {
   type SafetySubjectKind,
 } from "./log.js";
 export {
+  RECIPE_HALAL_LOG_FORMAT,
+  deriveRecipeHalalWithLog,
+  type RecipeHalalLogRecord,
+} from "./recipe/halal-log.js";
+export {
   RECIPE_HALAL_STATUSES,
   deriveRecipeHalal,
+  type CheckedLine,
   type RecipeHalalFinding,
   type RecipeHalalInput,
   type RecipeHalalResult,

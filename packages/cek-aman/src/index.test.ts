@@ -12,6 +12,7 @@ describe("SAF-01 Cek Aman public surface", () => {
     expect(functions).toEqual([
       "CekAmanInputError",
       "deriveRecipeHalal",
+      "deriveRecipeHalalWithLog",
       "evaluate",
       "evaluateWithLog",
       "ingredientFromRecognition",

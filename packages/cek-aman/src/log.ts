@@ -70,7 +70,8 @@ function requireText(value: unknown, name: string): string {
   return value;
 }
 
-function readContext(raw: unknown): SafetyLogContext {
+/** Checks a log context; internal, shared with the recipe halal log (LIB-05). */
+export function readContext(raw: unknown): SafetyLogContext {
   const context = isObject(raw) ? raw : {};
   const rawSubject = own(context, "subject");
   const subject = isObject(rawSubject) ? rawSubject : {};
