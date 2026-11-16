@@ -238,6 +238,7 @@ describe("Cek Aman results on every food item (SAF-02, SUG-04, AI-01)", () => {
       "memberId",
       "rulesConsent",
       "status",
+      "condition",
       "reasons",
     ]);
     expect(schema("MemberSafetyResult").properties?.rulesConsent?.$ref).toBe(
@@ -315,9 +316,12 @@ describe("Cek Aman results on every food item (SAF-02, SUG-04, AI-01)", () => {
     for (const [name, pattern] of Object.entries(cautious)) {
       expect(schema(name).description?.replace(/\s+/g, " "), name).toMatch(pattern);
     }
-    expect(schema("MemberSafetyResult").description?.replace(/\s+/g, " ")).toMatch(
-      /never Safe, whatever `status` says/,
-    );
+    // L5: consent replaces only Safe; it never hides Not safe or Check the label.
+    const member = schema("MemberSafetyResult").description?.replace(/\s+/g, " ") ?? "";
+    expect(member).toMatch(/a `safe` status is shown as the neutral/);
+    expect(member).toMatch(/`not_safe` and `check_label` are always shown as they are/);
+    expect(member).toMatch(/consent never hides a Not safe result/);
+    expect(member).not.toMatch(/whatever `status` says/);
   });
 
   it("Q58 the new response enums match the reviewed lists (a change needs a version bump)", () => {
@@ -409,9 +413,13 @@ describe("Masak Apa Hari Ini suggestions", () => {
     );
     expect(schema("SuggestionSet").properties?.items?.maxItems).toBe(3);
     expect(schema("SuggestionMoreRequest").required).toEqual(["page"]);
-    expect(operation("requestMoreSuggestions").operation.description).toMatch(
-      /same `page` again returns the same items/,
-    );
+    // M4: a repeated page offers the same recipes but is checked again.
+    const more = operation("requestMoreSuggestions").operation.description?.replace(/\s+/g, " ");
+    expect(more).toMatch(/every serve, a repeat of the same page included, runs Cek Aman again/);
+    expect(more).toMatch(/against the selected members' current rules and consent/);
+    expect(more).toMatch(/A stored or cached result is never replayed/);
+    expect(more).toMatch(/A changed result is allowed/);
+    expect(more).not.toMatch(/returns the same items/);
     expect(errorCodes).toContain("suggestion_set_expired");
   });
 
@@ -650,8 +658,6 @@ describe("meal feedback and safety reports", () => {
     expect(props("SafetyReportCreate")).toEqual([
       "subject",
       "checkId",
-      "ruleSetVersion",
-      "referenceVersion",
       "memberIds",
       "reportType",
       "ingredientLineId",
@@ -668,8 +674,21 @@ describe("meal feedback and safety reports", () => {
     const staffView = reachableSchemas(["AdminSafetyReportList"]);
     expect(staffView).not.toContain("SafetyRuleRef");
     expect(staffView).not.toContain("MemberSafetyResult");
-    const names = staffView.flatMap(props);
-    expect(names.filter((p) => /^(memberId|memberIds|householdId|freeText)$/.test(p))).toEqual([]);
+    // The reviewer's own note (`SafetyReportReview.note`) is staff text.
+    const names = staffView.filter((n) => n !== "SafetyReportReview").flatMap(props);
+    expect(
+      names.filter((p) =>
+        /^(memberId|memberIds|householdId|freeText|rawName|note|adaptationId|checkId)$/.test(p),
+      ),
+    ).toEqual([]);
+    // L3: no household-typed text reaches staff verbatim.
+    expect(staffView).not.toContain("SafetyIngredientRef");
+    expect(staffView).not.toContain("SafetyReportSubject");
+    expect(staffView).toContain("AdminIngredientRef");
+    expect(props("AdminSafetyReport")).toContain("redactedNote");
+    expect(schema("AdminSafetyReport").description).toMatch(
+      /never see household-typed\s+text verbatim/,
+    );
   });
 
   it("SAF-14 the report subject kinds are the Cek Aman safety-log kinds", () => {

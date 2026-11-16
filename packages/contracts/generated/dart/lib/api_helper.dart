@@ -82,15 +82,6 @@ String parameterToString(dynamic value) {
   if (value is DevicePlatform) {
     return DevicePlatformTypeTransformer().encode(value).toString();
   }
-  if (value is DraftDecision) {
-    return DraftDecisionTypeTransformer().encode(value).toString();
-  }
-  if (value is DraftOperation) {
-    return DraftOperationTypeTransformer().encode(value).toString();
-  }
-  if (value is DraftStatus) {
-    return DraftStatusTypeTransformer().encode(value).toString();
-  }
   if (value is EaterMode) {
     return EaterModeTypeTransformer().encode(value).toString();
   }
@@ -166,9 +157,6 @@ String parameterToString(dynamic value) {
   if (value is RecipeDifficulty) {
     return RecipeDifficultyTypeTransformer().encode(value).toString();
   }
-  if (value is RecipeLifecycleStatus) {
-    return RecipeLifecycleStatusTypeTransformer().encode(value).toString();
-  }
   if (value is RecipeOrigin) {
     return RecipeOriginTypeTransformer().encode(value).toString();
   }
@@ -184,17 +172,14 @@ String parameterToString(dynamic value) {
   if (value is RulesConsentStatus) {
     return RulesConsentStatusTypeTransformer().encode(value).toString();
   }
+  if (value is SafetyConditionKind) {
+    return SafetyConditionKindTypeTransformer().encode(value).toString();
+  }
   if (value is SafetyReasonCode) {
     return SafetyReasonCodeTypeTransformer().encode(value).toString();
   }
   if (value is SafetyReasonKind) {
     return SafetyReasonKindTypeTransformer().encode(value).toString();
-  }
-  if (value is SafetyReportOutcome) {
-    return SafetyReportOutcomeTypeTransformer().encode(value).toString();
-  }
-  if (value is SafetyReportStatus) {
-    return SafetyReportStatusTypeTransformer().encode(value).toString();
   }
   if (value is SafetyReportType) {
     return SafetyReportTypeTypeTransformer().encode(value).toString();

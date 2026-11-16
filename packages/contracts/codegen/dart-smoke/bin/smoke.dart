@@ -96,6 +96,7 @@ const fictionalMemberResult = {
   'memberId': 'profile-test-1',
   'rulesConsent': 'given',
   'status': 'check_label',
+  'condition': null,
   'reasons': [
     {
       'kind': 'brand_uncertain',
@@ -151,7 +152,13 @@ const fictionalSuggestion = {
     'referenceVersion': 'TEST-FIXTURE-1',
     'members': [
       fictionalMemberResult,
-      {'memberId': 'profile-test-2', 'rulesConsent': 'none', 'status': 'safe', 'reasons': <Object>[]},
+      {
+        'memberId': 'profile-test-2',
+        'rulesConsent': 'none',
+        'status': 'safe',
+        'condition': null,
+        'reasons': <Object>[],
+      },
     ],
     'halalStatus': {'status': 'check_label', 'findings': <Object>[]},
   },
@@ -366,6 +373,24 @@ void main() {
   ]));
   check(meal['overall'] == 'no' && (meal['members'] as List).single['rating'] == 'ok',
       'PRF-13 "no" encodes as text, not as a boolean');
+
+  final conditional = MemberSafetyResult.fromJson({
+    'memberId': 'profile-test-3',
+    'rulesConsent': 'given',
+    'status': 'safe',
+    'condition': {
+      'kind': 'separate_portion',
+      'variantId': 'variant-test-1',
+      'separateBeforeStepId': 'step-test-4',
+      'omittedLineIds': ['line-test-3'],
+    },
+    'reasons': <Object>[],
+  });
+  check(conditional?.condition?.kind == SafetyConditionKind.separatePortion &&
+          conditional!.condition!.omittedLineIds.contains('line-test-3'),
+      'SAF-11 a Safe that holds only with a set-aside portion carries its condition');
+  check(SafetyConditionKind.fromJson('a_kind_from_a_newer_server') == null,
+      'SAF-11 an unknown condition kind is never read as a known one');
 
   final nutrition = NutritionPerServing.fromJson({
     'status': 'unavailable',

@@ -10,7 +10,7 @@
 
 part of keluargamakan_api;
 
-/// Reason codes from the Cek Aman engine (`packages/cek-aman`). Like `ErrorCode`, codes may be added: a client that does not know a code still renders the member's `status` and shows the generic missing-data line, and never hides a Not safe result or shows it as safe. Until the app decodes unknown codes that way, new codes come with a version bump (QUESTIONS #82).
+/// Reason codes from the Cek Aman engine (`packages/cek-aman`). Like `ErrorCode`, codes may be added: a client that does not know a code still renders the member's `status` and shows the generic missing-data line, and never hides a Not safe result or shows it as safe. The app reads food items with a strict hand-written decoder that keeps `status` and shows the generic line for an unknown code, and drops only the bad item (T-054, T-055); until it ships, new codes come with a version bump (QUESTIONS #82).
 enum SafetyReasonCode {
   allergenContains._(r'allergen_contains'),
   halalNotHalal._(r'halal_not_halal'),

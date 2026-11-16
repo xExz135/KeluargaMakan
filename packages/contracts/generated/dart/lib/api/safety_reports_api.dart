@@ -18,17 +18,17 @@ class SafetyReportsApi {
 
   /// Report a wrong Cek Aman result
   ///
-  /// From the recipe screen (SAF-15). The report names the recipe, the check it is about (`checkId`, with the rule set and data versions, SAF-14), the members it concerns and what is wrong. The server stores only the members' rule types from that check, never their names, and the content team reviews it in the admin queue. A report never changes a result on any phone. It may be queued offline: send an `Idempotency-Key`. The note is optional, short, and the app asks not to put personal details in it. Rate-limited (429).
+  /// From the recipe screen (SAF-15). The report names the recipe, the check it is about (`checkId`), the members it concerns and what is wrong. The server takes the rule set and data versions, the result and the rule types from its own log of that check (SAF-14), never from the phone. A `checkId` of another household, or one past its retention, answers 404 `not_found`; a member who is not in the check answers 400. Only the members' rule types are kept, never their names, and the content team reviews the report in the admin queue. A report never changes a result on any phone. It may be queued offline, so `Idempotency-Key` is required; a replay returns the first receipt and does not count against the rate limit (429). The note is optional and short; the app asks not to put personal details in it, and staff only see a redacted copy.
   ///
   /// Note: This method returns the HTTP [Response].
   ///
   /// Parameters:
   ///
-  /// * [SafetyReportCreate] safetyReportCreate (required):
+  /// * [String] idempotencyKey (required):
+  ///   As `IdempotencyKey`, but required: the request is queued offline and replayed, so every send carries a client-generated UUID.
   ///
-  /// * [String] idempotencyKey:
-  ///   A client-generated UUID. Repeating a request with the same key returns the first result instead of creating a duplicate, so an offline queue can replay safely. Reusing a key with a different body returns 409 `idempotency_key_reused`. Keys are kept for a configured period.
-  Future<Response> createSafetyReportWithHttpInfo(SafetyReportCreate safetyReportCreate, { String? idempotencyKey, Future<void>? abortTrigger, }) async {
+  /// * [SafetyReportCreate] safetyReportCreate (required):
+  Future<Response> createSafetyReportWithHttpInfo(String idempotencyKey, SafetyReportCreate safetyReportCreate, { Future<void>? abortTrigger, }) async {
     // ignore: prefer_const_declarations
     final path = r'/v1/household/safety-reports';
 
@@ -39,9 +39,7 @@ class SafetyReportsApi {
     final headerParams = <String, String>{};
     final formParams = <String, String>{};
 
-    if (idempotencyKey != null) {
-      headerParams[r'Idempotency-Key'] = parameterToString(idempotencyKey);
-    }
+    headerParams[r'Idempotency-Key'] = parameterToString(idempotencyKey);
 
     const contentTypes = <String>['application/json'];
 
@@ -60,16 +58,16 @@ class SafetyReportsApi {
 
   /// Report a wrong Cek Aman result
   ///
-  /// From the recipe screen (SAF-15). The report names the recipe, the check it is about (`checkId`, with the rule set and data versions, SAF-14), the members it concerns and what is wrong. The server stores only the members' rule types from that check, never their names, and the content team reviews it in the admin queue. A report never changes a result on any phone. It may be queued offline: send an `Idempotency-Key`. The note is optional, short, and the app asks not to put personal details in it. Rate-limited (429).
+  /// From the recipe screen (SAF-15). The report names the recipe, the check it is about (`checkId`), the members it concerns and what is wrong. The server takes the rule set and data versions, the result and the rule types from its own log of that check (SAF-14), never from the phone. A `checkId` of another household, or one past its retention, answers 404 `not_found`; a member who is not in the check answers 400. Only the members' rule types are kept, never their names, and the content team reviews the report in the admin queue. A report never changes a result on any phone. It may be queued offline, so `Idempotency-Key` is required; a replay returns the first receipt and does not count against the rate limit (429). The note is optional and short; the app asks not to put personal details in it, and staff only see a redacted copy.
   ///
   /// Parameters:
   ///
-  /// * [SafetyReportCreate] safetyReportCreate (required):
+  /// * [String] idempotencyKey (required):
+  ///   As `IdempotencyKey`, but required: the request is queued offline and replayed, so every send carries a client-generated UUID.
   ///
-  /// * [String] idempotencyKey:
-  ///   A client-generated UUID. Repeating a request with the same key returns the first result instead of creating a duplicate, so an offline queue can replay safely. Reusing a key with a different body returns 409 `idempotency_key_reused`. Keys are kept for a configured period.
-  Future<SafetyReportReceipt?> createSafetyReport(SafetyReportCreate safetyReportCreate, { String? idempotencyKey, Future<void>? abortTrigger, }) async {
-    final response = await createSafetyReportWithHttpInfo(safetyReportCreate, idempotencyKey: idempotencyKey, abortTrigger: abortTrigger,);
+  /// * [SafetyReportCreate] safetyReportCreate (required):
+  Future<SafetyReportReceipt?> createSafetyReport(String idempotencyKey, SafetyReportCreate safetyReportCreate, { Future<void>? abortTrigger, }) async {
+    final response = await createSafetyReportWithHttpInfo(idempotencyKey, safetyReportCreate, abortTrigger: abortTrigger,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }

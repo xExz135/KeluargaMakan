@@ -13,6 +13,7 @@ part of keluargamakan_api;
 class CookedMealInput {
   /// Returns a new [CookedMealInput] instance.
   CookedMealInput({
+    required this.ageMs,
     required this.recipeId,
     required this.recipeVersion,
     required this.adaptationId,
@@ -24,6 +25,9 @@ class CookedMealInput {
     required this.servings,
     required this.feedback,
   });
+
+  /// Milliseconds from the edit to sending, measured on the phone (as `KitchenChange.ageMs`).
+  final int ageMs;
 
   /// Identifier of a reference ingredient or library dish.
   final String recipeId;
@@ -53,6 +57,7 @@ class CookedMealInput {
 
   @override
   bool operator ==(Object other) => identical(this, other) || other is CookedMealInput &&
+    other.ageMs == ageMs &&
     other.recipeId == recipeId &&
     other.recipeVersion == recipeVersion &&
     other.adaptationId == adaptationId &&
@@ -67,6 +72,7 @@ class CookedMealInput {
   @override
   int get hashCode =>
     // ignore: unnecessary_parenthesis
+    (ageMs.hashCode) +
     (recipeId.hashCode) +
     (recipeVersion.hashCode) +
     (adaptationId == null ? 0 : adaptationId!.hashCode) +
@@ -79,10 +85,11 @@ class CookedMealInput {
     (feedback == null ? 0 : feedback!.hashCode);
 
   @override
-  String toString() => 'CookedMealInput[recipeId=$recipeId, recipeVersion=$recipeVersion, adaptationId=$adaptationId, variantId=$variantId, substitutionIds=$substitutionIds, cookedOn=$cookedOn, mealType=$mealType, eaterMemberIds=$eaterMemberIds, servings=$servings, feedback=$feedback]';
+  String toString() => 'CookedMealInput[ageMs=$ageMs, recipeId=$recipeId, recipeVersion=$recipeVersion, adaptationId=$adaptationId, variantId=$variantId, substitutionIds=$substitutionIds, cookedOn=$cookedOn, mealType=$mealType, eaterMemberIds=$eaterMemberIds, servings=$servings, feedback=$feedback]';
 
   Map<String, dynamic> toJson() {
     final json = <String, dynamic>{};
+      json[r'ageMs'] = this.ageMs;
       json[r'recipeId'] = this.recipeId;
       json[r'recipeVersion'] = this.recipeVersion;
     if (this.adaptationId != null) {
@@ -111,6 +118,7 @@ class CookedMealInput {
   /// Clones this instance of [CookedMealInput] and returns a new one where some of the
   /// properties have changed.
   CookedMealInput copyWith({
+    int? ageMs,
     String? recipeId,
     int? recipeVersion,
     String? adaptationId,
@@ -125,6 +133,7 @@ class CookedMealInput {
     MealFeedbackInput? feedback,
     bool feedbackSetToNull = false,
   }) => CookedMealInput(
+    ageMs: ageMs ?? this.ageMs,
     recipeId: recipeId ?? this.recipeId,
     recipeVersion: recipeVersion ?? this.recipeVersion,
     adaptationId: adaptationIdSetToNull ? null : adaptationId ?? this.adaptationId,
@@ -148,6 +157,8 @@ class CookedMealInput {
       // Note 1: the values aren't checked for validity beyond being non-null.
       // Note 2: this code is stripped in release mode!
       assert(() {
+        assert(json.containsKey(r'ageMs'), 'Required key "CookedMealInput[ageMs]" is missing from JSON.');
+        assert(json[r'ageMs'] != null, 'Required key "CookedMealInput[ageMs]" has a null value in JSON.');
         assert(json.containsKey(r'recipeId'), 'Required key "CookedMealInput[recipeId]" is missing from JSON.');
         assert(json[r'recipeId'] != null, 'Required key "CookedMealInput[recipeId]" has a null value in JSON.');
         assert(json.containsKey(r'recipeVersion'), 'Required key "CookedMealInput[recipeVersion]" is missing from JSON.');
@@ -169,6 +180,7 @@ class CookedMealInput {
       }());
 
       return CookedMealInput(
+        ageMs: mapValueOfType<int>(json, r'ageMs')!,
         recipeId: mapValueOfType<String>(json, r'recipeId')!,
         recipeVersion: mapValueOfType<int>(json, r'recipeVersion')!,
         adaptationId: mapValueOfType<String>(json, r'adaptationId'),
@@ -230,6 +242,7 @@ class CookedMealInput {
 
   /// The list of required keys that must be present in a JSON.
   static const requiredKeys = <String>{
+    'ageMs',
     'recipeId',
     'recipeVersion',
     'adaptationId',

@@ -1,10 +1,17 @@
 // TEST FIXTURE: not real safety or nutrition data. Fictional IDs only.
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
 import { createApiClient, type Problem, type Schemas } from "./index.js";
-import { SPEC } from "./testing/openapi-document.js";
+import { SPEC, type OpenApiDocument } from "./testing/openapi-document.js";
+
+// The Dart package is generated from the spec without the staff-only admin
+// API (security review T-040 L6); `mobileSpec` is the filter generate.mjs uses.
+const { mobileSpec } = (await import(new URL("../scripts/generate.mjs", import.meta.url).href)) as {
+  mobileSpec: (spec: OpenApiDocument) => OpenApiDocument;
+};
+const MOBILE = mobileSpec(SPEC);
 
 function recordingFetch(status: number, body: unknown, contentType = "application/json") {
   const requests: Request[] = [];
@@ -137,8 +144,6 @@ describe("generated TypeScript client, contract 0.3", () => {
           variantId: null,
         },
         checkId: "check-test-1",
-        ruleSetVersion: "TEST-FIXTURE-rules-1",
-        referenceVersion: "TEST-FIXTURE-1",
         memberIds: ["profile-test-1"],
         reportType: "marked_safe_wrong",
         ingredientLineId: null,
@@ -172,9 +177,9 @@ describe("generated output covers the whole contract", () => {
   });
 
   it("Dart has a model for every component schema and an API class per tag", () => {
-    for (const name of Object.keys(SPEC.components.schemas)) {
+    for (const name of Object.keys(MOBILE.components.schemas)) {
       // Plain string aliases (Id, TimeZone, ...) become `String` in Dart.
-      const s = SPEC.components.schemas[name];
+      const s = MOBILE.components.schemas[name];
       if (s?.type === "string" && !s.enum) continue;
       // Array aliases (MappedIngredientIds) become `Set<String>` or `List` in Dart.
       if (s?.type === "array") continue;
@@ -185,12 +190,36 @@ describe("generated output covers the whole contract", () => {
         name,
       ).not.toThrow();
     }
-    for (const tag of SPEC.tags) {
+    for (const tag of MOBILE.tags) {
       expect(
         () => readFileSync(new URL(`lib/api/${snake(tag.name)}_api.dart`, dartDir)),
         tag.name,
       ).not.toThrow();
     }
+  });
+
+  it("L6 the app's Dart package has no admin API, staff token or admin-only model", () => {
+    expect(MOBILE.tags.map((tag) => tag.name)).not.toContain("Admin");
+    expect(Object.keys(MOBILE.paths).filter((p) => p.startsWith("/v1/admin/"))).toEqual([]);
+    expect(Object.keys(MOBILE.paths).length).toBe(
+      Object.keys(SPEC.paths).filter((p) => !p.startsWith("/v1/admin/")).length,
+    );
+    expect(existsSync(new URL("lib/api/admin_api.dart", dartDir))).toBe(false);
+    const adminOnly = Object.keys(SPEC.components.schemas).filter(
+      (name) => !(name in MOBILE.components.schemas),
+    );
+    expect(adminOnly).toEqual(
+      expect.arrayContaining(["IngredientDraft", "AdminRecipeContent", "AdminSafetyReport"]),
+    );
+    // Household shapes stay, including schemas no operation uses yet.
+    expect(Object.keys(MOBILE.components.schemas)).toEqual(
+      expect.arrayContaining(["RecipeSafety", "PhotoSession", "SafetyReportCreate", "PageCursor"]),
+    );
+    for (const name of adminOnly) {
+      expect(existsSync(new URL(`lib/model/${snake(name)}.dart`, dartDir)), name).toBe(false);
+    }
+    const apiClient = readFileSync(new URL("lib/api_client.dart", dartDir), "utf8");
+    expect(apiClient).not.toContain("staffAuth");
   });
 
   it("Dart enums have no catch-all member that could stand in for an unknown value", () => {

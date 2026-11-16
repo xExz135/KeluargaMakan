@@ -18,14 +18,14 @@ class ReferenceApi {
 
   /// Get the current rule set, reference data and library versions
   ///
-  /// The versions every safety result is computed with (DAT-06, SAF-14): the Cek Aman rule set, the verified reference ingredient data and the recipe library. The phone compares them with the versions stored on its cached safety results; a cached result made with older versions is checked again the next time the recipe is opened online, and the phone refreshes within `refreshWithinHours` (SAF-13, 24 hours target, from configuration). Content changes reach phones without an app release (NFR-20). When the reference data is not loaded or fails verification the answer is 503 `reference_data_unavailable`. Sending the `ETag` back in `If-None-Match` answers 304 with no body while the versions are unchanged.
+  /// The versions every safety result is computed with (DAT-06, SAF-14): the Cek Aman rule set, the verified reference ingredient data and the recipe library. The phone compares them with the versions stored on its cached safety results; a cached result made with older versions is checked again the next time the recipe is opened online, and the phone refreshes within `refreshWithinHours` (SAF-13, 24 hours target, from configuration). Content changes reach phones without an app release (NFR-20). When the reference data is not loaded or fails verification the answer is 503 `reference_data_unavailable`. The `ETag` is derived from the three versions only. Sending it back in `If-None-Match` answers 304 with no body while they are unchanged; the client accepts a 304 only when the `ETag` it sent matches the one it stored.
   ///
   /// Note: This method returns the HTTP [Response].
   ///
   /// Parameters:
   ///
   /// * [String] ifNoneMatch:
-  ///   The `ETag` of the copy the client already has.
+  ///   The `ETag` of the copy the client already has. The server checks authentication first and answers 304 only when this equals the current `ETag`. The client accepts a 304 only for a request in which it sent the `ETag` it has stored, and treats any other 304 as an error (it keeps checking cached results as stale).
   Future<Response> getReferenceVersionsWithHttpInfo({ String? ifNoneMatch, Future<void>? abortTrigger, }) async {
     // ignore: prefer_const_declarations
     final path = r'/v1/reference/versions';
@@ -58,12 +58,12 @@ class ReferenceApi {
 
   /// Get the current rule set, reference data and library versions
   ///
-  /// The versions every safety result is computed with (DAT-06, SAF-14): the Cek Aman rule set, the verified reference ingredient data and the recipe library. The phone compares them with the versions stored on its cached safety results; a cached result made with older versions is checked again the next time the recipe is opened online, and the phone refreshes within `refreshWithinHours` (SAF-13, 24 hours target, from configuration). Content changes reach phones without an app release (NFR-20). When the reference data is not loaded or fails verification the answer is 503 `reference_data_unavailable`. Sending the `ETag` back in `If-None-Match` answers 304 with no body while the versions are unchanged.
+  /// The versions every safety result is computed with (DAT-06, SAF-14): the Cek Aman rule set, the verified reference ingredient data and the recipe library. The phone compares them with the versions stored on its cached safety results; a cached result made with older versions is checked again the next time the recipe is opened online, and the phone refreshes within `refreshWithinHours` (SAF-13, 24 hours target, from configuration). Content changes reach phones without an app release (NFR-20). When the reference data is not loaded or fails verification the answer is 503 `reference_data_unavailable`. The `ETag` is derived from the three versions only. Sending it back in `If-None-Match` answers 304 with no body while they are unchanged; the client accepts a 304 only when the `ETag` it sent matches the one it stored.
   ///
   /// Parameters:
   ///
   /// * [String] ifNoneMatch:
-  ///   The `ETag` of the copy the client already has.
+  ///   The `ETag` of the copy the client already has. The server checks authentication first and answers 304 only when this equals the current `ETag`. The client accepts a 304 only for a request in which it sent the `ETag` it has stored, and treats any other 304 as an error (it keeps checking cached results as stale).
   Future<ReferenceVersions?> getReferenceVersions({ String? ifNoneMatch, Future<void>? abortTrigger, }) async {
     final response = await getReferenceVersionsWithHttpInfo(ifNoneMatch: ifNoneMatch, abortTrigger: abortTrigger,);
     if (response.statusCode >= HttpStatus.badRequest) {

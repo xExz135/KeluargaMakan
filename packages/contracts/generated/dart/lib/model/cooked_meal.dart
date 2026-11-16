@@ -24,6 +24,7 @@ class CookedMeal {
     this.eaterMemberIds = const [],
     required this.servings,
     required this.feedback,
+    required this.changedAt,
     required this.createdAt,
     required this.updatedAt,
   });
@@ -56,6 +57,8 @@ class CookedMeal {
 
   final MealFeedbackInput? feedback;
 
+  final DateTime changedAt;
+
   final DateTime createdAt;
 
   final DateTime updatedAt;
@@ -73,6 +76,7 @@ class CookedMeal {
     _deepEquality.equals(other.eaterMemberIds, eaterMemberIds) &&
     other.servings == servings &&
     other.feedback == feedback &&
+    other.changedAt == changedAt &&
     other.createdAt == createdAt &&
     other.updatedAt == updatedAt;
 
@@ -90,11 +94,12 @@ class CookedMeal {
     (eaterMemberIds.hashCode) +
     (servings.hashCode) +
     (feedback == null ? 0 : feedback!.hashCode) +
+    (changedAt.hashCode) +
     (createdAt.hashCode) +
     (updatedAt.hashCode);
 
   @override
-  String toString() => 'CookedMeal[id=$id, recipeId=$recipeId, recipeVersion=$recipeVersion, adaptationId=$adaptationId, variantId=$variantId, substitutionIds=$substitutionIds, cookedOn=$cookedOn, mealType=$mealType, eaterMemberIds=$eaterMemberIds, servings=$servings, feedback=$feedback, createdAt=$createdAt, updatedAt=$updatedAt]';
+  String toString() => 'CookedMeal[id=$id, recipeId=$recipeId, recipeVersion=$recipeVersion, adaptationId=$adaptationId, variantId=$variantId, substitutionIds=$substitutionIds, cookedOn=$cookedOn, mealType=$mealType, eaterMemberIds=$eaterMemberIds, servings=$servings, feedback=$feedback, changedAt=$changedAt, createdAt=$createdAt, updatedAt=$updatedAt]';
 
   Map<String, dynamic> toJson() {
     final json = <String, dynamic>{};
@@ -121,6 +126,7 @@ class CookedMeal {
     } else {
       json[r'feedback'] = null;
     }
+      json[r'changedAt'] = this.changedAt.toUtc().toIso8601String();
       json[r'createdAt'] = this.createdAt.toUtc().toIso8601String();
       json[r'updatedAt'] = this.updatedAt.toUtc().toIso8601String();
     return json;
@@ -143,6 +149,7 @@ class CookedMeal {
     int? servings,
     MealFeedbackInput? feedback,
     bool feedbackSetToNull = false,
+    DateTime? changedAt,
     DateTime? createdAt,
     DateTime? updatedAt,
   }) => CookedMeal(
@@ -157,6 +164,7 @@ class CookedMeal {
     eaterMemberIds: eaterMemberIds ?? this.eaterMemberIds,
     servings: servings ?? this.servings,
     feedback: feedbackSetToNull ? null : feedback ?? this.feedback,
+    changedAt: changedAt ?? this.changedAt,
     createdAt: createdAt ?? this.createdAt,
     updatedAt: updatedAt ?? this.updatedAt,
   );
@@ -191,6 +199,8 @@ class CookedMeal {
         assert(json.containsKey(r'servings'), 'Required key "CookedMeal[servings]" is missing from JSON.');
         assert(json[r'servings'] != null, 'Required key "CookedMeal[servings]" has a null value in JSON.');
         assert(json.containsKey(r'feedback'), 'Required key "CookedMeal[feedback]" is missing from JSON.');
+        assert(json.containsKey(r'changedAt'), 'Required key "CookedMeal[changedAt]" is missing from JSON.');
+        assert(json[r'changedAt'] != null, 'Required key "CookedMeal[changedAt]" has a null value in JSON.');
         assert(json.containsKey(r'createdAt'), 'Required key "CookedMeal[createdAt]" is missing from JSON.');
         assert(json[r'createdAt'] != null, 'Required key "CookedMeal[createdAt]" has a null value in JSON.');
         assert(json.containsKey(r'updatedAt'), 'Required key "CookedMeal[updatedAt]" is missing from JSON.');
@@ -214,6 +224,7 @@ class CookedMeal {
             : const [],
         servings: mapValueOfType<int>(json, r'servings')!,
         feedback: MealFeedbackInput.fromJson(json[r'feedback']),
+        changedAt: mapDateTime(json, r'changedAt', r'')!,
         createdAt: mapDateTime(json, r'createdAt', r'')!,
         updatedAt: mapDateTime(json, r'updatedAt', r'')!,
       );
@@ -274,6 +285,7 @@ class CookedMeal {
     'eaterMemberIds',
     'servings',
     'feedback',
+    'changedAt',
     'createdAt',
     'updatedAt',
   };

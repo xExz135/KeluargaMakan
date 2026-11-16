@@ -16,6 +16,7 @@ class MemberSafetyResult {
     required this.memberId,
     required this.rulesConsent,
     required this.status,
+    required this.condition,
     this.reasons = const [],
   });
 
@@ -26,6 +27,8 @@ class MemberSafetyResult {
 
   final SafetyStatus status;
 
+  final SafetyCondition? condition;
+
   /// Empty for `safe`; at least one for the other states.
   final List<SafetyReason> reasons;
 
@@ -34,6 +37,7 @@ class MemberSafetyResult {
     other.memberId == memberId &&
     other.rulesConsent == rulesConsent &&
     other.status == status &&
+    other.condition == condition &&
     _deepEquality.equals(other.reasons, reasons);
 
   @override
@@ -42,16 +46,22 @@ class MemberSafetyResult {
     (memberId.hashCode) +
     (rulesConsent.hashCode) +
     (status.hashCode) +
+    (condition == null ? 0 : condition!.hashCode) +
     (reasons.hashCode);
 
   @override
-  String toString() => 'MemberSafetyResult[memberId=$memberId, rulesConsent=$rulesConsent, status=$status, reasons=$reasons]';
+  String toString() => 'MemberSafetyResult[memberId=$memberId, rulesConsent=$rulesConsent, status=$status, condition=$condition, reasons=$reasons]';
 
   Map<String, dynamic> toJson() {
     final json = <String, dynamic>{};
       json[r'memberId'] = this.memberId;
       json[r'rulesConsent'] = this.rulesConsent;
       json[r'status'] = this.status;
+    if (this.condition != null) {
+      json[r'condition'] = this.condition;
+    } else {
+      json[r'condition'] = null;
+    }
       json[r'reasons'] = this.reasons;
     return json;
   }
@@ -62,11 +72,14 @@ class MemberSafetyResult {
     String? memberId,
     RulesConsentStatus? rulesConsent,
     SafetyStatus? status,
+    SafetyCondition? condition,
+    bool conditionSetToNull = false,
     List<SafetyReason>? reasons,
   }) => MemberSafetyResult(
     memberId: memberId ?? this.memberId,
     rulesConsent: rulesConsent ?? this.rulesConsent,
     status: status ?? this.status,
+    condition: conditionSetToNull ? null : condition ?? this.condition,
     reasons: reasons ?? this.reasons,
   );
 
@@ -87,6 +100,7 @@ class MemberSafetyResult {
         assert(json[r'rulesConsent'] != null, 'Required key "MemberSafetyResult[rulesConsent]" has a null value in JSON.');
         assert(json.containsKey(r'status'), 'Required key "MemberSafetyResult[status]" is missing from JSON.');
         assert(json[r'status'] != null, 'Required key "MemberSafetyResult[status]" has a null value in JSON.');
+        assert(json.containsKey(r'condition'), 'Required key "MemberSafetyResult[condition]" is missing from JSON.');
         assert(json.containsKey(r'reasons'), 'Required key "MemberSafetyResult[reasons]" is missing from JSON.');
         assert(json[r'reasons'] != null, 'Required key "MemberSafetyResult[reasons]" has a null value in JSON.');
         return true;
@@ -96,6 +110,7 @@ class MemberSafetyResult {
         memberId: mapValueOfType<String>(json, r'memberId')!,
         rulesConsent: RulesConsentStatus.fromJson(json[r'rulesConsent'])!,
         status: SafetyStatus.fromJson(json[r'status'])!,
+        condition: SafetyCondition.fromJson(json[r'condition']),
         reasons: SafetyReason.listFromJson(json[r'reasons']),
       );
     }
@@ -147,6 +162,7 @@ class MemberSafetyResult {
     'memberId',
     'rulesConsent',
     'status',
+    'condition',
     'reasons',
   };
 }
