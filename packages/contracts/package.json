@@ -27,6 +27,7 @@
     "openapi-fetch": "0.17.0"
   },
   "devDependencies": {
+    "@keluargamakan/cek-aman": "workspace:*",
     "openapi-typescript": "7.13.0",
     "yaml": "2.9.1"
   }

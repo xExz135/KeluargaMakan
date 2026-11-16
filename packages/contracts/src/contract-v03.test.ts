@@ -1,8 +1,15 @@
 // Contract 0.3 (T-040): library, recipes, suggestions, substitutions, meal
 // feedback, safety reports, reference versions and the staff admin endpoints.
 // TEST FIXTURE: not real safety or nutrition data. The contract carries no values.
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 
+import {
+  REASON_CODES,
+  REASON_KINDS,
+  RECIPE_HALAL_STATUSES,
+  SAFETY_STATUSES,
+  SAFETY_SUBJECT_KINDS,
+} from "@keluargamakan/cek-aman";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -691,28 +698,22 @@ describe("meal feedback and safety reports", () => {
     );
   });
 
+  // The engine's own value lists, from its package root (SAF-01): any drift
+  // between the engine and the contract fails here, and nothing is skipped.
   it("SAF-14 the report subject kinds are the Cek Aman safety-log kinds", () => {
-    const log = new URL("../../cek-aman/src/log.ts", import.meta.url);
-    if (!existsSync(log)) return;
-    const text = readFileSync(log, "utf8");
-    const block = /SAFETY_SUBJECT_KINDS = \[([^\]]*)\]/.exec(text)?.[1] ?? "";
-    const kinds = [...block.matchAll(/"([a-z_]+)"/g)].map((m) => m[1]);
-    expect(schema("SafetySubjectKind").enum).toEqual(kinds);
+    expect(SAFETY_SUBJECT_KINDS.length).toBeGreaterThan(0);
+    expect(schema("SafetySubjectKind").enum).toEqual([...SAFETY_SUBJECT_KINDS]);
   });
 
   it("SAF-04 reason codes and kinds are the Cek Aman engine's", () => {
-    const types = new URL("../../cek-aman/src/types.ts", import.meta.url);
-    if (!existsSync(types)) return;
-    const text = readFileSync(types, "utf8");
-    const union = (name: string) =>
-      [
-        ...(new RegExp(`export type ${name} =([^;]*);`).exec(text)?.[1] ?? "").matchAll(
-          /"([a-z_]+)"/g,
-        ),
-      ].map((m) => m[1]);
-    expect(schema("SafetyReasonCode").enum).toEqual(union("ReasonCode"));
-    expect(schema("SafetyReasonKind").enum).toEqual(union("ReasonKind"));
-    expect(schema("SafetyStatus").enum).toEqual(union("SafetyStatus"));
+    expect(REASON_CODES.length).toBeGreaterThan(0);
+    expect(schema("SafetyReasonCode").enum).toEqual([...REASON_CODES]);
+    expect(schema("SafetyReasonKind").enum).toEqual([...REASON_KINDS]);
+    expect(schema("SafetyStatus").enum).toEqual([...SAFETY_STATUSES]);
+  });
+
+  it("LIB-05 the recipe halal status values are the Cek Aman derivation's", () => {
+    expect(schema("HalalStatus").enum).toEqual([...RECIPE_HALAL_STATUSES]);
   });
 });
 

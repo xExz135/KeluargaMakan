@@ -1,5 +1,4 @@
-import { existsSync } from "node:fs";
-
+import * as vocabulary from "@keluargamakan/cek-aman";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -910,19 +909,13 @@ describe("data protection", () => {
   });
 });
 
-// Parity with the Cek Aman vocabulary (T-012). Runs once packages/cek-aman is
-// on the same branch; until then it is reported as skipped.
-const VOCABULARY = new URL("../../cek-aman/src/vocabulary.ts", import.meta.url);
-
+// Parity with the Cek Aman vocabulary (T-012), read from the engine's package
+// root (SAF-01). Any drift fails; nothing is skipped.
 describe("Cek Aman vocabulary parity", () => {
-  it.skipIf(!existsSync(VOCABULARY))(
-    "PRF-03, PRF-04, PRF-08 contract enums equal the Cek Aman vocabulary",
-    async () => {
-      const vocabulary = (await import(VOCABULARY.href)) as Record<string, readonly string[]>;
-      expect(schema("StandardAllergen").enum).toEqual(vocabulary.STANDARD_ALLERGENS);
-      expect(schema("HardRuleType").enum).toEqual(vocabulary.HARD_RULE_TYPES);
-      expect(schema("MappingStatus").enum).toEqual(vocabulary.MAPPING_STATUSES);
-      expect(schema("MappingConfirmer").enum).toEqual(vocabulary.MAPPING_CONFIRMERS);
-    },
-  );
+  it("PRF-03, PRF-04, PRF-08 contract enums equal the Cek Aman vocabulary", () => {
+    expect(schema("StandardAllergen").enum).toEqual([...vocabulary.STANDARD_ALLERGENS]);
+    expect(schema("HardRuleType").enum).toEqual([...vocabulary.HARD_RULE_TYPES]);
+    expect(schema("MappingStatus").enum).toEqual([...vocabulary.MAPPING_STATUSES]);
+    expect(schema("MappingConfirmer").enum).toEqual([...vocabulary.MAPPING_CONFIRMERS]);
+  });
 });

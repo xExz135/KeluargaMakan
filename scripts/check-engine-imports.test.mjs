@@ -25,7 +25,12 @@ const files = {
     "  evaluateMember,",
     '} from "../../../packages/cek-aman/src/evaluate.js";',
   ].join("\n"),
+  // Refused too: reading engine sources as text (T-025 rebase; use the package root's lists).
+  "packages/contracts/src/text-read.test.ts":
+    'const text = readFileSync(new URL("../../cek-aman/src/log.ts", import.meta.url), "utf8");',
   // Allowed.
+  "packages/contracts/src/parity.test.ts":
+    'import { REASON_CODES, SAFETY_SUBJECT_KINDS } from "@keluargamakan/cek-aman";',
   "services/api/src/root.ts": 'import { evaluate } from "@keluargamakan/cek-aman";',
   "services/api/vitest.config.ts":
     'alias: { "@keluargamakan/cek-aman": new URL("../../packages/cek-aman/src/index.ts", import.meta.url) }',
@@ -49,6 +54,7 @@ describe("SAF-01 SAF-12 engine boundary guard (T-025 security re-check N1)", () 
   it("SAF-01 refuses every path into the engine internals from outside the package", () => {
     const flagged = [...new Set(findViolations(Object.keys(files), read).map((v) => v.path))];
     assert.deepEqual(flagged.sort(), [
+      "packages/contracts/src/text-read.test.ts",
       "packages/contracts/src/url.test.ts",
       "services/api/src/dist-planted.ts",
       "services/api/src/dynamic.ts",
