@@ -92,6 +92,75 @@ const staple = {
   'createdAt': '2026-01-01T00:00:00Z',
 };
 
+const fictionalMemberResult = {
+  'memberId': 'profile-test-1',
+  'rulesConsent': 'given',
+  'status': 'check_label',
+  'reasons': [
+    {
+      'kind': 'brand_uncertain',
+      'code': 'brand_not_recorded',
+      'rule': {'ruleId': 'rule-test-1', 'type': 'allergy', 'allergen': 'soy', 'freeText': null},
+      'ingredient': {
+        'lineId': 'line-test-1',
+        'ingredientId': 'fx_smoke_kecap',
+        'displayName': {'id': 'Kecap fiksi', 'en': 'Fictional soy sauce'},
+        'rawName': 'kecap fiksi',
+        'isCustom': false,
+      },
+      'componentPath': <Object>[],
+      'brand': null,
+      'detail': null,
+    },
+  ],
+};
+
+const fictionalSuggestion = {
+  'itemId': 'item-test-1',
+  'recipe': {
+    'recipeId': 'fx_smoke_recipe',
+    'version': 1,
+    'name': {'id': 'Tumis fiktif', 'en': 'Fictional stir-fry'},
+    'description': {'id': 'Resep uji, bukan resep sungguhan.', 'en': 'Test recipe, not a real one.'},
+    'cuisine': 'indonesian',
+    'region': null,
+    'mealTypes': ['dinner'],
+    'prepMinutes': 10,
+    'cookMinutes': 15,
+    'totalMinutes': 25,
+    'difficulty': 'easy',
+    'baseServings': 4,
+    'tags': {'fried': false, 'santan': false, 'spiceLevel': 'medium'},
+    'images': <Object>[],
+    'origin': 'library',
+    'testRecord': {'testedBy': 'Tim uji fiktif', 'testedOn': '2026-01-01'},
+    'baseRecipeId': null,
+  },
+  'servings': 3,
+  'kitchenMatch': {
+    'availableCount': 4,
+    'missingCount': 1,
+    'missing': [
+      {'lineId': 'line-test-2', 'ingredientId': null, 'displayName': null, 'rawName': 'daun fiktif'},
+    ],
+  },
+  'safety': {
+    'checkId': 'check-test-1',
+    'checkedAt': '2026-01-01T00:00:00Z',
+    'ruleSetVersion': 'TEST-FIXTURE-rules-1',
+    'referenceVersion': 'TEST-FIXTURE-1',
+    'members': [
+      fictionalMemberResult,
+      {'memberId': 'profile-test-2', 'rulesConsent': 'none', 'status': 'safe', 'reasons': <Object>[]},
+    ],
+    'halalStatus': {'status': 'check_label', 'findings': <Object>[]},
+  },
+  'tradeOff': null,
+  'adaptation': null,
+  'variant': null,
+  'withinTimeAvailable': true,
+};
+
 void main() {
   final profile = Profile.fromJson(childProfile);
   check(profile != null, 'Profile decodes');
@@ -250,6 +319,60 @@ void main() {
   check(recognized?.confidence == RecognitionConfidence.low, 'REC-03 low confidence decodes');
   check(RecognitionConfidence.fromJson('a_level_from_a_newer_server') == null,
       'REC-02 an unknown confidence is never read as a known level');
+
+  // Contract 0.3: suggestions, recipes and Cek Aman results.
+  final suggestion = Suggestion.fromJson(fictionalSuggestion);
+  check(suggestion != null, 'SUG-09 a suggestion card decodes');
+  final members = suggestion?.safety.members ?? const <MemberSafetyResult>[];
+  check(members.length == 2 && members.first.memberId == 'profile-test-1',
+      'SAF-05 per-member results are keyed by member ID');
+  check(members.first.status == SafetyStatus.checkLabel &&
+          members.first.reasons.single.code == SafetyReasonCode.brandNotRecorded,
+      'SAF-04 a Check the label result decodes with its reason code');
+  check(members.last.rulesConsent == RulesConsentStatus.none,
+      'Q36 the consent state at check time decodes');
+  check(suggestion?.recipe.origin == RecipeOrigin.library_ &&
+          suggestion?.recipe.testRecord?.testedBy == 'Tim uji fiktif',
+      'LIB-01 the test record decodes');
+  check(suggestion?.kitchenMatch.missing.single.rawName == 'daun fiktif',
+      'SUG-10 the missing ingredient is plain text');
+
+  var unknownStatusRejected = false;
+  try {
+    final result = Map<String, dynamic>.from(fictionalMemberResult)
+      ..['status'] = 'a_status_from_a_newer_server';
+    MemberSafetyResult.fromJson(result);
+  } on Error {
+    unknownStatusRejected = true;
+  }
+  check(unknownStatusRejected, 'SAF-04 an unknown status never decodes as a result');
+  check(SafetyStatus.fromJson('a_status_from_a_newer_server') == null,
+      'SAF-04 an unknown status is never mapped to safe');
+  check(AiAvailability.fromJson('off') == AiAvailability.off,
+      'AI-08 "off" decodes as the AI state, not as a boolean');
+
+  final request = roundTrip(SuggestionRequest(
+    eaters: EaterSelection(mode: EaterMode.selected, memberIds: {'profile-test-1'}),
+    mealType: MealType.dinner,
+    timeAvailable: TimeAvailable.upTo30,
+  ));
+  check(request['timeAvailable'] == 'up_to_30' && !request.containsKey('cuisine'),
+      'SUG-02 a suggestion request sends member IDs and leaves defaults out');
+  check(!jsonEncode(request).contains('rule') && !jsonEncode(request).contains('allergen'),
+      'AI-03 a suggestion request carries no rules');
+
+  final meal = roundTrip(MealFeedbackInput(overall: MealRating.no, members: [
+    MemberMealFeedback(memberId: 'profile-test-1', rating: MemberMealRating.ok),
+  ]));
+  check(meal['overall'] == 'no' && (meal['members'] as List).single['rating'] == 'ok',
+      'PRF-13 "no" encodes as text, not as a boolean');
+
+  final nutrition = NutritionPerServing.fromJson({
+    'status': 'unavailable',
+    'ranges': <Object>[],
+  });
+  check(nutrition?.status == NutritionStatus.unavailable && nutrition!.ranges.isEmpty,
+      'NUT-05 nutrition unavailable decodes with no values');
 
   if (failures > 0) {
     stderr.writeln('$failures check(s) failed');

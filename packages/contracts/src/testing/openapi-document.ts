@@ -15,8 +15,15 @@ export interface SchemaObject {
   readonly allOf?: readonly SchemaObject[];
   readonly $ref?: string;
   readonly minimum?: number;
+  readonly minItems?: number;
+  readonly maxItems?: number;
+  readonly pattern?: string;
   readonly description?: string;
   readonly "x-data-sensitivity"?: string;
+  /** A food item shown to a household: requires its Cek Aman result (contract 0.3). */
+  readonly "x-food-item"?: boolean;
+  /** Recipe content that is only ever returned inside a food item. */
+  readonly "x-food-content"?: boolean;
 }
 
 export interface MediaType {
@@ -33,6 +40,7 @@ export interface ParameterObject {
   readonly $ref?: string;
   readonly name?: string;
   readonly in?: string;
+  readonly schema?: SchemaObject;
 }
 
 export interface OperationObject {
@@ -47,6 +55,10 @@ export interface OperationObject {
   readonly "x-requirements"?: readonly string[];
   /** Backlog task that serves an operation designed ahead of its server work. */
   readonly "x-server-task"?: string;
+  /** Server permission a household operation needs (`@Requires`). */
+  readonly "x-permission"?: string;
+  /** Staff roles an admin operation allows. */
+  readonly "x-staff-roles"?: readonly string[];
 }
 
 export interface OpenApiDocument {

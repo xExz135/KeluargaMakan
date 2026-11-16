@@ -61,6 +61,9 @@ String parameterToString(dynamic value) {
   if (value is AgeGroup) {
     return AgeGroupTypeTransformer().encode(value).toString();
   }
+  if (value is AiAvailability) {
+    return AiAvailabilityTypeTransformer().encode(value).toString();
+  }
   if (value is AvatarStyle) {
     return AvatarStyleTypeTransformer().encode(value).toString();
   }
@@ -73,8 +76,23 @@ String parameterToString(dynamic value) {
   if (value is ConsentPurpose) {
     return ConsentPurposeTypeTransformer().encode(value).toString();
   }
+  if (value is Cuisine) {
+    return CuisineTypeTransformer().encode(value).toString();
+  }
   if (value is DevicePlatform) {
     return DevicePlatformTypeTransformer().encode(value).toString();
+  }
+  if (value is DraftDecision) {
+    return DraftDecisionTypeTransformer().encode(value).toString();
+  }
+  if (value is DraftOperation) {
+    return DraftOperationTypeTransformer().encode(value).toString();
+  }
+  if (value is DraftStatus) {
+    return DraftStatusTypeTransformer().encode(value).toString();
+  }
+  if (value is EaterMode) {
+    return EaterModeTypeTransformer().encode(value).toString();
   }
   if (value is ErrorCode) {
     return ErrorCodeTypeTransformer().encode(value).toString();
@@ -85,8 +103,14 @@ String parameterToString(dynamic value) {
   if (value is FoodRefKind) {
     return FoodRefKindTypeTransformer().encode(value).toString();
   }
+  if (value is HalalStatus) {
+    return HalalStatusTypeTransformer().encode(value).toString();
+  }
   if (value is HardRuleType) {
     return HardRuleTypeTypeTransformer().encode(value).toString();
+  }
+  if (value is KitchenAvailability) {
+    return KitchenAvailabilityTypeTransformer().encode(value).toString();
   }
   if (value is KitchenCategory) {
     return KitchenCategoryTypeTransformer().encode(value).toString();
@@ -115,11 +139,41 @@ String parameterToString(dynamic value) {
   if (value is MappingStatus) {
     return MappingStatusTypeTransformer().encode(value).toString();
   }
+  if (value is MealRating) {
+    return MealRatingTypeTransformer().encode(value).toString();
+  }
+  if (value is MealType) {
+    return MealTypeTypeTransformer().encode(value).toString();
+  }
+  if (value is MemberMealRating) {
+    return MemberMealRatingTypeTransformer().encode(value).toString();
+  }
+  if (value is NutrientCode) {
+    return NutrientCodeTypeTransformer().encode(value).toString();
+  }
+  if (value is NutrientUnit) {
+    return NutrientUnitTypeTransformer().encode(value).toString();
+  }
+  if (value is NutritionStatus) {
+    return NutritionStatusTypeTransformer().encode(value).toString();
+  }
   if (value is PhotoSessionStatus) {
     return PhotoSessionStatusTypeTransformer().encode(value).toString();
   }
   if (value is PortionSize) {
     return PortionSizeTypeTransformer().encode(value).toString();
+  }
+  if (value is RecipeDifficulty) {
+    return RecipeDifficultyTypeTransformer().encode(value).toString();
+  }
+  if (value is RecipeLifecycleStatus) {
+    return RecipeLifecycleStatusTypeTransformer().encode(value).toString();
+  }
+  if (value is RecipeOrigin) {
+    return RecipeOriginTypeTransformer().encode(value).toString();
+  }
+  if (value is RecipeSpiceLevel) {
+    return RecipeSpiceLevelTypeTransformer().encode(value).toString();
   }
   if (value is RecognitionConfidence) {
     return RecognitionConfidenceTypeTransformer().encode(value).toString();
@@ -130,6 +184,27 @@ String parameterToString(dynamic value) {
   if (value is RulesConsentStatus) {
     return RulesConsentStatusTypeTransformer().encode(value).toString();
   }
+  if (value is SafetyReasonCode) {
+    return SafetyReasonCodeTypeTransformer().encode(value).toString();
+  }
+  if (value is SafetyReasonKind) {
+    return SafetyReasonKindTypeTransformer().encode(value).toString();
+  }
+  if (value is SafetyReportOutcome) {
+    return SafetyReportOutcomeTypeTransformer().encode(value).toString();
+  }
+  if (value is SafetyReportStatus) {
+    return SafetyReportStatusTypeTransformer().encode(value).toString();
+  }
+  if (value is SafetyReportType) {
+    return SafetyReportTypeTypeTransformer().encode(value).toString();
+  }
+  if (value is SafetyStatus) {
+    return SafetyStatusTypeTransformer().encode(value).toString();
+  }
+  if (value is SafetySubjectKind) {
+    return SafetySubjectKindTypeTransformer().encode(value).toString();
+  }
   if (value is SignInChannel) {
     return SignInChannelTypeTransformer().encode(value).toString();
   }
@@ -139,11 +214,23 @@ String parameterToString(dynamic value) {
   if (value is SpiceLevel) {
     return SpiceLevelTypeTransformer().encode(value).toString();
   }
+  if (value is StaffRole) {
+    return StaffRoleTypeTransformer().encode(value).toString();
+  }
   if (value is StandardAllergen) {
     return StandardAllergenTypeTransformer().encode(value).toString();
   }
+  if (value is SubstitutionSource) {
+    return SubstitutionSourceTypeTransformer().encode(value).toString();
+  }
   if (value is TexturePreference) {
     return TexturePreferenceTypeTransformer().encode(value).toString();
+  }
+  if (value is TimeAvailable) {
+    return TimeAvailableTypeTransformer().encode(value).toString();
+  }
+  if (value is TradeOffKind) {
+    return TradeOffKindTypeTransformer().encode(value).toString();
   }
   return value.toString();
 }

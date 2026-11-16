@@ -13,7 +13,7 @@ export type { components, operations, paths };
 export const CONTRACTS_PACKAGE = "@keluargamakan/contracts" as const;
 
 /** Contract version, equal to `info.version` in openapi.yaml (a test checks this). */
-export const CONTRACT_VERSION = "0.2.3" as const;
+export const CONTRACT_VERSION = "0.3.0" as const;
 
 /** Every named schema in the contract, for example `Schemas["Profile"]`. */
 export type Schemas = components["schemas"];

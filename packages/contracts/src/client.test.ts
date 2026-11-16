@@ -80,6 +80,79 @@ describe("generated TypeScript client", () => {
   });
 });
 
+describe("generated TypeScript client, contract 0.3", () => {
+  it("SUG-01 PRF-09 requests suggestions with member IDs only and reads per-member results", async () => {
+    const set: Schemas["SuggestionSet"] = {
+      id: "set-test-1",
+      page: 1,
+      inputs: {
+        eaters: { mode: "only_me", memberIds: [] },
+        mealType: "lunch",
+        timeAvailable: "up_to_30",
+      },
+      memberIds: ["profile-test-1"],
+      items: [],
+      poolExhausted: false,
+      noSafeRecipe: { closestOptions: [], conflicts: [] },
+      aiAvailability: "off",
+      libraryVersion: "TEST-FIXTURE-library-1",
+      expiresAt: "2026-01-01T01:00:00Z",
+    };
+    const mock = recordingFetch(200, set);
+    const client = createApiClient({ baseUrl: "http://api.test", fetch: mock.fetch });
+
+    const { data, error } = await client.POST("/v1/household/suggestions", {
+      body: {
+        eaters: { mode: "only_me", memberIds: [] },
+        mealType: "lunch",
+        timeAvailable: "up_to_30",
+      },
+    });
+
+    expect(error).toBeUndefined();
+    expect(data?.noSafeRecipe?.closestOptions).toEqual([]);
+    expect(await mock.requests[0]?.json()).toEqual({
+      eaters: { mode: "only_me", memberIds: [] },
+      mealType: "lunch",
+      timeAvailable: "up_to_30",
+    });
+  });
+
+  it("SAF-15 sends a wrong-result report with an Idempotency-Key", async () => {
+    const mock = recordingFetch(202, {
+      reportId: "report-test-1",
+      receivedAt: "2026-01-01T00:00:00Z",
+    });
+    const client = createApiClient({ baseUrl: "http://api.test", fetch: mock.fetch });
+
+    const { data } = await client.POST("/v1/household/safety-reports", {
+      params: { header: { "Idempotency-Key": "00000000-0000-4000-8000-000000000002" } },
+      body: {
+        subject: {
+          kind: "library_recipe",
+          recipeId: "fx_test_recipe",
+          recipeVersion: 1,
+          adaptationId: null,
+          substitutionId: null,
+          variantId: null,
+        },
+        checkId: "check-test-1",
+        ruleSetVersion: "TEST-FIXTURE-rules-1",
+        referenceVersion: "TEST-FIXTURE-1",
+        memberIds: ["profile-test-1"],
+        reportType: "marked_safe_wrong",
+        ingredientLineId: null,
+        note: null,
+      },
+    });
+
+    expect(data?.reportId).toBe("report-test-1");
+    expect(mock.requests[0]?.headers.get("idempotency-key")).toBe(
+      "00000000-0000-4000-8000-000000000002",
+    );
+  });
+});
+
 describe("generated output covers the whole contract", () => {
   const schemaTs = readFileSync(new URL("./generated/schema.ts", import.meta.url), "utf8");
   const dartDir = new URL("../generated/dart/", import.meta.url);
@@ -105,6 +178,8 @@ describe("generated output covers the whole contract", () => {
       if (s?.type === "string" && !s.enum) continue;
       // Array aliases (MappedIngredientIds) become `Set<String>` or `List` in Dart.
       if (s?.type === "array") continue;
+      // Free-form objects (IngredientDraftContent) become `Map<String, Object>`.
+      if (s?.type === "object" && s.properties === undefined) continue;
       expect(
         () => readFileSync(new URL(`lib/model/${snake(name)}.dart`, dartDir)),
         name,
