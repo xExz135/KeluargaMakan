@@ -29,7 +29,7 @@ void main() {
     });
 
     test('SET-03 every contract ErrorCode is known to the app (contract '
-        '0.2.0)', () {
+        '0.3.0)', () {
       for (final code in api.ErrorCode.values) {
         expect(
           ApiErrorCode.fromWire(code.toJson()).wire,
