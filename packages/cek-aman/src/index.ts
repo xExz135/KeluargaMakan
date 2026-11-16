@@ -17,6 +17,21 @@ export {
   type SafetyLogRecord,
   type SafetySubjectKind,
 } from "./log.js";
+export {
+  RECIPE_HALAL_STATUSES,
+  deriveRecipeHalal,
+  type RecipeHalalFinding,
+  type RecipeHalalInput,
+  type RecipeHalalResult,
+  type RecipeHalalStatus,
+  type RecipeLineInput,
+  type RecipeLineRef,
+} from "./recipe/halal.js";
+export {
+  ingredientFromRecognition,
+  type RecognitionOutput,
+  type UnresolvedIngredientInput,
+} from "./recipe/recognition.js";
 export { RULE_SET_VERSION } from "./rule-set.js";
 export type { RuleSummary } from "./rules.js";
 export type * from "./types.js";
