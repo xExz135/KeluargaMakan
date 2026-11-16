@@ -106,7 +106,21 @@ export type HardRule =
 // Engine input and output.
 // ---------------------------------------------------------------------------
 
-export interface RecipeIngredientInput {
+/**
+ * REC-06, SAF-10: photo recognition output (label, confidence, model ID, a
+ * proposed reference ID) has no place in any engine input. These fields can
+ * never be set, so spreading a recognized item into an input fails to
+ * compile; convert it with `ingredientFromRecognition`, which leaves it
+ * unresolved. At run time the engine reads none of them either.
+ */
+export interface RecognitionFieldsAbsent {
+  readonly label?: never;
+  readonly confidence?: never;
+  readonly modelId?: never;
+  readonly proposedIngredientId?: never;
+}
+
+export interface RecipeIngredientInput extends RecognitionFieldsAbsent {
   /**
    * Resolved reference ingredient ID, or null when unresolved: a custom
    * ingredient (KIT-05), or an AI-named ingredient not yet mapped to the

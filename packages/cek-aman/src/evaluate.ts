@@ -60,7 +60,8 @@ interface PreparedMember {
 /** Reason without the rule it was evaluated against. */
 type PartialReason = Omit<SafetyReason, "rule" | "ingredient">;
 
-const NOT_SAFE_KINDS: readonly ReasonKind[] = ["contains", "component"];
+/** Reason kinds that mean "Not safe"; shared with the recipe halal derivation (LIB-05). */
+export const NOT_SAFE_KINDS: readonly ReasonKind[] = ["contains", "component"];
 
 function nonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value !== "";

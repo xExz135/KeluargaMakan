@@ -1,6 +1,6 @@
 // TEST FIXTURE: not real safety or nutrition data
 import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -74,8 +74,17 @@ describe("SAF-01 SAF-10 AI-08 Cek Aman is independent of AI", () => {
     const forbidden =
       /\b(fetch|XMLHttpRequest|WebSocket|Date|Math\.random|crypto|process|require|setTimeout|setInterval|globalThis|performance)\b|\bimport\s*\(/;
     for (const { file, code } of sources) {
-      const specifiers = [...code.matchAll(/\bfrom\s+"([^"]+)"/g)].map((match) => match[1]);
-      for (const specifier of specifiers) expect(specifier, file).toMatch(/^\.\//);
+      // `from "..."` and side-effect `import "..."` specifiers alike.
+      const specifiers = [
+        ...code.matchAll(/\bfrom\s+"([^"]+)"/g),
+        ...code.matchAll(/^\s*import\s+"([^"]+)"/gm),
+      ].map((match) => match[1]!);
+      for (const specifier of specifiers) {
+        // Relative, and still inside the package sources (src/recipe/ imports "../").
+        expect(specifier, file).toMatch(/^\.\.?\//);
+        const target = resolve(dirname(join(sourceDir, file)), specifier);
+        expect(target.startsWith(sourceDir), `${file}: ${specifier}`).toBe(true);
+      }
       // Strip comments before scanning for forbidden globals.
       const body = code.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
       expect(body, file).not.toMatch(forbidden);
