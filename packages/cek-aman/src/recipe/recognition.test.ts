@@ -43,6 +43,36 @@ describe("REC-06 recognized items enter Cek Aman unresolved", () => {
     });
   });
 
+  it("REC-06 SAF-10 a label never resolves the item, even one that names a reference ingredient exactly", () => {
+    // Fictional reference data: each label below would resolve to a verified,
+    // halal, allergen-free ingredient if the converter matched on labels.
+    const reference = [ing("fx-plain"), ing("tahu"), ing("fx-tempe")];
+    const labels = [
+      "fx-plain",
+      "tahu",
+      "fx-tempe",
+      " tahu ",
+      "TAHU",
+      "Fiksi fx-plain",
+      "Fiction fx-plain",
+      "Fiksi tahu",
+    ];
+    const members = [member("m-halal", rules.halal()), member("m-soy", rules.allergy("soy"))];
+    for (const label of labels) {
+      const item = { ...recognized, label, ingredientId: null, options: [] };
+      const converted = ingredientFromRecognition(item);
+      expect(converted, label).toEqual({ ingredientId: null, rawName: label });
+      const result = evaluate({
+        ...input({ reference, recipe: [], members }),
+        ingredients: [converted],
+      });
+      for (const verdict of result.perMember) {
+        expect(verdict.status, `${label} ${verdict.memberId}`).toBe("check_label");
+        expect(verdict.reasons.map((r) => r.code)).toEqual(["ingredient_unresolved"]);
+      }
+    }
+  });
+
   it("REC-06 a missing, inherited or non-string label gives an empty name", () => {
     const proto = Object.prototype as Record<string, unknown>;
     expect(Object.hasOwn(proto, "label")).toBe(false);
