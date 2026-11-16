@@ -107,17 +107,23 @@ export type HardRule =
 // ---------------------------------------------------------------------------
 
 /**
- * REC-06, SAF-10: photo recognition output (label, confidence, model ID, a
- * proposed reference ID) has no place in any engine input. These fields can
- * never be set, so spreading a recognized item into an input fails to
- * compile; convert it with `ingredientFromRecognition`, which leaves it
- * unresolved. At run time the engine reads none of them either.
+ * REC-06, SAF-10: photo recognition output (contract 0.3 `RecognizedItem`) has
+ * no place in any engine input. Its `label`, `confidence` and `options` (and
+ * an AI service's `modelId`) can never be set here, so spreading a recognized
+ * item into an input fails to compile; convert it with
+ * `ingredientFromRecognition`, which leaves it unresolved.
+ *
+ * At run time the engine ignores those fields, but it does read
+ * `ingredientId`, and a recognized item carries the API's unconfirmed name
+ * match there. The engine cannot tell it from a confirmed one, so this type
+ * and the converter are the guard, together with REC-04 in the API (an
+ * unconfirmed result never reaches Cek Aman).
  */
 export interface RecognitionFieldsAbsent {
   readonly label?: never;
   readonly confidence?: never;
+  readonly options?: never;
   readonly modelId?: never;
-  readonly proposedIngredientId?: never;
 }
 
 export interface RecipeIngredientInput extends RecognitionFieldsAbsent {
