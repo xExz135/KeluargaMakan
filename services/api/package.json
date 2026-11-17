@@ -16,7 +16,7 @@
     "@keluargamakan/cek-aman": "workspace:*",
     "@keluargamakan/contracts": "workspace:*",
     "@keluargamakan/reference-data": "workspace:*",
-    "@nestjs/common": "12.3.2",
+    "@nestjs/common": "12.5.0",
     "@nestjs/core": "12.3.2",
     "@nestjs/platform-fastify": "12.3.2",
     "fastify": "5.12.7",
