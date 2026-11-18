@@ -31,6 +31,12 @@ export interface CheckEater {
   readonly memberId: string;
   readonly rulesConsent: RulesConsentStatus;
   readonly hardRules: readonly HardRule[];
+  /**
+   * Security review T-041 L1: the member's `health_rules_stamp`, read before
+   * the rules. The log write compares it under the member lock, so a check
+   * made with rules or consent that changed since is never served.
+   */
+  readonly rulesStamp: string;
 }
 
 async function eaterIds(
@@ -88,10 +94,25 @@ export async function loadCheckEaters(
   selection: EaterSelection,
 ): Promise<CheckEater[]> {
   const ids = await eaterIds(db, householdId, selection);
+  // Stamp first, rules second: a change after the stamp is caught at the
+  // log write; a change before it is in both.
+  const { rows } = await withDbErrors(() =>
+    db.query<{ id: string; stamp: string }>(
+      `SELECT id, health_rules_stamp(id) AS stamp
+         FROM profile WHERE household_id = $1 AND id = ANY($2::uuid[])`,
+      [householdId, ids],
+    ),
+  );
+  const stamps = new Map(rows.map((row) => [row.id, row.stamp]));
   const members = await loadRulesForEvaluation(db, keys, householdId, ids);
-  return members.map((member) => ({
-    memberId: member.profileId,
-    rulesConsent: member.consent,
-    hardRules: member.hardRules ?? [],
-  }));
+  return members.map((member) => {
+    const rulesStamp = stamps.get(member.profileId);
+    if (rulesStamp === undefined) throw new NotFoundError("profile");
+    return {
+      memberId: member.profileId,
+      rulesConsent: member.consent,
+      hardRules: member.hardRules ?? [],
+      rulesStamp,
+    };
+  });
 }

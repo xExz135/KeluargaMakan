@@ -11,6 +11,9 @@ import type { SqlExecutor } from "../db/executor.js";
 import { HealthDataKeys } from "../db/health-data-keys.js";
 import { migrate } from "../db/migrate.js";
 import { readRecipeHalalLog } from "../db/recipe-halal-log.js";
+import { recordHealthConsent, withdrawHealthConsent } from "../db/consent.js";
+import { RulesChangedError } from "../db/errors.js";
+import { insertHardRule } from "../db/hard-rules.js";
 import { readSafetyLog } from "../db/safety-log.js";
 import { pgliteTarget, type TestDatabase } from "../db/testing/databases.js";
 import { randomLocalKeys, seedHousehold, type SeededHousehold } from "../db/testing/seed.js";
@@ -21,6 +24,7 @@ import {
   type CheckContext,
   type FoodCandidate,
 } from "./checked-serving.js";
+import { loadCheckEaters } from "./eaters.js";
 
 const SRC = fileURLToPath(new URL("..", import.meta.url));
 const SEAM = join("safety", "checked-serving.ts");
@@ -125,6 +129,11 @@ let db: SqlExecutor;
 let keys: HealthDataKeys;
 let home: SeededHousehold;
 let reference: LoadedReference;
+let managerStamp: string;
+
+const stampOf = async (profileId: string) =>
+  (await db.query<{ s: string }>(`SELECT health_rules_stamp($1) AS s`, [profileId])).rows[0]?.s ??
+  "";
 
 beforeAll(async () => {
   opened = await pgliteTarget.open();
@@ -142,6 +151,7 @@ beforeAll(async () => {
   const loaded = source.current();
   if (loaded === null) throw new Error("no reference");
   reference = loaded;
+  managerStamp = await stampOf(home.managerProfileId);
 });
 afterAll(async () => {
   await opened.close();
@@ -163,6 +173,7 @@ function context(): CheckContext {
         memberId: home.managerProfileId,
         rulesConsent: "given",
         hardRules: [{ ruleId: "fx-rule-1", type: "allergy", allergen: "shrimp" }],
+        rulesStamp: managerStamp,
       },
     ],
     recordedBrands: new Map(),
@@ -245,5 +256,92 @@ describe("SAF-02 SAF-14 checkFood and serveChecked", () => {
       )
     ).rows[0]?.n;
     expect(after).toBe(before);
+  });
+});
+
+describe("L1 SAF-12 PRF-11 SET-04 a check made with rules or consent that changed is never served", () => {
+  const logsOf = async (householdId: string) =>
+    (
+      await db.query<{ n: number }>(
+        `SELECT count(*)::int AS n FROM safety_log WHERE household_id = $1`,
+        [householdId],
+      )
+    ).rows[0]?.n;
+
+  async function consentedHousehold(): Promise<SeededHousehold> {
+    const household = await seedHousehold(db);
+    await recordHealthConsent(db, {
+      householdId: household.householdId,
+      profileId: household.managerProfileId,
+      decision: "given",
+      textVersion: "health-data-draft-1",
+      language: "id",
+      recordedByAccountId: household.accountId,
+    });
+    return household;
+  }
+
+  async function checkNow(household: SeededHousehold) {
+    const eaters = await loadCheckEaters(db, keys, household.householdId, {
+      mode: "only_me",
+      memberIds: [],
+    });
+    const pending = checkFood(
+      {
+        householdId: household.householdId,
+        eaters,
+        recordedBrands: new Map(),
+        reference,
+        evaluatedAt: new Date(),
+      },
+      candidate,
+    );
+    if (pending === null) throw new Error("not checked");
+    return pending;
+  }
+
+  it("L1 P2 a rule added after the check: nothing is served (no stale Safe) and nothing is logged", async () => {
+    const household = await consentedHousehold();
+    const pending = await checkNow(household);
+    expect(pending.statuses[0]?.status).toBe("safe");
+    await insertHardRule(db, keys, {
+      householdId: household.householdId,
+      profileId: household.managerProfileId,
+      rule: { type: "allergy", allergen: "shrimp" },
+      mappingConfirmedBy: null,
+    });
+    await expect(serveChecked(db, keys, [pending])).rejects.toBeInstanceOf(RulesChangedError);
+    expect(await logsOf(household.householdId)).toBe(0);
+    // Checked again with the current rules, the dish is Not safe.
+    const [served] = await serveChecked(db, keys, [await checkNow(household)]);
+    expect(served?.safety.members[0]?.status).toBe("not_safe");
+  });
+
+  it("L1 P3 consent withdrawn after the check: no body with the withdrawn rule text is returned", async () => {
+    const household = await consentedHousehold();
+    await insertHardRule(db, keys, {
+      householdId: household.householdId,
+      profileId: household.managerProfileId,
+      rule: { type: "free_text", freeText: "alergi udang fiksi", mappedIngredientIds: [] },
+      mappingConfirmedBy: null,
+    });
+    const pending = await checkNow(household);
+    await withdrawHealthConsent(db, {
+      householdId: household.householdId,
+      profileId: household.managerProfileId,
+      withdrawnAt: new Date(),
+      deletionWindowDays: 30,
+    });
+    let served: unknown = null;
+    await expect(
+      serveChecked(db, keys, [pending]).then((result) => {
+        served = result;
+      }),
+    ).rejects.toBeInstanceOf(RulesChangedError);
+    expect(served).toBeNull();
+    expect(await logsOf(household.householdId)).toBe(0);
+    const [again] = await serveChecked(db, keys, [await checkNow(household)]);
+    expect(again?.safety.members[0]).toMatchObject({ rulesConsent: "withdrawn", reasons: [] });
+    expect(JSON.stringify(again)).not.toContain("alergi udang fiksi");
   });
 });

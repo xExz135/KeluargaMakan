@@ -16,7 +16,7 @@ import {
 } from "@keluargamakan/cek-aman";
 import type { Schemas } from "@keluargamakan/contracts";
 
-import { InvalidDataError } from "../db/errors.js";
+import { InvalidDataError, RulesChangedError } from "../db/errors.js";
 import type { SqlExecutor } from "../db/executor.js";
 import type { HealthDataKeys } from "../db/health-data-keys.js";
 import { insertRecipeHalalLog } from "../db/recipe-halal-log.js";
@@ -109,6 +109,8 @@ interface PendingInternals {
   readonly safetyLog: SafetyLogRecord;
   readonly halalLog: RecipeHalalLogRecord;
   readonly body: RecipeSafetyBody;
+  /** Each eater's rule stamp when the check ran (security review T-041 L1). */
+  readonly ruleStamps: ReadonlyMap<string, string>;
   served: boolean;
 }
 
@@ -391,6 +393,7 @@ export function checkFood(context: CheckContext, candidate: FoodCandidate): Pend
       safetyLog: safety.logRecord,
       halalLog: halal.logRecord,
       body,
+      ruleStamps: new Map(context.eaters.map((eater) => [eater.memberId, eater.rulesStamp])),
       served: false,
     });
     return pending;
@@ -401,6 +404,19 @@ export function checkFood(context: CheckContext, candidate: FoodCandidate): Pend
 }
 
 // ---------------------------------------------------------------- step 2: log, then serve
+
+/** The eaters' stamps of checks served together; one request, so they must agree. */
+function ruleStampsOf(entries: readonly PendingInternals[]): Map<string, string> {
+  const stamps = new Map<string, string>();
+  for (const entry of entries) {
+    for (const [memberId, stamp] of entry.ruleStamps) {
+      const known = stamps.get(memberId);
+      if (known !== undefined && known !== stamp) throw new RulesChangedError();
+      stamps.set(memberId, stamp);
+    }
+  }
+  return stamps;
+}
 
 /**
  * Writes the logs of every check in one transaction and returns the bodies
@@ -425,10 +441,14 @@ export async function serveChecked(
       db,
       keys,
       entries.map(({ entry }) => ({ logId: entry.checkId, record: entry.safetyLog })),
-      async (tx) => {
-        for (const { entry } of entries) {
-          await insertRecipeHalalLog(tx, entry.checkId, entry.halalLog);
-        }
+      {
+        inTransaction: async (tx) => {
+          for (const { entry } of entries) {
+            await insertRecipeHalalLog(tx, entry.checkId, entry.halalLog);
+          }
+        },
+        // L1: the eaters' rules and consent must still be the ones checked.
+        expectedRuleStamps: ruleStampsOf(entries.map(({ entry }) => entry)),
       },
     );
   } catch (error) {

@@ -524,6 +524,61 @@ describe("LIB-08 SAF-02 library search", () => {
     }
   });
 
+  it("L1 SAF-12 when an eater's rules change during a request, it checks once more; a second change answers 503 and serves nothing", async () => {
+    const session = await signInWithHousehold(api);
+    const kakak = await memberWithRules(session, "Kakak", [
+      { type: "allergy", allergen: "shrimp" },
+    ]);
+    let changes = 0;
+    const changing = (limit: number) => {
+      const wrap = (executor: SqlExecutor): SqlExecutor => ({
+        async query(text, params) {
+          if (text.includes("health_rules_stamp(p.id) AS rules_stamp") && changes < limit) {
+            changes += 1;
+            // A rule edit lands between the check and its log write.
+            await executor.query(
+              `UPDATE hard_rule SET updated_at = updated_at + interval '1 second' WHERE profile_id = $1`,
+              [kakak],
+            );
+          }
+          return executor.query(text, params);
+        },
+        execScript: (sql) => executor.execScript(sql),
+        transaction: (fn) => executor.transaction((tx) => fn(wrap(tx))),
+      });
+      return wrap(db);
+    };
+    for (const [limit, status] of [
+      [1, 200],
+      [Number.POSITIVE_INFINITY, 503],
+    ] as const) {
+      changes = 0;
+      const h = await startHarness(changing(limit), {
+        reference: referenceSourceOf(fixture.verified),
+        keys,
+        secrets: api.secrets,
+      });
+      try {
+        const before = await count(`SELECT count(*) AS n FROM safety_log WHERE household_id = $1`, [
+          session.householdId,
+        ]);
+        const response = await search(session, { eaters: selected(kakak), limit: 2 }, h);
+        expect(response.status, response.raw).toBe(status);
+        const after = await count(`SELECT count(*) AS n FROM safety_log WHERE household_id = $1`, [
+          session.householdId,
+        ]);
+        expect(after - before).toBe(status === 200 ? 2 : 0);
+        if (status === 503) {
+          expect((response.body as { code: string }).code).toBe("service_unavailable");
+          expect(response.headers["retry-after"]).toBeDefined();
+          expect(changes).toBe(2);
+        }
+      } finally {
+        await h.close();
+      }
+    }
+  });
+
   it("SAF-02 AI-08 without verified reference data the answer is 503, never an unchecked list", async () => {
     const noReference = await startHarness(db, { keys });
     try {

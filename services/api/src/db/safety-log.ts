@@ -10,7 +10,7 @@ import {
 } from "@keluargamakan/cek-aman";
 
 import { bucketFor, decryptField, encryptField } from "./crypto/data-key-cipher.js";
-import { InvalidDataError, NotFoundError, withDbErrors } from "./errors.js";
+import { InvalidDataError, NotFoundError, RulesChangedError, withDbErrors } from "./errors.js";
 import type { SqlExecutor } from "./executor.js";
 import type { HealthDataKeys, MemberDataKey } from "./health-data-keys.js";
 import { isReferenceId, isReferenceVersion, isUuid } from "./ids.js";
@@ -159,6 +159,7 @@ function validate(record: SafetyLogRecord): void {
 interface MemberStateRow {
   profile_id: string;
   consent_active: boolean;
+  rules_stamp: string;
   k_id: string | null;
   rule_ids: string[];
 }
@@ -231,7 +232,16 @@ export async function insertSafetyLogs(
   db: SqlExecutor,
   keys: HealthDataKeys,
   writes: readonly SafetyLogWrite[],
-  inTransaction?: (tx: SqlExecutor) => Promise<void>,
+  options: {
+    /** Runs in the same transaction after the logs are written. */
+    readonly inTransaction?: (tx: SqlExecutor) => Promise<void>;
+    /**
+     * Security review T-041 L1: the `health_rules_stamp` of every member as
+     * read before the check. Under the member lock each must still match, or
+     * nothing is written (`RulesChangedError`).
+     */
+    readonly expectedRuleStamps?: ReadonlyMap<string, string>;
+  } = {},
 ): Promise<string[]> {
   if (writes.length === 0) throw new InvalidDataError("no safety log to write");
   const prepared = writes.map(prepare);
@@ -262,6 +272,7 @@ export async function insertSafetyLogs(
         const { rows } = await tx.query<MemberStateRow>(
           `SELECT p.id AS profile_id,
                   health_consent_active(p.id) AS consent_active,
+                  health_rules_stamp(p.id) AS rules_stamp,
                   k.id AS k_id,
                   COALESCE(
                     (SELECT array_agg(h.id::text) FROM hard_rule h WHERE h.profile_id = p.id),
@@ -274,11 +285,20 @@ export async function insertSafetyLogs(
         );
         for (const row of rows) states.set(row.profile_id, row);
       }
+      const expected = options.expectedRuleStamps;
+      if (expected !== undefined) {
+        for (const memberId of memberIds) {
+          const stamp = expected.get(memberId);
+          if (stamp === undefined || states.get(memberId)?.rules_stamp !== stamp) {
+            throw new RulesChangedError();
+          }
+        }
+      }
 
       for (const log of prepared) {
         await writeLog(tx, log, states, preloaded);
       }
-      if (inTransaction !== undefined) await inTransaction(tx);
+      if (options.inTransaction !== undefined) await options.inTransaction(tx);
       return prepared.map((log) => log.logId);
     }),
   );

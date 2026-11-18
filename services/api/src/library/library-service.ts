@@ -4,6 +4,7 @@ import type { LibraryConfig } from "../../config/library.js";
 import { ApiError, validationFailed } from "../api-error.js";
 import type { Clock } from "../auth/auth-service.js";
 import type { HouseholdScope } from "../authz/access.js";
+import { RulesChangedError } from "../db/errors.js";
 import type { SqlExecutor } from "../db/executor.js";
 import type { HealthDataKeys } from "../db/health-data-keys.js";
 import { isReferenceId } from "../db/ids.js";
@@ -328,7 +329,36 @@ export class LibraryService {
     return { status: 200, etag, mediaType: image.mediaType, bytes };
   }
 
-  async search(
+  /**
+   * Security review T-041 L1: when an eater's rules or consent changed between
+   * the check and its log write, nothing was served; check once more with the
+   * current rules. A second change answers 503 (`ConcurrentUpdateError`).
+   */
+  async #onceMore<T>(run: () => Promise<T>): Promise<T> {
+    try {
+      return await run();
+    } catch (error) {
+      if (error instanceof RulesChangedError) return run();
+      throw error;
+    }
+  }
+
+  search(
+    scope: HouseholdScope,
+    input: LibrarySearchInput,
+  ): Promise<Schemas["LibrarySearchResult"]> {
+    return this.#onceMore(() => this.#search(scope, input));
+  }
+
+  detail(
+    scope: HouseholdScope,
+    recipeId: string,
+    input: RecipeDetailInput,
+  ): Promise<Schemas["RecipeDetail"]> {
+    return this.#onceMore(() => this.#detail(scope, recipeId, input));
+  }
+
+  async #search(
     scope: HouseholdScope,
     input: LibrarySearchInput,
   ): Promise<Schemas["LibrarySearchResult"]> {
@@ -412,7 +442,7 @@ export class LibraryService {
     };
   }
 
-  async detail(
+  async #detail(
     scope: HouseholdScope,
     recipeId: string,
     input: RecipeDetailInput,
