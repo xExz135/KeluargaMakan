@@ -12,3 +12,18 @@ export function isUuid(value: unknown): value is string {
 export function isReferenceId(value: unknown): value is string {
   return typeof value === "string" && REFERENCE_ID.test(value);
 }
+
+/**
+ * DAT-06, SAF-14: the pattern of a reference data version as results record
+ * it (`<data version>@sha256:<content hash>`, packages/reference-data). No
+ * spaces, quotes or control characters, so a name can never be stored as a
+ * version. The one copy: migration 0012 builds its CHECK constraints from
+ * this text, the log writers test against it, and the reference loader
+ * refuses a dataset whose version does not match (security review T-041 L4).
+ */
+export const REFERENCE_VERSION_PATTERN = "^[A-Za-z0-9][A-Za-z0-9._+/:@-]{0,199}$";
+const REFERENCE_VERSION = new RegExp(REFERENCE_VERSION_PATTERN);
+
+export function isReferenceVersion(value: unknown): value is string {
+  return typeof value === "string" && REFERENCE_VERSION.test(value);
+}

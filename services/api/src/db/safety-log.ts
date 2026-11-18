@@ -13,7 +13,7 @@ import { bucketFor, decryptField, encryptField } from "./crypto/data-key-cipher.
 import { InvalidDataError, NotFoundError, withDbErrors } from "./errors.js";
 import type { SqlExecutor } from "./executor.js";
 import type { HealthDataKeys, MemberDataKey } from "./health-data-keys.js";
-import { isReferenceId, isUuid } from "./ids.js";
+import { isReferenceId, isReferenceVersion, isUuid } from "./ids.js";
 import { lockMembers } from "./locks.js";
 
 /**
@@ -44,12 +44,6 @@ import { lockMembers } from "./locks.js";
 
 const REASON_CODE = /^[a-z_]{1,64}$/;
 const VERSION = /^[A-Za-z0-9][A-Za-z0-9._+/-]{0,99}$/;
-/**
- * The verified reference version is `<data version>@sha256:<content hash>`
- * (packages/reference-data, migration 0012). Still no spaces, so a name can
- * never be logged as a version.
- */
-const REFERENCE_VERSION = /^[A-Za-z0-9][A-Za-z0-9._+/:@-]{0,199}$/;
 const STATUSES: readonly SafetyStatus[] = ["safe", "not_safe", "check_label"];
 const DETAILS_VERSION = 2;
 
@@ -133,7 +127,7 @@ function validate(record: SafetyLogRecord): void {
     "subject.version is invalid",
   );
   requireValid(VERSION.test(record.ruleSetVersion), "ruleSetVersion is invalid");
-  requireValid(REFERENCE_VERSION.test(record.referenceVersion), "referenceVersion is invalid");
+  requireValid(isReferenceVersion(record.referenceVersion), "referenceVersion is invalid");
   requireValid(
     !Number.isNaN(Date.parse(record.evaluatedAt)) && /^\d{4}-\d{2}-\d{2}T/.test(record.evaluatedAt),
     "evaluatedAt must be ISO 8601",

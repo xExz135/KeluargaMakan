@@ -12,7 +12,7 @@ import {
 
 import { InvalidDataError, NotFoundError, withDbErrors } from "./errors.js";
 import type { SqlExecutor } from "./executor.js";
-import { isReferenceId, isUuid } from "./ids.js";
+import { isReferenceId, isReferenceVersion, isUuid } from "./ids.js";
 
 /**
  * Recipe halal log (`keluargamakan.recipe-halal-log/1`; SAF-14, LIB-05,
@@ -28,7 +28,6 @@ import { isReferenceId, isUuid } from "./ids.js";
  */
 
 const VERSION = /^[A-Za-z0-9][A-Za-z0-9._+/-]{0,99}$/;
-const REFERENCE_VERSION = /^[A-Za-z0-9][A-Za-z0-9._+/:@-]{0,199}$/;
 const DETAIL = /^[a-z0-9][a-z0-9_.-]{0,99}$/;
 
 function requireValid(condition: boolean, message: string): asserts condition {
@@ -104,7 +103,7 @@ export function checkedHalalLogRecord(record: RecipeHalalLogRecord): RecipeHalal
     "subject.version is invalid",
   );
   requireValid(VERSION.test(record.ruleSetVersion), "ruleSetVersion is invalid");
-  requireValid(REFERENCE_VERSION.test(record.referenceVersion), "referenceVersion is invalid");
+  requireValid(isReferenceVersion(record.referenceVersion), "referenceVersion is invalid");
   requireValid(
     !Number.isNaN(Date.parse(record.evaluatedAt)) && /^\d{4}-\d{2}-\d{2}T/.test(record.evaluatedAt),
     "evaluatedAt must be ISO 8601",
