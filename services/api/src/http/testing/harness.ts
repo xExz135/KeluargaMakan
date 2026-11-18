@@ -8,6 +8,7 @@ import { parse } from "yaml";
 
 import { resolveApiConfig, type ApiConfig, type ApiConfigOverrides } from "../../../config/api.js";
 import type { KitchenConfig } from "../../../config/kitchen.js";
+import type { LibraryConfig } from "../../../config/library.js";
 import type { ProfileConfig } from "../../../config/profiles.js";
 import { resolveTargets, type TargetOverrides, type Targets } from "../../../config/targets.js";
 import type { Clock } from "../../auth/auth-service.js";
@@ -116,6 +117,7 @@ export async function startHarness(
     /** Verified reference dataset (default: none, so catalog routes answer 503). */
     readonly reference?: ReferenceSource;
     readonly kitchenConfig?: KitchenConfig;
+    readonly libraryConfig?: LibraryConfig;
     readonly profileConfig?: ProfileConfig;
     readonly codeSender?: SignInCodeSender;
     /** Share another harness's secrets so its tokens are recognised. */
@@ -139,6 +141,7 @@ export async function startHarness(
     ...(options.catalog === undefined ? {} : { catalog: options.catalog }),
     ...(options.reference === undefined ? {} : { reference: options.reference }),
     ...(options.kitchenConfig === undefined ? {} : { kitchenConfig: options.kitchenConfig }),
+    ...(options.libraryConfig === undefined ? {} : { libraryConfig: options.libraryConfig }),
     ...(options.profileConfig === undefined ? {} : { profileConfig: options.profileConfig }),
     secrets,
     codeSender: options.codeSender ?? sender,

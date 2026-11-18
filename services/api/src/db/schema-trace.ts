@@ -434,7 +434,8 @@ export const SCHEMA_TRACE: Readonly<Record<string, TableTrace>> = {
       tag_fried: "Tags: fried (LIB-03)",
       tag_santan: "Tags: santan (LIB-03)",
       tag_spice_level: "Tags: spice level (LIB-03)",
-      nutrition_per_serving: "Nutrition per serving: estimate ranges or unavailable (LIB-03, NUT-05)",
+      nutrition_per_serving:
+        "Nutrition per serving: estimate ranges or unavailable (LIB-03, NUT-05)",
       tested_by: "Tester: display label (LIB-01, NFR-23, QUESTIONS #79)",
       tested_on: "Test date (LIB-01, NFR-23)",
       test_notes: "Tester: staff notes on the test",

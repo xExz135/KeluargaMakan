@@ -9,6 +9,7 @@ import type { FastifyReply, FastifyRequest } from "fastify";
 
 import type { ApiConfig } from "../../config/api.js";
 import { defaultKitchenConfig, type KitchenConfig } from "../../config/kitchen.js";
+import { defaultLibraryConfig, type LibraryConfig } from "../../config/library.js";
 import { defaultProfileConfig, type ProfileConfig } from "../../config/profiles.js";
 import { defaultTargets, type Targets } from "../../config/targets.js";
 import { readAccount } from "../auth/accounts.js";
@@ -24,6 +25,8 @@ import { HealthController } from "../health/health.controller.js";
 import { HouseholdService } from "../households/household-service.js";
 import { KitchenController } from "../kitchen/kitchen.controller.js";
 import { KitchenService } from "../kitchen/kitchen-service.js";
+import { LibraryController } from "../library/library.controller.js";
+import { LibraryService } from "../library/library-service.js";
 import type { ApiLogger } from "../logger.js";
 import { ProfileService } from "../profiles/profile-service.js";
 import { ProfilesController } from "../profiles/profiles.controller.js";
@@ -40,6 +43,8 @@ import {
   HOUSEHOLD_SERVICE,
   KITCHEN_CONFIG,
   KITCHEN_SERVICE,
+  LIBRARY_CONFIG,
+  LIBRARY_SERVICE,
   PROFILE_SERVICE,
   REFERENCE_SOURCE,
 } from "./tokens.js";
@@ -62,6 +67,8 @@ export interface AppDeps {
   readonly reference?: ReferenceSource;
   /** Dapur Saya settings (`config/kitchen.ts`): default staples, limits. */
   readonly kitchenConfig?: KitchenConfig;
+  /** Recipe library settings (`config/library.ts`): page sizes, served cuisines. */
+  readonly libraryConfig?: LibraryConfig;
   readonly secrets: AuthSecrets;
   readonly codeSender: SignInCodeSender;
   readonly logger: ApiLogger;
@@ -95,6 +102,7 @@ export const CONTROLLERS = Object.freeze([
   ReferenceController,
   ProfilesController,
   KitchenController,
+  LibraryController,
   HealthController,
 ] as const);
 
@@ -173,6 +181,16 @@ export async function createApp(deps: AppDeps): Promise<NestFastifyApplication> 
     ...(deps.clock === undefined ? {} : { clock: deps.clock }),
   });
 
+  const libraryConfig = deps.libraryConfig ?? defaultLibraryConfig;
+  const libraryService = new LibraryService({
+    db: deps.db,
+    keys: deps.keys,
+    reference,
+    config: libraryConfig,
+    hashKey: deps.secrets.hashKey,
+    ...(deps.clock === undefined ? {} : { clock: deps.clock }),
+  });
+
   @Catch()
   class ProblemFilter implements ExceptionFilter {
     catch(error: unknown, host: ArgumentsHost): void {
@@ -198,6 +216,8 @@ export async function createApp(deps: AppDeps): Promise<NestFastifyApplication> 
       { provide: PROFILE_SERVICE, useValue: profileService },
       { provide: KITCHEN_SERVICE, useValue: kitchenService },
       { provide: KITCHEN_CONFIG, useValue: kitchenConfig },
+      { provide: LIBRARY_SERVICE, useValue: libraryService },
+      { provide: LIBRARY_CONFIG, useValue: libraryConfig },
       { provide: REFERENCE_SOURCE, useValue: reference },
       { provide: HEALTH_CHECKS, useValue: { db: deps.db, reference } },
       { provide: ACCOUNT_READER, useValue: { read: (id: string) => readAccount(deps.db, id) } },

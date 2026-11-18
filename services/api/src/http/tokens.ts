@@ -8,3 +8,5 @@ export const KITCHEN_SERVICE = Symbol("KitchenService");
 export const KITCHEN_CONFIG = Symbol("KitchenConfig");
 export const REFERENCE_SOURCE = Symbol("ReferenceSource");
 export const HEALTH_CHECKS = Symbol("HealthChecks");
+export const LIBRARY_SERVICE = Symbol("LibraryService");
+export const LIBRARY_CONFIG = Symbol("LibraryConfig");
