@@ -101,7 +101,7 @@ beforeAll(async () => {
   await migrate(db);
   await loadFixtureLibrary(db, FIXTURE);
   keys = new HealthDataKeys(randomLocalKeys());
-  api = await startHarness(db, { reference: referenceSourceOf(fixture.verified), keys });
+  api = recording(await startHarness(db, { reference: referenceSourceOf(fixture.verified), keys }));
   home = await signInWithHousehold(api);
 });
 
@@ -112,6 +112,33 @@ afterAll(async () => {
 });
 
 // ---------------------------------------------------------------- helpers
+
+/** Every successful food-route response of the main harness (security review T-041 L2). */
+const servedFood: Response[] = [];
+const FOOD_ROUTE = /^\/v1\/library\/recipes\/(search|[^/]+\/detail)$/;
+
+function recording(harness: Harness): Harness {
+  return {
+    ...harness,
+    async request(method, url, options) {
+      const response = await harness.request(method, url, options);
+      if (response.status === 200 && FOOD_ROUTE.test(url)) servedFood.push(response);
+      return response;
+    },
+  };
+}
+
+/** Every object in a response that holds a recipe: a food item. */
+function foodItems(value: unknown, out: Record<string, unknown>[] = []): Record<string, unknown>[] {
+  if (Array.isArray(value)) {
+    for (const item of value) foodItems(item, out);
+  } else if (typeof value === "object" && value !== null) {
+    const record = value as Record<string, unknown>;
+    if ("recipe" in record) out.push(record);
+    for (const child of Object.values(record)) foodItems(child, out);
+  }
+  return out;
+}
 
 const searchUrl = "/v1/library/recipes/search";
 const detailUrl = (recipeId: string) => `/v1/library/recipes/${recipeId}/detail`;
@@ -961,5 +988,27 @@ describe("LIB-04 LIB-08 regions, LIB-03 images", () => {
         "unauthenticated",
       );
     }
+  });
+});
+
+// ---------------------------------------------------------------- response-level guard (runs last)
+
+describe("L2 SAF-02 SAF-14 every served food item has a logged Cek Aman result", () => {
+  it("L2 every food item in every served library response carries a safety result whose checkId is in safety_log", async () => {
+    expect(servedFood.length).toBeGreaterThan(20);
+    let items = 0;
+    for (const response of servedFood) {
+      for (const item of foodItems(response.body)) {
+        items += 1;
+        const safety = item["safety"] as { checkId?: unknown } | undefined;
+        expect(typeof safety?.checkId, response.raw.slice(0, 80)).toBe("string");
+        expect(
+          await count(`SELECT count(*) AS n FROM safety_log WHERE id = $1::uuid`, [
+            safety?.checkId,
+          ]),
+        ).toBe(1);
+      }
+    }
+    expect(items).toBeGreaterThan(50);
   });
 });

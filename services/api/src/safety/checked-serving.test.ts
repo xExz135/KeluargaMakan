@@ -26,59 +26,110 @@ import {
 } from "./checked-serving.js";
 import { loadCheckEaters } from "./eaters.js";
 
-const SRC = fileURLToPath(new URL("..", import.meta.url));
-const SEAM = join("safety", "checked-serving.ts");
+/** services/api: src, config and every other folder of the service. */
+const ROOT = fileURLToPath(new URL("../..", import.meta.url));
+const SEAM = join("src", "safety", "checked-serving.ts");
+const SKIPPED_DIRS = new Set(["node_modules", "dist", "coverage"]);
+const CODE = /\.(ts|mts|cts|js|mjs|cjs)$/;
+const TEST = /\.(test|spec)\.[cm]?[jt]s$/;
 
-/** Every non-test TypeScript file of services/api/src, relative to it. */
-function sourceFiles(dir: string = SRC): string[] {
+/** Every non-test code file under services/api, relative to it. */
+function sourceFiles(dir: string = ROOT): string[] {
   return readdirSync(dir).flatMap((name) => {
     const full = join(dir, name);
-    if (statSync(full).isDirectory()) return sourceFiles(full);
-    return name.endsWith(".ts") && !name.endsWith(".test.ts") ? [relative(SRC, full)] : [];
+    if (statSync(full).isDirectory()) return SKIPPED_DIRS.has(name) ? [] : sourceFiles(full);
+    return CODE.test(name) && !TEST.test(name) && !name.endsWith(".d.ts")
+      ? [relative(ROOT, full)]
+      : [];
   });
 }
 
+const read = (path: string) => readFileSync(join(ROOT, path), "utf8");
 const isTestingSupport = (path: string) => path.split(sep).includes("testing");
 
+const ENGINE_FUNCTIONS = [
+  "evaluate",
+  "evaluateWithLog",
+  "deriveRecipeHalal",
+  "deriveRecipeHalalWithLog",
+];
+const PACKAGE = `["']@keluargamakan/cek-aman["']`;
+const CALL = new RegExp(`\\b(${ENGINE_FUNCTIONS.join("|")})\\s*\\(`);
+const NAMED = new RegExp(
+  `\\b(import|export)\\s*(type\\s*)?\\{([^}]*)\\}\\s*from\\s*${PACKAGE}`,
+  "g",
+);
+const NAMESPACE = new RegExp(`\\bimport\\s*\\*\\s*as\\s+\\w+\\s+from\\s*${PACKAGE}`);
+const EXPORT_ALL = new RegExp(`\\bexport\\s*\\*\\s*(as\\s+\\w+\\s*)?from\\s*${PACKAGE}`);
+const DYNAMIC = new RegExp(`\\bimport\\s*\\(\\s*${PACKAGE}`);
+const REQUIRE = new RegExp(`\\brequire\\s*\\(\\s*${PACKAGE}`);
+
+/**
+ * Security review T-041 L2: every way code outside the serving module could
+ * reach the engine's checking functions: a call by name, a named import
+ * (aliases included), a namespace import, a re-export (`export *` or named),
+ * a dynamic `import()` or a `require` of the package.
+ */
+function engineUses(text: string): string[] {
+  const found: string[] = [];
+  if (CALL.test(text)) found.push("call");
+  for (const match of text.matchAll(NAMED)) {
+    if (match[2] !== undefined) continue; // type-only
+    const names = (match[3] ?? "")
+      .split(",")
+      .map((part) => part.trim())
+      .filter((part) => !part.startsWith("type "))
+      .map((part) => part.split(/\s+as\s+/)[0]?.trim() ?? "");
+    if (names.some((name) => ENGINE_FUNCTIONS.includes(name))) found.push(`${match[1]} named`);
+  }
+  if (NAMESPACE.test(text)) found.push("namespace");
+  if (EXPORT_ALL.test(text)) found.push("export *");
+  if (DYNAMIC.test(text)) found.push("dynamic import");
+  if (REQUIRE.test(text)) found.push("require");
+  return found;
+}
+
 describe("T-025 N4 SAF-02 one module serves safety results", () => {
-  it("T-025 N4 evaluate, evaluateWithLog, deriveRecipeHalal and deriveRecipeHalalWithLog are called only from the serving module", () => {
-    const calls = /\b(evaluate|evaluateWithLog|deriveRecipeHalal|deriveRecipeHalalWithLog)\s*\(/;
-    const offenders = sourceFiles()
-      .filter((path) => path !== SEAM)
-      .filter((path) => calls.test(readFileSync(join(SRC, path), "utf8")));
-    expect(offenders).toEqual([]);
-    expect(calls.test(readFileSync(join(SRC, SEAM), "utf8"))).toBe(true);
+  it("L2 the scan covers every folder of the service, config included", () => {
+    const files = sourceFiles();
+    expect(files).toContain(SEAM);
+    expect(files.some((path) => path.startsWith(`config${sep}`))).toBe(true);
+    expect(files.some((path) => TEST.test(path))).toBe(false);
   });
 
-  it("T-025 N4 no other module imports those engine functions, so none can call them by another name", () => {
-    const names = ["evaluate", "evaluateWithLog", "deriveRecipeHalal", "deriveRecipeHalalWithLog"];
-    const importBlock = /import\s*(type\s*)?\{([^}]*)\}\s*from\s*["']@keluargamakan\/cek-aman["']/g;
-    const offenders: string[] = [];
-    for (const path of sourceFiles()) {
-      if (path === SEAM) continue;
-      for (const match of readFileSync(join(SRC, path), "utf8").matchAll(importBlock)) {
-        if (match[1] !== undefined) continue; // type-only import
-        const imported = (match[2] ?? "")
-          .split(",")
-          .map(
-            (part) =>
-              part
-                .trim()
-                .replace(/^type\s+/, "")
-                .split(/\s+as\s+/)[0],
-          )
-          .filter((part) => part !== undefined && part !== "");
-        if (imported.some((name) => names.includes(name ?? ""))) offenders.push(path);
-      }
-      if (
-        /import\s*\*\s*as\s+\w+\s+from\s*["']@keluargamakan\/cek-aman["']/.test(
-          readFileSync(join(SRC, path), "utf8"),
-        )
-      ) {
-        offenders.push(path);
-      }
+  it("L2 the scan catches calls, aliased, namespace and re-exported imports, dynamic import and require", () => {
+    const cases: [string, string][] = [
+      ["call", "const r = evaluate(input);"],
+      ["import named", 'import { evaluate as run } from "@keluargamakan/cek-aman";'],
+      [
+        "import named",
+        "import { RULE_SET_VERSION, deriveRecipeHalalWithLog } from '@keluargamakan/cek-aman';",
+      ],
+      ["namespace", 'import * as engine from "@keluargamakan/cek-aman";'],
+      ["export *", 'export * from "@keluargamakan/cek-aman";'],
+      ["export *", 'export * as engine from "@keluargamakan/cek-aman";'],
+      ["export named", 'export { evaluateWithLog as check } from "@keluargamakan/cek-aman";'],
+      ["dynamic import", 'const engine = await import("@keluargamakan/cek-aman");'],
+      ["require", 'const engine = require("@keluargamakan/cek-aman");'],
+    ];
+    for (const [kind, text] of cases) expect(engineUses(text), text).toContain(kind);
+    for (const allowed of [
+      'import type { HardRule } from "@keluargamakan/cek-aman";',
+      'import { RULE_SET_VERSION, type HardRule } from "@keluargamakan/cek-aman";',
+      'import { evaluateWithLog } from "./other.js";',
+      "const evaluation = 1; // evaluated later",
+    ]) {
+      expect(engineUses(allowed), allowed).toEqual([]);
     }
+  });
+
+  it("T-025 N4 L2 no file of the service but the serving module reaches evaluate, evaluateWithLog, deriveRecipeHalal or deriveRecipeHalalWithLog", () => {
+    const offenders = sourceFiles()
+      .filter((path) => path !== SEAM)
+      .map((path) => [path, engineUses(read(path))] as const)
+      .filter(([, uses]) => uses.length > 0);
     expect(offenders).toEqual([]);
+    expect(engineUses(read(SEAM))).toContain("call");
   });
 
   it("LIB-01 household code reads library content only through the servable view", () => {
@@ -86,15 +137,17 @@ describe("T-025 N4 SAF-02 one module serves safety results", () => {
     // "library_recipe" is not a table reference).
     const direct = /\b(FROM|JOIN|INTO|UPDATE)\s+library_recipe(_version)?\b(?!_)/i;
     const offenders = sourceFiles()
-      .filter((path) => !path.startsWith(join("db", "migrations")) && !isTestingSupport(path))
-      .filter((path) => direct.test(readFileSync(join(SRC, path), "utf8")));
+      .filter(
+        (path) => !path.startsWith(join("src", "db", "migrations")) && !isTestingSupport(path),
+      )
+      .filter((path) => direct.test(read(path)));
     expect(offenders).toEqual([]);
   });
 
   it("LIB-01 the fixture loader, the only writer of a tester label, is never imported by served code", () => {
     const offenders = sourceFiles()
       .filter((path) => !isTestingSupport(path))
-      .filter((path) => /testing\/fixture-library/.test(readFileSync(join(SRC, path), "utf8")));
+      .filter((path) => /testing\/fixture-library/.test(read(path)));
     expect(offenders).toEqual([]);
   });
 });
