@@ -11,9 +11,11 @@ import {
 import type { VerifiedReference } from "@keluargamakan/reference-data";
 import { describe, expect, it } from "vitest";
 
+import { ApiError } from "../api-error.js";
 import { referenceSourceOf, type LoadedReference } from "../reference/reference-data.js";
-import { checkFood, referenceSubset, type FoodCandidate } from "./checked-serving.js";
+import { checkFood, type FoodCandidate } from "./checked-serving.js";
 import type { CheckEater } from "./eaters.js";
+import { ReferenceIntegrityError, referenceSubset } from "./reference-subset.js";
 
 function loaded(data: ReferenceDataset): LoadedReference {
   const verified: VerifiedReference = {
@@ -150,7 +152,11 @@ describe("M1 SAF-01 the per-check reference subset gives exactly the full-datase
         })),
       };
       const recordedBrands = brands.filter(() => next() < 0.4);
-      const subset = referenceSubset(reference, candidate, eaters);
+      const subset = referenceSubset(
+        reference.verified.reference,
+        candidate.lines.map((line) => line.ingredientId),
+        eaters.flatMap((eater) => eater.hardRules),
+      );
       expect(subset.ingredients.length).toBeLessThanOrEqual(records.length);
       const input = (data: ReferenceDataset) => ({
         ingredients: candidate.lines.map((line) => ({
@@ -236,5 +242,118 @@ describe("M1 NFR-03 checking a whole library stays within a time budget", () => 
     expect(checked).toBe(300);
     // The review measured 1,293 ms before the fix; generous for slow CI.
     expect(elapsed).toBeLessThan(1000);
+  });
+});
+
+// ---------------------------------------------------------------- re-check N1
+
+describe("N1 SAF-01 SAF-09 a reference the engine refuses as a whole serves nothing", () => {
+  const record = (id: unknown, contains: string[]) => ({
+    id,
+    displayName: { id: "fiksi", en: "fiction" },
+    localNames: [],
+    category: "protein",
+    components: { verification: "verified", ingredientIds: [] },
+    allergens: { verification: "verified", contains, mayContain: [] },
+    halal: { verification: "verified", value: "halal", nonHalalSources: [] },
+    diet: { verification: "verified", vegetarian: "suitable", vegan: "suitable" },
+    brandVaries: false,
+    brandVariants: [],
+    tkpiCode: null,
+  });
+  const dataset = (ingredients: unknown[]) =>
+    ({
+      schema: "keluargamakan.reference.ingredients/1",
+      version: "TEST-FIXTURE-n1-1",
+      ingredients,
+    }) as unknown as ReferenceDataset;
+  /** A loaded reference built by hand, as a loader that skipped verification would. */
+  const handBuilt = (data: ReferenceDataset) =>
+    ({
+      verified: {
+        version: data.version,
+        contentHash: "0".repeat(64),
+        fixture: true,
+        ingredientCount: data.ingredients.length,
+        referenceVersion: data.version,
+        reference: data,
+      },
+      catalog: null,
+    }) as unknown as LoadedReference;
+  const shrimpAllergy: CheckEater = {
+    memberId: "fx-member-kakak",
+    rulesConsent: "given",
+    hardRules: [{ ruleId: "fx-r1", type: "allergy", allergen: "shrimp" }],
+    rulesStamp: "fixture",
+  };
+  const candidate: FoodCandidate = {
+    subject: { kind: "library_recipe", id: "fx_r_n1", version: "1" },
+    lines: [{ lineId: "l1", ingredientId: "fx_a", rawName: "Bahan fiksi" }],
+  };
+  const context = (reference: LoadedReference, eaters: CheckEater[] = [shrimpAllergy]) => ({
+    householdId: randomUUID(),
+    eaters,
+    recordedBrands: new Map<string, string[]>(),
+    reference,
+    evaluatedAt: new Date(),
+  });
+
+  // The reviewer's case R3: fx_a twice, and the second copy contains shrimp.
+  const duplicate = dataset([record("fx_a", []), record("fx_a", ["shrimp"])]);
+
+  it("N1 the full engine refuses the duplicate-ID dataset, and so does the subset (never first copy wins)", () => {
+    expect(() =>
+      evaluate({
+        ingredients: [{ ingredientId: "fx_a", rawName: "Bahan fiksi" }],
+        recordedBrands: [],
+        members: [shrimpAllergy],
+        reference: duplicate,
+      }),
+    ).toThrow(/duplicate reference ingredient id/);
+    expect(() => referenceSubset(duplicate, ["fx_a"], [])).toThrow(ReferenceIntegrityError);
+  });
+
+  it("N1 checkFood on a dataset with a repeated ID or a record without an ID answers 503 reference_data_unavailable, never Safe", () => {
+    for (const data of [
+      duplicate,
+      dataset([record("fx_a", []), record(undefined, [])]),
+      dataset([record("fx_a", []), record(7, [])]),
+      dataset([record("fx_a", []), "not a record"]),
+    ]) {
+      let thrown: unknown = null;
+      try {
+        checkFood(context(handBuilt(data)), candidate);
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown).toBeInstanceOf(ApiError);
+      expect((thrown as ApiError).code).toBe("reference_data_unavailable");
+      expect((thrown as ApiError).status).toBe(503);
+    }
+  });
+
+  it("N1 the loader refuses such a dataset itself", () => {
+    expect(() => loaded(duplicate)).toThrow(ReferenceIntegrityError);
+  });
+
+  it("N1 R4 a rule without a mapping gives the engine's own result, not a 500", () => {
+    const reference = loaded(dataset([record("fx_a", [])]));
+    const broken = {
+      ruleId: "fx-r2",
+      type: "free_text",
+      freeText: "aturan fiksi",
+    } as unknown as HardRule;
+    const eater: CheckEater = { ...shrimpAllergy, hardRules: [broken] };
+    const engine = evaluate({
+      ingredients: [{ ingredientId: "fx_a", rawName: "Bahan fiksi" }],
+      recordedBrands: [],
+      members: [{ memberId: eater.memberId, hardRules: [broken] }],
+      reference: reference.verified.reference,
+    });
+    const pending = checkFood(context(reference, [eater]), candidate);
+    expect(pending?.statuses).toEqual([
+      { memberId: eater.memberId, status: engine.perMember[0]?.status },
+    ]);
+    expect(engine.perMember[0]?.status).toBe("check_label");
   });
 });

@@ -8,6 +8,7 @@ import { ApiError } from "../api-error.js";
 import { isDevelopmentEnv } from "../app-env.js";
 import { isReferenceVersion } from "../db/ids.js";
 import type { ApiLogger } from "../logger.js";
+import { assertReferenceIntegrity, ReferenceIntegrityError } from "../safety/reference-subset.js";
 import { CatalogFormatError, IngredientCatalog } from "./ingredient-catalog.js";
 
 /**
@@ -47,8 +48,10 @@ export class ReferenceVersionError extends Error {
 
 /**
  * A source serving one verified dataset. Throws `CatalogFormatError` when a
- * record cannot be read, and `ReferenceVersionError` when the version does
- * not match the logged version pattern or differs from the engine input.
+ * record cannot be read, `ReferenceVersionError` when the version does not
+ * match the logged version pattern or differs from the engine input, and
+ * `ReferenceIntegrityError` when a record has no ID or an ID repeats (the
+ * engine refuses such a dataset as a whole; security re-check T-041 N1).
  */
 export function referenceSourceOf(verified: VerifiedReference): ReferenceSource {
   if (
@@ -57,6 +60,7 @@ export function referenceSourceOf(verified: VerifiedReference): ReferenceSource 
   ) {
     throw new ReferenceVersionError();
   }
+  assertReferenceIntegrity(verified.reference);
   const loaded: LoadedReference = Object.freeze({
     verified,
     catalog: new IngredientCatalog(verified),
@@ -102,7 +106,11 @@ export function loggedReferenceSource(
     });
     return source;
   } catch (error) {
-    if (!(error instanceof CatalogFormatError) && !(error instanceof ReferenceVersionError)) {
+    if (
+      !(error instanceof CatalogFormatError) &&
+      !(error instanceof ReferenceVersionError) &&
+      !(error instanceof ReferenceIntegrityError)
+    ) {
       throw error;
     }
     logger.error("reference_data_unavailable", { error: error.name, reason: error.message });
