@@ -1,4 +1,7 @@
 // TEST FIXTURE: not real safety or nutrition data. Fictional versions only.
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
 import type { VerifiedReference } from "@keluargamakan/reference-data";
 import { describe, expect, it } from "vitest";
 
@@ -60,8 +63,13 @@ describe("L4 DAT-06 SAF-14 one reference version pattern", () => {
     expect(lines[0]).not.toContain("bad version");
   });
 
-  it("SAF-14 the database checks use the same pattern text", () => {
+  it("SAF-14 N6 migration 0012 holds the same pattern as a literal, not the constant", () => {
     const library = MIGRATIONS.find((migration) => migration.name === "library-recipes");
     expect(library?.sql.split(`'${REFERENCE_VERSION_PATTERN}'`).length).toBe(3);
+    const source = readFileSync(
+      fileURLToPath(new URL("../db/migrations/0012-library-recipes.ts", import.meta.url)),
+      "utf8",
+    );
+    expect(source).not.toContain("REFERENCE_VERSION_PATTERN");
   });
 });

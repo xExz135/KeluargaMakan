@@ -1,4 +1,3 @@
-import { REFERENCE_VERSION_PATTERN } from "../ids.js";
 import type { Migration } from "./types.js";
 
 /**
@@ -54,7 +53,7 @@ ALTER TABLE safety_log
   DROP CONSTRAINT safety_log_reference_version_check,
   DROP CONSTRAINT safety_log_reference_version_pattern,
   ADD CONSTRAINT safety_log_reference_version_pattern
-    CHECK (reference_version ~ '${REFERENCE_VERSION_PATTERN}');
+    CHECK (reference_version ~ '^[A-Za-z0-9][A-Za-z0-9._+/:@-]{0,199}$');
 
 -- Text in both languages (contract LocalizedText), each 1 to max_length characters.
 CREATE FUNCTION library_text_ok(value jsonb, max_length integer) RETURNS boolean
@@ -515,7 +514,7 @@ CREATE TABLE recipe_halal_log (
   evaluated_at timestamptz NOT NULL,
   rule_set_version text NOT NULL CHECK (rule_set_version ~ '^[A-Za-z0-9][A-Za-z0-9._+/-]{0,99}$'),
   reference_version text NOT NULL CHECK (
-    reference_version ~ '${REFERENCE_VERSION_PATTERN}'
+    reference_version ~ '^[A-Za-z0-9][A-Za-z0-9._+/:@-]{0,199}$'
   ),
   status text NOT NULL CHECK (status IN ('halal', 'not_halal', 'check_label')),
   -- Every line as checked: position, line ID, reference ingredient ID (or
