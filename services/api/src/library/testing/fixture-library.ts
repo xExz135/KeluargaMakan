@@ -56,6 +56,17 @@ export interface FixtureLibrary {
 
 const MARKER = "TEST FIXTURE";
 
+/**
+ * Fictional staff IDs (security review T-041 M2): the database needs the staff
+ * member who recorded the test, the author and a different approver. No staff
+ * account exists for them.
+ */
+export const FIXTURE_STAFF = Object.freeze({
+  testRecordedBy: "0f1c0000-0000-4000-8000-00000000f1c1",
+  author: "0f1c0000-0000-4000-8000-00000000f1c2",
+  approver: "0f1c0000-0000-4000-8000-00000000f1c3",
+});
+
 /** Refuses anything that is not plainly a fixture: fx_ IDs and a fixture tester label. */
 function requireFixture(recipe: FixtureRecipe): void {
   if (!recipe.recipeId.startsWith("fx_")) {
@@ -67,9 +78,16 @@ function requireFixture(recipe: FixtureRecipe): void {
 }
 
 /** Publishes the next version of a fixture recipe (version 1 creates the recipe). */
+export interface FixtureStaff {
+  readonly testRecordedBy: string | null;
+  readonly author: string | null;
+  readonly approver: string | null;
+}
+
 export async function publishFixtureRecipe(
   db: SqlExecutor,
   recipe: FixtureRecipe,
+  staff: FixtureStaff = FIXTURE_STAFF,
 ): Promise<number> {
   requireFixture(recipe);
   const c = recipe.content;
@@ -89,9 +107,9 @@ export async function publishFixtureRecipe(
       `INSERT INTO library_recipe_version
          (recipe_id, version, name, description, cuisine, region_id, meal_types, base_servings,
           prep_minutes, cook_minutes, difficulty, tag_fried, tag_santan, tag_spice_level,
-          tested_by, tested_on)
+          tested_by, tested_on, test_recorded_by_staff_id, author_staff_id, approved_by_staff_id)
        VALUES ($1, $2, $3::jsonb, $4::jsonb, $5, $6, $7::text[], $8, $9, $10, $11, $12, $13, $14,
-               $15, $16::date)`,
+               $15, $16::date, $17, $18, $19)`,
       [
         recipe.recipeId,
         version,
@@ -109,6 +127,9 @@ export async function publishFixtureRecipe(
         c.tags.spiceLevel,
         recipe.testRecord.testedBy,
         recipe.testRecord.testedOn,
+        staff.testRecordedBy,
+        staff.author,
+        staff.approver,
       ],
     );
     for (const [position, line] of c.ingredients.entries()) {

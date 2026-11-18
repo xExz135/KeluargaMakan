@@ -12,6 +12,7 @@ import { REPO_ROOT } from "../kitchen/testing/catalog-fixture.js";
 import { LibraryReader } from "./library-store.js";
 import {
   loadFixtureLibrary,
+  FIXTURE_STAFF,
   publishFixtureRecipe,
   retireFixtureRecipe,
   type FixtureLibrary,
@@ -106,11 +107,14 @@ for (const target of DATABASE_TARGETS) {
               `INSERT INTO library_recipe_version
                  (recipe_id, version, name, description, cuisine, meal_types, base_servings,
                   prep_minutes, cook_minutes, difficulty, tag_fried, tag_santan, tag_spice_level,
-                  tested_by, tested_on)
+                  tested_by, tested_on, test_recorded_by_staff_id, author_staff_id,
+                  approved_by_staff_id)
                VALUES ('fx_rcp_tanpa_uji', 1, '{"id":"a","en":"a"}', '{"id":"a","en":"a"}',
                        'indonesian', ARRAY['lunch'], 2, 1, 1, 'easy', false, false, 'not_spicy',
                        ${column === "tested_by" ? "NULL" : "'Tim'"},
-                       ${column === "tested_on" ? "NULL" : "'2026-10-01'"})`,
+                       ${column === "tested_on" ? "NULL" : "'2026-10-01'"},
+                       '${FIXTURE_STAFF.testRecordedBy}', '${FIXTURE_STAFF.author}',
+                       '${FIXTURE_STAFF.approver}')`,
             );
           }),
         );
@@ -123,6 +127,62 @@ for (const target of DATABASE_TARGETS) {
         }),
       );
       expect(message).toMatch(/tested_before_publication/);
+    });
+
+    it("LIB-01 M2 a version needs a recording staff member, an author and a different approver; a tester label alone is refused", async () => {
+      const cases: [string, Parameters<typeof publishFixtureRecipe>[2], RegExp][] = [
+        ["no recorder", { ...FIXTURE_STAFF, testRecordedBy: null }, /null value|not-null/i],
+        ["no author", { ...FIXTURE_STAFF, author: null }, /null value|not-null/i],
+        ["no approver", { ...FIXTURE_STAFF, approver: null }, /null value|not-null/i],
+        [
+          "approver recorded the test",
+          { ...FIXTURE_STAFF, approver: FIXTURE_STAFF.testRecordedBy },
+          /tester_not_approver/,
+        ],
+        [
+          "approver wrote it",
+          { ...FIXTURE_STAFF, approver: FIXTURE_STAFF.author },
+          /second_person/,
+        ],
+      ];
+      for (const [name, staff, expected] of cases) {
+        expect(
+          await rejects(
+            publishFixtureRecipe(db, variantOf("fx_rcp_staf", { variants: [] }), staff),
+          ),
+          name,
+        ).toMatch(expected);
+      }
+      expect(
+        (await db.query(`SELECT 1 FROM library_recipe WHERE recipe_id = 'fx_rcp_staf'`)).rows,
+      ).toEqual([]);
+    });
+
+    it("LIB-11 DAT-05 L5 TRUNCATE is refused on the library tables and both safety logs", async () => {
+      for (const table of [
+        "library_region",
+        "library_image",
+        "library_recipe",
+        "library_recipe_version",
+        "library_recipe_line",
+        "library_recipe_step",
+        "library_recipe_version_image",
+        "library_recipe_variant",
+        "library_release",
+        "recipe_halal_log",
+        "safety_log",
+        "safety_log_member",
+      ]) {
+        expect(await rejects(db.query(`TRUNCATE ${table} CASCADE`)), table).toMatch(
+          /TRUNCATE is refused/,
+        );
+      }
+      expect(
+        Number(
+          (await db.query<{ n: string }>(`SELECT count(*)::text AS n FROM library_recipe`)).rows[0]
+            ?.n,
+        ),
+      ).toBeGreaterThan(0);
     });
 
     it("LIB-01 LIB-11 only the current version of a published recipe is servable; retirement is final", async () => {

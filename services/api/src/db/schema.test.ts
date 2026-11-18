@@ -40,17 +40,24 @@ describe("migrations", () => {
   it("PRF-01 REC-07 SET-05 store no photos or photo URLs", () => {
     // LIB-03 recipe images (contract `getLibraryImage`) are the one exception:
     // content-team food pictures in the library migration, never household
-    // data. Every other migration may not mention images at all.
-    const library = MIGRATIONS.find((migration) => migration.name === "library-recipes");
-    const others = MIGRATIONS.filter((migration) => migration !== library)
+    // data. Every other migration may not mention images at all. In the
+    // library migrations only the library image tables, their triggers, the
+    // `image_id` column and the two media types are removed before the check
+    // (security review T-041 I5), so a column like `profile_image_url` fails.
+    const isLibrary = (name: string) => name.startsWith("library-");
+    const others = MIGRATIONS.filter((migration) => !isLibrary(migration.name))
       .map((migration) => migration.sql)
       .join("\n");
     expect(others).not.toMatch(/photo|image|picture|_url\b/i);
-    expect(library).toBeDefined();
-    const withoutImageNames = (library?.sql ?? "")
-      .replace(/'image\/(webp|jpeg)'/g, "")
-      .replace(/\b[a-z_]*image[a-z_]*\b/g, "");
-    expect(withoutImageNames).not.toMatch(/photo|image|picture|_url\b/i);
+    const library = MIGRATIONS.filter((migration) => isLibrary(migration.name));
+    expect(library.map((migration) => migration.name)).toContain("library-recipes");
+    for (const migration of library) {
+      const withoutImageNames = migration.sql
+        .replace(/'image\/(webp|jpeg)'/g, "")
+        .replace(/\blibrary_(recipe_version_)?image(_[a-z_]+)?\b/g, "")
+        .replace(/\bimage_id\b/g, "");
+      expect(withoutImageNames, migration.name).not.toMatch(/photo|image|picture|_url\b/i);
+    }
   });
 
   it("LIB-03 REC-07 SET-05 library images are content tables with no household link", () => {
