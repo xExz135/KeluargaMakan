@@ -12,7 +12,7 @@ import {
 import { bucketFor, decryptField, encryptField } from "./crypto/data-key-cipher.js";
 import { InvalidDataError, NotFoundError, withDbErrors } from "./errors.js";
 import type { SqlExecutor } from "./executor.js";
-import type { HealthDataKeys } from "./health-data-keys.js";
+import type { HealthDataKeys, MemberDataKey } from "./health-data-keys.js";
 import { isReferenceId, isUuid } from "./ids.js";
 import { lockMembers } from "./locks.js";
 
@@ -44,6 +44,12 @@ import { lockMembers } from "./locks.js";
 
 const REASON_CODE = /^[a-z_]{1,64}$/;
 const VERSION = /^[A-Za-z0-9][A-Za-z0-9._+/-]{0,99}$/;
+/**
+ * The verified reference version is `<data version>@sha256:<content hash>`
+ * (packages/reference-data, migration 0012). Still no spaces, so a name can
+ * never be logged as a version.
+ */
+const REFERENCE_VERSION = /^[A-Za-z0-9][A-Za-z0-9._+/:@-]{0,199}$/;
 const STATUSES: readonly SafetyStatus[] = ["safe", "not_safe", "check_label"];
 const DETAILS_VERSION = 2;
 
@@ -127,7 +133,7 @@ function validate(record: SafetyLogRecord): void {
     "subject.version is invalid",
   );
   requireValid(VERSION.test(record.ruleSetVersion), "ruleSetVersion is invalid");
-  requireValid(VERSION.test(record.referenceVersion), "referenceVersion is invalid");
+  requireValid(REFERENCE_VERSION.test(record.referenceVersion), "referenceVersion is invalid");
   requireValid(
     !Number.isNaN(Date.parse(record.evaluatedAt)) && /^\d{4}-\d{2}-\d{2}T/.test(record.evaluatedAt),
     "evaluatedAt must be ISO 8601",
@@ -163,23 +169,23 @@ interface MemberStateRow {
   rule_ids: string[];
 }
 
-/**
- * SAF-14: persists one Cek Aman log record from `evaluateWithLog`. The caller
- * must not show the result if this throws.
- */
-export async function insertSafetyLog(
-  db: SqlExecutor,
-  keys: HealthDataKeys,
-  record: SafetyLogRecord,
-): Promise<string> {
+/** One log to write, under the ID the caller chose (the API's `checkId`, T-025 N2). */
+export interface SafetyLogWrite {
+  readonly logId: string;
+  readonly record: SafetyLogRecord;
+}
+
+interface PreparedLog {
+  readonly logId: string;
+  readonly record: SafetyLogRecord;
+  readonly detailsJson: readonly string[];
+  readonly bucket: number;
+}
+
+function prepare(write: SafetyLogWrite): PreparedLog {
+  const { record } = write;
   validate(record);
-  const memberIds = record.members.map((member) => member.memberId);
-
-  // N2: unwrap the members' existing keys before any lock or transaction, so a
-  // slow key service never holds a member lock. Under the lock below, a key
-  // is used only if it is still the member's current key.
-  const preloaded = await keys.loadForProfiles(db, record.householdId, memberIds);
-
+  requireValid(isUuid(write.logId), "logId must be an opaque UUID");
   const ingredientIds = record.ingredients.map((item) => item.ingredientId);
   const recordedBrands = record.recordedBrands.map((brand) => ({
     ingredientId: brand.ingredientId,
@@ -203,13 +209,62 @@ export async function insertSafetyLog(
   } catch {
     throw new InvalidDataError("safety log details are too large");
   }
+  return { logId: write.logId, record, detailsJson, bucket };
+}
+
+/**
+ * SAF-14: persists one Cek Aman log record from `evaluateWithLog`. The caller
+ * must not show the result if this throws.
+ */
+export async function insertSafetyLog(
+  db: SqlExecutor,
+  keys: HealthDataKeys,
+  record: SafetyLogRecord,
+): Promise<string> {
+  const [logId] = await insertSafetyLogs(db, keys, [{ logId: randomUUID(), record }]);
+  if (logId === undefined) throw new Error("safety log insert returned no ID");
+  return logId;
+}
+
+/**
+ * SAF-14: persists several Cek Aman log records of one household in one
+ * transaction, each under the ID the caller chose. `inTransaction` runs in
+ * the same transaction after the logs are written (T-025 N4: the recipe
+ * halal records), so either everything is stored or nothing is. The caller
+ * must not show any of the results if this throws.
+ */
+export async function insertSafetyLogs(
+  db: SqlExecutor,
+  keys: HealthDataKeys,
+  writes: readonly SafetyLogWrite[],
+  inTransaction?: (tx: SqlExecutor) => Promise<void>,
+): Promise<string[]> {
+  if (writes.length === 0) throw new InvalidDataError("no safety log to write");
+  const prepared = writes.map(prepare);
+  const householdId = prepared[0]?.record.householdId ?? "";
+  requireValid(
+    prepared.every((log) => log.record.householdId === householdId),
+    "safety logs written together must belong to one household",
+  );
+  requireValid(
+    new Set(prepared.map((log) => log.logId)).size === prepared.length,
+    "duplicate logId",
+  );
+  const memberIds = [
+    ...new Set(prepared.flatMap((log) => log.record.members.map((member) => member.memberId))),
+  ];
+
+  // N2: unwrap the members' existing keys before any lock or transaction, so a
+  // slow key service never holds a member lock. Under the lock below, a key
+  // is used only if it is still the member's current key.
+  const preloaded = await keys.loadForProfiles(db, householdId, memberIds);
 
   return withDbErrors(() =>
     db.transaction(async (tx) => {
       // H4: decide on details under the member lock, from the current state.
       const states = new Map<string, MemberStateRow>();
       if (memberIds.length > 0) {
-        await lockMembers(tx, record.householdId, memberIds);
+        await lockMembers(tx, householdId, memberIds);
         const { rows } = await tx.query<MemberStateRow>(
           `SELECT p.id AS profile_id,
                   health_consent_active(p.id) AS consent_active,
@@ -221,67 +276,78 @@ export async function insertSafetyLog(
              FROM profile p
              LEFT JOIN health_data_key k ON k.profile_id = p.id AND k.household_id = p.household_id
             WHERE p.household_id = $1 AND p.id = ANY($2::uuid[])`,
-          [record.householdId, memberIds],
+          [householdId, memberIds],
         );
         for (const row of rows) states.set(row.profile_id, row);
       }
 
-      const { rows } = await tx.query<{ id: string }>(
-        `INSERT INTO safety_log
-           (household_id, log_format, subject_kind, subject_id, subject_version, evaluated_at,
-            rule_set_version, reference_version)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-         RETURNING id`,
-        [
-          record.householdId,
-          record.logFormat,
-          record.subject.kind,
-          record.subject.id,
-          record.subject.version,
-          record.evaluatedAt,
-          record.ruleSetVersion,
-          record.referenceVersion,
-        ],
-      );
-      const logId = rows[0]?.id;
-      if (logId === undefined) throw new Error("safety log insert returned no row");
-
-      for (const [index, member] of record.members.entries()) {
-        const state = states.get(member.memberId);
-        if (state === undefined) throw new NotFoundError("profile");
-        const current = new Set(state.rule_ids);
-        const rulesStillStored = member.rules.every((rule) => current.has(rule.ruleId));
-        const key = preloaded.get(member.memberId);
-        const json = detailsJson[index];
-        if (
-          !state.consent_active ||
-          state.k_id === null ||
-          key === undefined ||
-          key.keyId !== state.k_id ||
-          !rulesStillStored ||
-          json === undefined
-        ) {
-          await tx.query(
-            `INSERT INTO safety_log_member (log_id, member_index, member_key_id, details_enc, redacted_at)
-             VALUES ($1, $2, $3, NULL, now())`,
-            [logId, index, randomUUID()],
-          );
-          continue;
-        }
-        await tx.query(
-          `INSERT INTO safety_log_member (log_id, member_index, member_key_id, details_enc)
-           VALUES ($1, $2, $3, $4)`,
-          [
-            logId,
-            index,
-            key.keyId,
-            encryptField(key.dataKey, json, memberContext(logId, index, key.keyId), bucket),
-          ],
-        );
+      for (const log of prepared) {
+        await writeLog(tx, log, states, preloaded);
       }
-      return logId;
+      if (inTransaction !== undefined) await inTransaction(tx);
+      return prepared.map((log) => log.logId);
     }),
   );
+}
+
+async function writeLog(
+  tx: SqlExecutor,
+  log: PreparedLog,
+  states: ReadonlyMap<string, MemberStateRow>,
+  preloaded: ReadonlyMap<string, MemberDataKey>,
+): Promise<void> {
+  const { record, logId } = log;
+  await tx.query(
+    `INSERT INTO safety_log
+       (id, household_id, log_format, subject_kind, subject_id, subject_version, evaluated_at,
+        rule_set_version, reference_version)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+    [
+      logId,
+      record.householdId,
+      record.logFormat,
+      record.subject.kind,
+      record.subject.id,
+      record.subject.version,
+      record.evaluatedAt,
+      record.ruleSetVersion,
+      record.referenceVersion,
+    ],
+  );
+
+  for (const [index, member] of record.members.entries()) {
+    const state = states.get(member.memberId);
+    if (state === undefined) throw new NotFoundError("profile");
+    const current = new Set(state.rule_ids);
+    const rulesStillStored = member.rules.every((rule) => current.has(rule.ruleId));
+    const key = preloaded.get(member.memberId);
+    const json = log.detailsJson[index];
+    if (
+      !state.consent_active ||
+      state.k_id === null ||
+      key === undefined ||
+      key.keyId !== state.k_id ||
+      !rulesStillStored ||
+      json === undefined
+    ) {
+      await tx.query(
+        `INSERT INTO safety_log_member (log_id, member_index, member_key_id, details_enc, redacted_at)
+         VALUES ($1, $2, $3, NULL, now())`,
+        [logId, index, randomUUID()],
+      );
+      continue;
+    }
+    await tx.query(
+      `INSERT INTO safety_log_member (log_id, member_index, member_key_id, details_enc)
+       VALUES ($1, $2, $3, $4)`,
+      [
+        logId,
+        index,
+        key.keyId,
+        encryptField(key.dataKey, json, memberContext(logId, index, key.keyId), log.bucket),
+      ],
+    );
+  }
 }
 
 interface LogRow {

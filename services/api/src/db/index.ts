@@ -31,8 +31,10 @@ export {
 } from "./hard-rules.js";
 export {
   insertSafetyLog,
+  insertSafetyLogs,
   readSafetyLog,
   type LoggedReason,
+  type SafetyLogWrite,
   type SafetyLogMemberDetails,
   type StoredSafetyLog,
   type StoredSafetyLogMember,
