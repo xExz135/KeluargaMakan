@@ -1,8 +1,9 @@
 import type { Schemas } from "@keluargamakan/contracts";
 
 import type { LibraryConfig } from "../../config/library.js";
-import { ApiError, validationFailed } from "../api-error.js";
+import { ApiError, rateLimited, validationFailed } from "../api-error.js";
 import type { Clock } from "../auth/auth-service.js";
+import { RateLimiter } from "../auth/rate-limiter.js";
 import type { HouseholdScope } from "../authz/access.js";
 import { RulesChangedError } from "../db/errors.js";
 import type { SqlExecutor } from "../db/executor.js";
@@ -232,6 +233,11 @@ function matchRank(
   return best;
 }
 
+/** Checks run between two yields to the event loop (security review T-041 M1). */
+const CHECKS_PER_TURN = 25;
+
+const yieldToEventLoop = () => new Promise<void>((resolve) => setImmediate(resolve));
+
 function compareText(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }
@@ -244,6 +250,7 @@ export class LibraryService {
   readonly #hashKey: Buffer;
   readonly #clock: Clock;
   readonly #reader: LibraryReader;
+  readonly #limiter: RateLimiter;
 
   constructor(deps: LibraryServiceDeps) {
     this.#db = deps.db;
@@ -253,6 +260,23 @@ export class LibraryService {
     this.#hashKey = deps.hashKey;
     this.#clock = deps.clock ?? systemClock;
     this.#reader = new LibraryReader(deps.db);
+    this.#limiter = new RateLimiter(deps.db, deps.hashKey);
+  }
+
+  /**
+   * Security review T-041 M1, L6: per-household limits from configuration,
+   * counted before any other work; over the limit answers 429 with
+   * Retry-After.
+   */
+  async #admit(scope: HouseholdScope, kind: "request" | "image"): Promise<void> {
+    const { rateLimits } = this.#config;
+    const decision = await this.#limiter.hit(
+      kind === "request" ? "library_household" : "library_image_household",
+      scope.householdId,
+      kind === "request" ? rateLimits.requestsPerHousehold : rateLimits.imagesPerHousehold,
+      this.#clock.now(),
+    );
+    if (!decision.allowed) throw rateLimited(decision.retryAfterSeconds);
   }
 
   async #library(): Promise<LoadedLibrary> {
@@ -284,7 +308,8 @@ export class LibraryService {
   }
 
   /** LIB-08, LIB-04: the regions servable recipes come from. No food content. */
-  async regions(): Promise<Schemas["LibraryRegionList"]> {
+  async regions(scope: HouseholdScope): Promise<Schemas["LibraryRegionList"]> {
+    await this.#admit(scope, "request");
     const library = await this.#library();
     const regions = new Map<string, Schemas["RecipeRegion"]>();
     for (const recipe of library.recipes) {
@@ -308,6 +333,7 @@ export class LibraryService {
    * unused picture.
    */
   async image(
+    scope: HouseholdScope,
     imageId: string,
     ifNoneMatch: unknown,
   ): Promise<
@@ -319,12 +345,18 @@ export class LibraryService {
         readonly bytes: Buffer;
       }
   > {
+    await this.#admit(scope, "image");
     if (!isReferenceId(imageId)) throw notFound();
-    const image = await readServableImage(this.#db, imageId);
+    const image = await readServableImage(this.#db, imageId, this.#imageLimits());
     if (image === null) throw notFound();
     const etag = `"${image.sha256}"`;
     if (sentTagMatches(ifNoneMatch, etag)) return { status: 304, etag };
-    const bytes = await readServableImageBytes(this.#db, imageId, image.sha256);
+    const bytes = await readServableImageBytes(
+      this.#db,
+      imageId,
+      image.sha256,
+      this.#imageLimits(),
+    );
     if (bytes === null) throw notFound();
     return { status: 200, etag, mediaType: image.mediaType, bytes };
   }
@@ -343,18 +375,24 @@ export class LibraryService {
     }
   }
 
-  search(
+  #imageLimits() {
+    return { maxBytes: this.#config.images.maxBytes, cuisines: this.#config.servedCuisines };
+  }
+
+  async search(
     scope: HouseholdScope,
     input: LibrarySearchInput,
   ): Promise<Schemas["LibrarySearchResult"]> {
+    await this.#admit(scope, "request");
     return this.#onceMore(() => this.#search(scope, input));
   }
 
-  detail(
+  async detail(
     scope: HouseholdScope,
     recipeId: string,
     input: RecipeDetailInput,
   ): Promise<Schemas["RecipeDetail"]> {
+    await this.#admit(scope, "request");
     return this.#onceMore(() => this.#detail(scope, recipeId, input));
   }
 
@@ -397,11 +435,15 @@ export class LibraryService {
         compareText(a.recipe.recipeId, b.recipe.recipeId),
     );
 
+    // M1: only the best matches are checked, and the loop yields so one
+    // search never holds the event loop for the whole library.
+    const candidates = matches.slice(0, this.#config.search.maxCandidatesChecked);
     const context = this.#context(scope, reference, eaters, kitchen);
     const visible: { recipe: LibraryRecipe; check: PendingCheck }[] = [];
     const hiddenFor = new Set<string>();
     let hiddenCount = 0;
-    for (const { recipe } of matches) {
+    for (const [index, { recipe }] of candidates.entries()) {
+      if (index > 0 && index % CHECKS_PER_TURN === 0) await yieldToEventLoop();
       const check = checkFood(context, candidateOf(recipe));
       // SAF-02: an item Cek Aman could not check is left out.
       if (check === null) continue;

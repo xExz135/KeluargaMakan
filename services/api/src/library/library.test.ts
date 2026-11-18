@@ -869,6 +869,85 @@ describe("LIB-04 LIB-08 regions, LIB-03 images", () => {
     ).toEqual([]);
   });
 
+  it("M1 L6 NFR-04 library requests and image requests are limited per household from config (429 with Retry-After)", async () => {
+    const limited = await startHarness(db, {
+      reference: referenceSourceOf(fixture.verified),
+      keys,
+      libraryConfig: resolveLibraryConfig({
+        rateLimits: {
+          requestsPerHousehold: { limit: 3, windowSeconds: 60 },
+          imagesPerHousehold: { limit: 2, windowSeconds: 60 },
+        },
+      }),
+    });
+    try {
+      const session = await signInWithHousehold(limited);
+      const other = await signInWithHousehold(limited);
+      const calls = [
+        () => search(session, { eaters: onlyMe, limit: 1 }, limited),
+        () => limited.request("GET", "/v1/library/regions", { token: session.token }),
+        () =>
+          limited.request("POST", detailUrl("fx_rcp_sayur_lodeh"), {
+            token: session.token,
+            body: { eaters: onlyMe },
+          }),
+      ];
+      for (const call of calls) expect((await call()).status).toBe(200);
+      const over = await search(session, { eaters: onlyMe, limit: 1 }, limited);
+      expectProblem(over, 429, "rate_limited");
+      expect(Number(over.headers["retry-after"])).toBeGreaterThan(0);
+      // Another household is not affected.
+      expect((await search(other, { eaters: onlyMe, limit: 1 }, limited)).status).toBe(200);
+
+      const image = (token: string) =>
+        limited.request("GET", "/v1/library/images/fx_img_padang", { token });
+      await insertFixtureImage(db, "fx_img_padang");
+      // fx_img_padang is not used by a recipe: 404, but each request still counts.
+      expect((await image(other.token)).status).toBe(404);
+      expect((await image(other.token)).status).toBe(404);
+      expectProblem(await image(other.token), 429, "rate_limited");
+    } finally {
+      await limited.close();
+    }
+  });
+
+  it("L6 I6 an image larger than the configured cap, or of a cuisine not served, is not served", async () => {
+    const big = Buffer.alloc(4096, 1);
+    await insertFixtureImage(db, "fx_img_besar", big);
+    await publishFixtureRecipe(db, {
+      recipeId: "fx_rcp_gambar_besar",
+      baseRecipeId: null,
+      testRecord: { testedBy: "Tim Uji Fiksi (TEST FIXTURE)", testedOn: "2026-10-03" },
+      content: {
+        ...FIXTURE.recipes.find((recipe) => recipe.recipeId === "fx_rcp_sayur_lodeh")!.content,
+        name: { id: "Sup gambar fiksi", en: "Fiction picture soup" },
+        imageIds: ["fx_img_besar"],
+      },
+    });
+    const url = "/v1/library/images/fx_img_besar";
+    expect((await api.request("GET", url, { token: home.token })).status).toBe(200);
+    const capped = await startHarness(db, {
+      reference: referenceSourceOf(fixture.verified),
+      keys,
+      secrets: api.secrets,
+      libraryConfig: resolveLibraryConfig({ images: { maxBytes: 1024 } }),
+    });
+    const japanese = await startHarness(db, {
+      reference: referenceSourceOf(fixture.verified),
+      keys,
+      secrets: api.secrets,
+      libraryConfig: resolveLibraryConfig({ servedCuisines: ["japanese"] }),
+    });
+    try {
+      expectProblem(await capped.request("GET", url, { token: home.token }), 404, "not_found");
+      expectProblem(await japanese.request("GET", url, { token: home.token }), 404, "not_found");
+    } finally {
+      await capped.close();
+      await japanese.close();
+    }
+    await retireFixtureRecipe(db, "fx_rcp_gambar_besar");
+  });
+
   it("NFR-09 every library route needs a signed-in caller with a household", async () => {
     for (const [method, url] of [
       ["POST", searchUrl],

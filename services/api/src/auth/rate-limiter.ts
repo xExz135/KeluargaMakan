@@ -16,7 +16,9 @@ export type RateLimitScope =
   | "code_verify_failure_destination"
   | "code_request_client"
   | "code_verify_client"
-  | "refresh_client";
+  | "refresh_client"
+  | "library_household"
+  | "library_image_household";
 
 export interface RateLimitDecision {
   readonly allowed: boolean;

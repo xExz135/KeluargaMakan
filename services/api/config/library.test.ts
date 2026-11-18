@@ -5,7 +5,16 @@ import { defaultLibraryConfig, libraryConfigFromEnv, resolveLibraryConfig } from
 describe("library config (T-041)", () => {
   it("LIB-08 SUG-03 defaults: 20 per page, at most 50, Indonesian only", () => {
     expect(libraryConfigFromEnv({})).toBe(defaultLibraryConfig);
-    expect(defaultLibraryConfig.search).toEqual({ defaultLimit: 20, maxLimit: 50 });
+    expect(defaultLibraryConfig.search).toEqual({
+      defaultLimit: 20,
+      maxLimit: 50,
+      maxCandidatesChecked: 300,
+    });
+    expect(defaultLibraryConfig.rateLimits.requestsPerHousehold).toEqual({
+      limit: 120,
+      windowSeconds: 60,
+    });
+    expect(defaultLibraryConfig.images.maxBytes).toBe(1024 * 1024);
     expect(defaultLibraryConfig.servedCuisines).toEqual(["indonesian"]);
   });
 
@@ -13,7 +22,7 @@ describe("library config (T-041)", () => {
     const config = libraryConfigFromEnv({
       LIBRARY_CONFIG_JSON: JSON.stringify({ search: { maxLimit: 10 }, maxRegionalVariants: 3 }),
     });
-    expect(config.search).toEqual({ defaultLimit: 10, maxLimit: 10 });
+    expect(config.search).toEqual({ defaultLimit: 10, maxLimit: 10, maxCandidatesChecked: 300 });
     expect(config.maxRegionalVariants).toBe(3);
   });
 
@@ -24,6 +33,10 @@ describe("library config (T-041)", () => {
     [{ servedCuisines: [] }, /non-empty/],
     [{ servedCuisines: ["indonesian", "indonesian"] }, /repeats/],
     [{ servedCuisines: ["korean"] }, /Cuisine/],
+    [{ rateLimits: { searchPerSecond: 1 } }, /Unknown library config/],
+    [{ rateLimits: { requestsPerHousehold: { limit: 0 } } }, /limit must be/],
+    [{ images: { maxBytes: 6 * 1024 * 1024 } }, /maxBytes/],
+    [{ search: { maxCandidatesChecked: 10 } }, /maxCandidatesChecked/],
   ])("LIB-08 refuses %j", (overrides, message) => {
     expect(() => resolveLibraryConfig(overrides)).toThrow(message);
   });

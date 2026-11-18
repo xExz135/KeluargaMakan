@@ -10,6 +10,8 @@
 
 import type { Schemas } from "@keluargamakan/contracts";
 
+import type { RateLimitRule } from "./api.js";
+
 type Cuisine = Schemas["Cuisine"];
 
 export interface LibraryConfig {
@@ -18,6 +20,23 @@ export interface LibraryConfig {
     readonly defaultLimit: number;
     /** Largest `limit` accepted (the contract allows at most 50). */
     readonly maxLimit: number;
+    /**
+     * Security review T-041 M1: the best-matching recipes checked by Cek Aman
+     * per search, after the filters and the text match. Recipes past it are
+     * not listed or counted; a narrower search reaches them.
+     */
+    readonly maxCandidatesChecked: number;
+  };
+  /** Security review T-041 M1 and L6: per household, answered with 429 and Retry-After. */
+  readonly rateLimits: {
+    /** Search, recipe screen and region list requests. */
+    readonly requestsPerHousehold: RateLimitRule;
+    /** Image requests (304 answers included). */
+    readonly imagesPerHousehold: RateLimitRule;
+  };
+  readonly images: {
+    /** Security review T-041 L6: larger stored images are not served (404). */
+    readonly maxBytes: number;
   };
   /** LIB-04: regional versions listed on one recipe screen. */
   readonly maxRegionalVariants: number;
@@ -32,7 +51,12 @@ const LIMIT_CEILING = 50; // contract LibrarySearchRequest.limit maximum
 const CUISINES: readonly Cuisine[] = ["indonesian", "japanese", "chinese", "fusion"];
 
 export const defaultLibraryConfig: LibraryConfig = Object.freeze({
-  search: Object.freeze({ defaultLimit: 20, maxLimit: 50 }),
+  search: Object.freeze({ defaultLimit: 20, maxLimit: 50, maxCandidatesChecked: 300 }),
+  rateLimits: Object.freeze({
+    requestsPerHousehold: Object.freeze({ limit: 120, windowSeconds: 60 }),
+    imagesPerHousehold: Object.freeze({ limit: 600, windowSeconds: 60 }),
+  }),
+  images: Object.freeze({ maxBytes: 1024 * 1024 }),
   maxRegionalVariants: 10,
   servedCuisines: Object.freeze(["indonesian"] as Cuisine[]),
 });
@@ -54,6 +78,21 @@ function wholeNumber(value: unknown, min: number, max: number, name: string): nu
   return value;
 }
 
+function rule(value: unknown, fallback: RateLimitRule, name: string): RateLimitRule {
+  const given = value ?? {};
+  if (!isRecord(given)) throw new Error(`library config ${name} must be an object`);
+  onlyKeys(given, ["limit", "windowSeconds"], `${name}.`);
+  return Object.freeze({
+    limit: wholeNumber(given["limit"] ?? fallback.limit, 1, 100_000, `${name}.limit`),
+    windowSeconds: wholeNumber(
+      given["windowSeconds"] ?? fallback.windowSeconds,
+      1,
+      86_400,
+      `${name}.windowSeconds`,
+    ),
+  });
+}
+
 function cuisines(value: unknown): readonly Cuisine[] {
   if (!Array.isArray(value) || value.length === 0) {
     throw new Error("library config servedCuisines must be a non-empty list");
@@ -73,10 +112,20 @@ function cuisines(value: unknown): readonly Cuisine[] {
 /** Defaults with the given values replaced. */
 export function resolveLibraryConfig(overrides: unknown = {}): LibraryConfig {
   if (!isRecord(overrides)) throw new Error("library config must be an object");
-  onlyKeys(overrides, ["search", "maxRegionalVariants", "servedCuisines"], "");
+  onlyKeys(
+    overrides,
+    ["search", "maxRegionalVariants", "servedCuisines", "rateLimits", "images"],
+    "",
+  );
+  const limits = overrides["rateLimits"] ?? {};
+  if (!isRecord(limits)) throw new Error("library config rateLimits must be an object");
+  onlyKeys(limits, ["requestsPerHousehold", "imagesPerHousehold"], "rateLimits.");
+  const images = overrides["images"] ?? {};
+  if (!isRecord(images)) throw new Error("library config images must be an object");
+  onlyKeys(images, ["maxBytes"], "images.");
   const search = overrides["search"] ?? {};
   if (!isRecord(search)) throw new Error("library config search must be an object");
-  onlyKeys(search, ["defaultLimit", "maxLimit"], "search.");
+  onlyKeys(search, ["defaultLimit", "maxLimit", "maxCandidatesChecked"], "search.");
   const maxLimit = wholeNumber(
     search["maxLimit"] ?? defaultLibraryConfig.search.maxLimit,
     1,
@@ -90,7 +139,36 @@ export function resolveLibraryConfig(overrides: unknown = {}): LibraryConfig {
     "search.defaultLimit",
   );
   return Object.freeze({
-    search: Object.freeze({ defaultLimit, maxLimit }),
+    search: Object.freeze({
+      defaultLimit,
+      maxLimit,
+      maxCandidatesChecked: wholeNumber(
+        search["maxCandidatesChecked"] ?? defaultLibraryConfig.search.maxCandidatesChecked,
+        maxLimit,
+        2000,
+        "search.maxCandidatesChecked",
+      ),
+    }),
+    rateLimits: Object.freeze({
+      requestsPerHousehold: rule(
+        limits["requestsPerHousehold"],
+        defaultLibraryConfig.rateLimits.requestsPerHousehold,
+        "rateLimits.requestsPerHousehold",
+      ),
+      imagesPerHousehold: rule(
+        limits["imagesPerHousehold"],
+        defaultLibraryConfig.rateLimits.imagesPerHousehold,
+        "rateLimits.imagesPerHousehold",
+      ),
+    }),
+    images: Object.freeze({
+      maxBytes: wholeNumber(
+        images["maxBytes"] ?? defaultLibraryConfig.images.maxBytes,
+        1024,
+        5 * 1024 * 1024,
+        "images.maxBytes",
+      ),
+    }),
     maxRegionalVariants: wholeNumber(
       overrides["maxRegionalVariants"] ?? defaultLibraryConfig.maxRegionalVariants,
       0,

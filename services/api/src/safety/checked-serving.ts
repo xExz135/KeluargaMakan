@@ -5,6 +5,8 @@ import {
   deriveRecipeHalalWithLog,
   evaluateWithLog,
   type CekAmanResult,
+  type ReferenceDataset,
+  type ReferenceIngredient,
   type HardRule,
   type RecipeHalalFinding,
   type RecipeHalalLogRecord,
@@ -299,6 +301,95 @@ function findingBodies(
   });
 }
 
+// ---------------------------------------------------------------- reference subset
+
+/**
+ * Security review T-041 M1: the reference index is built once per loaded
+ * reference version and process (the dataset is immutable per version), and
+ * each check gives Cek Aman only the records it can read: the item's
+ * ingredients, every component of them and of their brand variants (to any
+ * depth), and every ingredient a member's rule maps to. Same schema and
+ * version. A record left out by mistake can only make a result stricter
+ * (Cek Aman reports it as not in the reference: Check the label), never
+ * Safe; an equivalence test compares the results with the full dataset.
+ * Results themselves are never cached or replayed (T-040 M4).
+ */
+interface ReferenceIndex {
+  readonly positions: ReadonlyMap<string, number>;
+  readonly records: readonly ReferenceIngredient[];
+}
+
+const indexCache = new WeakMap<LoadedReference, ReferenceIndex>();
+
+function indexOf(reference: LoadedReference): ReferenceIndex {
+  let index = indexCache.get(reference);
+  if (index === undefined) {
+    const records = reference.verified.reference.ingredients;
+    const positions = new Map<string, number>();
+    records.forEach((record, position) => {
+      if (!positions.has(record.id)) positions.set(record.id, position);
+    });
+    index = { positions, records };
+    indexCache.set(reference, index);
+  }
+  return index;
+}
+
+const idsIn = (value: unknown): string[] =>
+  Array.isArray(value) ? value.filter((id): id is string => typeof id === "string") : [];
+
+/** Component IDs of a record and of its brand variants. Read defensively: a record is data. */
+function componentIds(record: ReferenceIngredient): string[] {
+  const ids = idsIn(record.components?.ingredientIds);
+  const variants: readonly unknown[] = Array.isArray(record.brandVariants)
+    ? record.brandVariants
+    : [];
+  for (const variant of variants) {
+    const components =
+      typeof variant === "object" && variant !== null
+        ? (variant as { components?: { ingredientIds?: unknown } }).components
+        : undefined;
+    ids.push(...idsIn(components?.ingredientIds));
+  }
+  return ids;
+}
+
+function ruleIngredientIds(rule: HardRule): string[] {
+  if (rule.type !== "free_text" && rule.type !== "medical_exclusion") return [];
+  return rule.mapping.status === "unmapped" ? [] : idsIn(rule.mapping.ingredientIds);
+}
+
+/** @internal Exported for the equivalence test only. */
+export function referenceSubset(
+  reference: LoadedReference,
+  candidate: FoodCandidate,
+  eaters: readonly CheckEater[],
+): ReferenceDataset {
+  const index = indexOf(reference);
+  const queue = [
+    ...candidate.lines.flatMap((line) => (line.ingredientId === null ? [] : [line.ingredientId])),
+    ...eaters.flatMap((eater) => eater.hardRules.flatMap(ruleIngredientIds)),
+  ];
+  const kept = new Set<number>();
+  const seen = new Set<string>();
+  while (queue.length > 0) {
+    const id = queue.pop() as string;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const position = index.positions.get(id);
+    if (position === undefined) continue;
+    kept.add(position);
+    const record = index.records[position];
+    if (record !== undefined) queue.push(...componentIds(record));
+  }
+  const dataset = reference.verified.reference;
+  return {
+    schema: dataset.schema,
+    version: dataset.version,
+    ingredients: [...kept].sort((a, b) => a - b).map((position) => index.records[position]!),
+  };
+}
+
 // ---------------------------------------------------------------- step 1: check
 
 function brandsFor(context: CheckContext, ingredientId: string | null): string[] {
@@ -313,6 +404,7 @@ function brandsFor(context: CheckContext, ingredientId: string | null): string[]
  */
 export function checkFood(context: CheckContext, candidate: FoodCandidate): PendingCheck | null {
   const reference = context.reference.verified;
+  const subset = referenceSubset(context.reference, candidate, context.eaters);
   const logContext = {
     householdId: context.householdId,
     subject: {
@@ -337,7 +429,7 @@ export function checkFood(context: CheckContext, candidate: FoodCandidate): Pend
           memberId: eater.memberId,
           hardRules: eater.hardRules,
         })),
-        reference: reference.reference,
+        reference: subset,
       },
       logContext,
     );
@@ -348,7 +440,7 @@ export function checkFood(context: CheckContext, candidate: FoodCandidate): Pend
           ingredientId: line.ingredientId,
           brandIds: brandsFor(context, line.ingredientId),
         })),
-        reference: reference.reference,
+        reference: subset,
       },
       logContext,
     );

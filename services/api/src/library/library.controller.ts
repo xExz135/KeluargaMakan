@@ -43,18 +43,19 @@ export class LibraryController {
 
   @Get("regions")
   @Requires("library:read")
-  async regions(): Promise<Schemas["LibraryRegionList"]> {
-    return this.library.regions();
+  async regions(@Scope() scope: HouseholdScope): Promise<Schemas["LibraryRegionList"]> {
+    return this.library.regions(scope);
   }
 
   @Get("images/:imageId")
   @Requires("library:read")
   async image(
+    @Scope() scope: HouseholdScope,
     @Param("imageId") imageId: string,
     @Headers("if-none-match") ifNoneMatch: unknown,
     @Res({ passthrough: true }) reply: FastifyReply,
   ): Promise<Buffer | undefined> {
-    const image = await this.library.image(imageId, ifNoneMatch);
+    const image = await this.library.image(scope, imageId, ifNoneMatch);
     void reply
       .header("ETag", image.etag)
       .header("Cache-Control", IMAGE_CACHE_CONTROL)

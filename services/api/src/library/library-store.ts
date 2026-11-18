@@ -299,6 +299,12 @@ export class LibraryChangingError extends Error {
   }
 }
 
+/** Security review T-041 L6 and I6: size cap and served cuisines. */
+export interface ImageLimits {
+  readonly maxBytes: number;
+  readonly cuisines: readonly string[];
+}
+
 export interface ServableImage {
   readonly mediaType: "image/webp" | "image/jpeg";
   readonly sha256: string;
@@ -311,6 +317,7 @@ export interface ServableImage {
 export async function readServableImage(
   db: SqlExecutor,
   imageId: string,
+  limits: ImageLimits,
 ): Promise<ServableImage | null> {
   if (!isReferenceId(imageId)) return null;
   const { rows } = await withDbErrors(() =>
@@ -322,9 +329,10 @@ export async function readServableImage(
           AND EXISTS (
             SELECT 1 FROM library_recipe_version_image v
               JOIN library_servable_version s ON s.recipe_id = v.recipe_id AND s.version = v.version
-             WHERE v.image_id = i.image_id
-          )`,
-      [imageId],
+             WHERE v.image_id = i.image_id AND s.cuisine = ANY ($3::text[])
+          )
+          AND octet_length(i.bytes) <= $2`,
+      [imageId, limits.maxBytes, [...limits.cuisines]],
     ),
   );
   const row = rows[0];
@@ -336,6 +344,7 @@ export async function readServableImageBytes(
   db: SqlExecutor,
   imageId: string,
   sha256: string,
+  limits: ImageLimits,
 ): Promise<Buffer | null> {
   if (!isReferenceId(imageId)) return null;
   const { rows } = await withDbErrors(() =>
@@ -343,14 +352,15 @@ export async function readServableImageBytes(
       `SELECT i.bytes
          FROM library_image i
         WHERE i.image_id = $1
-          AND i.sha256 = $2
+          AND i.sha256 = $4
           AND i.withdrawn_at IS NULL
           AND EXISTS (
             SELECT 1 FROM library_recipe_version_image v
               JOIN library_servable_version s ON s.recipe_id = v.recipe_id AND s.version = v.version
-             WHERE v.image_id = i.image_id
-          )`,
-      [imageId, sha256],
+             WHERE v.image_id = i.image_id AND s.cuisine = ANY ($3::text[])
+          )
+          AND octet_length(i.bytes) <= $2`,
+      [imageId, limits.maxBytes, [...limits.cuisines], sha256],
     ),
   );
   const row = rows[0];
