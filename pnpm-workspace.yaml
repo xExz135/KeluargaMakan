@@ -8,3 +8,12 @@ packages:
 # 3 days ago, and only allow install scripts for packages listed here.
 minimumReleaseAge: 4320
 onlyBuiltDependencies: []
+
+# Audit exceptions (owner decision 2026-11-18). Each entry is dev-tooling only,
+# never loaded by the API, the AI service or the app, and has no patched
+# release yet. Remove an entry as soon as a fixed version is available.
+auditConfig:
+  ignoreGhsas:
+    # picomatch ReDoS <=4.0.7, via typescript-eslint > typescript-estree >
+    # tinyglobby; globs come only from repo-controlled lint config.
+    - GHSA-fc5q-39xc-vjpf
