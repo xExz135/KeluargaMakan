@@ -605,12 +605,22 @@ export async function deleteHardRule(
   ruleId: string,
 ): Promise<boolean> {
   if (!isUuid(householdId) || !isUuid(profileId) || !isUuid(ruleId)) return false;
-  const { rowCount } = await withDbErrors(() =>
-    db.query(`DELETE FROM hard_rule WHERE id = $1 AND profile_id = $2 AND household_id = $3`, [
-      ruleId,
-      profileId,
-      householdId,
-    ]),
+  // Security re-check T-041 N2 (H4): like every health-data writer, lock the
+  // member first, so a delete waits for a safety check being logged for them
+  // and never commits inside its serve window.
+  return withDbErrors(() =>
+    db.transaction(async (tx) => {
+      try {
+        await lockMembers(tx, householdId, [profileId]);
+      } catch (error) {
+        if (error instanceof NotFoundError) return false;
+        throw error;
+      }
+      const { rowCount } = await tx.query(
+        `DELETE FROM hard_rule WHERE id = $1 AND profile_id = $2 AND household_id = $3`,
+        [ruleId, profileId, householdId],
+      );
+      return rowCount === 1;
+    }),
   );
-  return rowCount === 1;
 }
