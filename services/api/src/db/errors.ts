@@ -113,6 +113,14 @@ export class ConcurrentUpdateError extends DataLayerError {
   }
 }
 
+/**
+ * Security review T-041 L1: a member's consent or hard rules changed between
+ * the safety check and its log write. Nothing was written and nothing may be
+ * served from that check; check again (once), or answer 503 like any
+ * concurrent change.
+ */
+export class RulesChangedError extends ConcurrentUpdateError {}
+
 /** SQLSTATEs raised by the triggers in the migrations, and others the data layer handles. */
 export const SQLSTATE = {
   consentRequired: "KM001",

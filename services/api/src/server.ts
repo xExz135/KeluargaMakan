@@ -1,5 +1,6 @@
 import { apiConfigFromEnv } from "../config/api.js";
 import { kitchenConfigFromEnv } from "../config/kitchen.js";
+import { libraryConfigFromEnv } from "../config/library.js";
 import { profileConfigFromEnv } from "../config/profiles.js";
 import { targetsFromEnv } from "../config/targets.js";
 import { resolveAppEnv } from "./app-env.js";
@@ -52,6 +53,7 @@ export async function startApi(
   const reference = referenceSourceFromEnv(env, jsonLogger);
   requireReferenceOutsideDevelopment(reference, env["APP_ENV"]);
   const kitchenConfig = kitchenConfigFromEnv(env);
+  const libraryConfig = libraryConfigFromEnv(env);
   checkStaplesInReference(kitchenConfig, reference);
   const config = apiConfigFromEnv(env);
   const targets = targetsFromEnv(env);
@@ -74,6 +76,7 @@ export async function startApi(
     targets,
     profileConfig,
     kitchenConfig,
+    libraryConfig,
     // QUESTIONS #49: the kitchen, the search, likes, dislikes and rule
     // mappings all use this one verified dataset (createApp's default catalog).
     reference,

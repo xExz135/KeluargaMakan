@@ -6,7 +6,9 @@ import {
 
 import { ApiError } from "../api-error.js";
 import { isDevelopmentEnv } from "../app-env.js";
+import { isReferenceVersion } from "../db/ids.js";
 import type { ApiLogger } from "../logger.js";
+import { assertReferenceIntegrity, ReferenceIntegrityError } from "../safety/reference-subset.js";
 import { CatalogFormatError, IngredientCatalog } from "./ingredient-catalog.js";
 
 /**
@@ -32,8 +34,33 @@ export interface ReferenceSource {
 
 export const unavailableReference: ReferenceSource = Object.freeze({ current: () => null });
 
-/** A source serving one verified dataset. Throws `CatalogFormatError` when a record cannot be read. */
+/**
+ * Security review T-041 L4: a version that safety results cannot record
+ * (DAT-06, SAF-14) makes the dataset unusable, so food routes answer 503
+ * `reference_data_unavailable` instead of failing at the log write.
+ */
+export class ReferenceVersionError extends Error {
+  constructor() {
+    super("the reference version cannot be recorded with safety results");
+    this.name = "ReferenceVersionError";
+  }
+}
+
+/**
+ * A source serving one verified dataset. Throws `CatalogFormatError` when a
+ * record cannot be read, `ReferenceVersionError` when the version does not
+ * match the logged version pattern or differs from the engine input, and
+ * `ReferenceIntegrityError` when a record has no ID or an ID repeats (the
+ * engine refuses such a dataset as a whole; security re-check T-041 N1).
+ */
 export function referenceSourceOf(verified: VerifiedReference): ReferenceSource {
+  if (
+    !isReferenceVersion(verified.referenceVersion) ||
+    verified.reference.version !== verified.referenceVersion
+  ) {
+    throw new ReferenceVersionError();
+  }
+  assertReferenceIntegrity(verified.reference);
   const loaded: LoadedReference = Object.freeze({
     verified,
     catalog: new IngredientCatalog(verified),
@@ -50,8 +77,27 @@ export function referenceSourceFromEnv(
   env: Readonly<Record<string, string | undefined>>,
   logger: ApiLogger,
 ): ReferenceSource {
+  let verified: VerifiedReference;
   try {
-    const source = referenceSourceOf(loadReferenceDataFromEnv(env));
+    verified = loadReferenceDataFromEnv(env);
+  } catch (error) {
+    if (!(error instanceof ReferenceDataError)) throw error;
+    logger.error("reference_data_unavailable", { error: error.name, reason: error.message });
+    return unavailableReference;
+  }
+  return loggedReferenceSource(verified, logger);
+}
+
+/**
+ * The source for a loaded dataset, or the unavailable source (with one log
+ * line naming the error class) when its catalog or its version cannot be used.
+ */
+export function loggedReferenceSource(
+  verified: VerifiedReference,
+  logger: ApiLogger,
+): ReferenceSource {
+  try {
+    const source = referenceSourceOf(verified);
     const loaded = source.current();
     logger.info("reference_data_loaded", {
       referenceVersion: loaded?.verified.referenceVersion ?? null,
@@ -60,7 +106,11 @@ export function referenceSourceFromEnv(
     });
     return source;
   } catch (error) {
-    if (!(error instanceof ReferenceDataError) && !(error instanceof CatalogFormatError)) {
+    if (
+      !(error instanceof CatalogFormatError) &&
+      !(error instanceof ReferenceVersionError) &&
+      !(error instanceof ReferenceIntegrityError)
+    ) {
       throw error;
     }
     logger.error("reference_data_unavailable", { error: error.name, reason: error.message });

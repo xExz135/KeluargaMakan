@@ -41,6 +41,13 @@ export const HOUSEHOLD_PERMISSIONS = [
   /** Dapur Saya (KIT-01 to KIT-09, KIT-16). */
   "kitchen:read",
   "kitchen:write",
+  /**
+   * Recipe library and recipe screen (LIB-08, CKM-01; contract
+   * `x-permission-scope: household`, security review T-040 L7): every item
+   * carries the Cek Aman result for the household's own eaters, so it is
+   * household data, scoped from the session and never granted to staff.
+   */
+  "library:read",
 ] as const;
 
 export const REFERENCE_PERMISSIONS = [

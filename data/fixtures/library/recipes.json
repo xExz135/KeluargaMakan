@@ -1,0 +1,586 @@
+{
+  "$comment": "TEST FIXTURE: not real safety or nutrition data. Fictional library recipes for the T-041 API tests: not real recipes, not tested by anyone, every name ends in 'fiksi'. IDs use the fx_ prefix. The tester label is a fixture label, never a person.",
+  "regions": [
+    {
+      "regionId": "fx_reg_jawa",
+      "displayName": {
+        "id": "Jawa fiksi",
+        "en": "Fiction Java"
+      }
+    },
+    {
+      "regionId": "fx_reg_sumbar",
+      "displayName": {
+        "id": "Sumatera Barat fiksi",
+        "en": "Fiction West Sumatra"
+      }
+    }
+  ],
+  "recipes": [
+    {
+      "recipeId": "fx_rcp_nasi_goreng",
+      "baseRecipeId": null,
+      "testRecord": {
+        "testedBy": "Tim Uji Fiksi (TEST FIXTURE)",
+        "testedOn": "2026-10-01"
+      },
+      "content": {
+        "name": {
+          "id": "Nasi goreng fiksi",
+          "en": "Fiction fried rice"
+        },
+        "description": {
+          "id": "Nasi goreng rekaan untuk uji.",
+          "en": "Made-up fried rice for tests."
+        },
+        "cuisine": "indonesian",
+        "regionId": "fx_reg_jawa",
+        "mealTypes": ["lunch", "dinner"],
+        "baseServings": 4,
+        "prepMinutes": 10,
+        "cookMinutes": 15,
+        "difficulty": "easy",
+        "tags": {
+          "fried": true,
+          "santan": false,
+          "spiceLevel": "medium"
+        },
+        "imageIds": ["fx_img_nasi_goreng"],
+        "ingredients": [
+          {
+            "lineId": "l1",
+            "ingredientId": "fx_lib_nasi",
+            "rawName": "Nasi putih fiksi",
+            "quantity": {
+              "amount": 600,
+              "unitCode": "g",
+              "unitLabel": {
+                "id": "gram",
+                "en": "grams"
+              }
+            },
+            "isOptional": false,
+            "groupLabel": null
+          },
+          {
+            "lineId": "l2",
+            "ingredientId": "fx_lib_bawang",
+            "rawName": "Bawang merah fiksi",
+            "quantity": {
+              "amount": 5,
+              "unitCode": "siung",
+              "unitLabel": {
+                "id": "siung",
+                "en": "cloves"
+              }
+            },
+            "isOptional": false,
+            "groupLabel": {
+              "id": "Bumbu fiksi",
+              "en": "Fiction spices"
+            }
+          },
+          {
+            "lineId": "l3",
+            "ingredientId": "fx_lib_cabai",
+            "rawName": "Cabai fiksi",
+            "quantity": {
+              "amount": 3,
+              "unitCode": "buah",
+              "unitLabel": {
+                "id": "buah",
+                "en": "pieces"
+              }
+            },
+            "isOptional": true,
+            "groupLabel": {
+              "id": "Bumbu fiksi",
+              "en": "Fiction spices"
+            }
+          },
+          {
+            "lineId": "l4",
+            "ingredientId": "fx_lib_terasi",
+            "rawName": "Terasi fiksi",
+            "quantity": {
+              "amount": 1,
+              "unitCode": "sdt",
+              "unitLabel": {
+                "id": "sdt",
+                "en": "tsp"
+              }
+            },
+            "isOptional": false,
+            "groupLabel": {
+              "id": "Bumbu fiksi",
+              "en": "Fiction spices"
+            }
+          },
+          {
+            "lineId": "l5",
+            "ingredientId": "fx_lib_kecap",
+            "rawName": "Kecap manis fiksi",
+            "quantity": {
+              "amount": 2,
+              "unitCode": "sdm",
+              "unitLabel": {
+                "id": "sdm",
+                "en": "tbsp"
+              }
+            },
+            "isOptional": false,
+            "groupLabel": null
+          }
+        ],
+        "steps": [
+          {
+            "stepId": "s1",
+            "text": {
+              "id": "Tumis bawang dan cabai fiksi.",
+              "en": "Fry the fiction shallot and chili."
+            },
+            "timerSeconds": 120,
+            "ingredientLineIds": ["l2", "l3"]
+          },
+          {
+            "stepId": "s2",
+            "text": {
+              "id": "Masukkan nasi dan kecap fiksi.",
+              "en": "Add the fiction rice and soy sauce."
+            },
+            "timerSeconds": null,
+            "ingredientLineIds": ["l1", "l5"]
+          },
+          {
+            "stepId": "s3",
+            "text": {
+              "id": "Tambahkan terasi fiksi, aduk rata.",
+              "en": "Add the fiction shrimp paste and stir."
+            },
+            "timerSeconds": 60,
+            "ingredientLineIds": ["l4"]
+          }
+        ],
+        "variants": [
+          {
+            "variantId": "fx_var_tanpa_terasi",
+            "label": {
+              "id": "Pisahkan porsi {names} sebelum menambah terasi fiksi",
+              "en": "Set aside {names}'s portion before adding the fiction shrimp paste"
+            },
+            "separateBeforeStepId": "s3",
+            "omittedLineIds": ["l4"]
+          }
+        ]
+      }
+    },
+    {
+      "recipeId": "fx_rcp_nasi_goreng_padang",
+      "baseRecipeId": "fx_rcp_nasi_goreng",
+      "testRecord": {
+        "testedBy": "Tim Uji Fiksi (TEST FIXTURE)",
+        "testedOn": "2026-10-01"
+      },
+      "content": {
+        "name": {
+          "id": "Nasi goreng Padang fiksi",
+          "en": "Fiction Padang fried rice"
+        },
+        "description": {
+          "id": "Versi pedas rekaan.",
+          "en": "A made-up spicy version."
+        },
+        "cuisine": "indonesian",
+        "regionId": "fx_reg_sumbar",
+        "mealTypes": ["lunch", "dinner"],
+        "baseServings": 2,
+        "prepMinutes": 10,
+        "cookMinutes": 20,
+        "difficulty": "medium",
+        "tags": {
+          "fried": true,
+          "santan": false,
+          "spiceLevel": "spicy"
+        },
+        "imageIds": [],
+        "ingredients": [
+          {
+            "lineId": "l1",
+            "ingredientId": "fx_lib_nasi",
+            "rawName": "Nasi putih fiksi",
+            "quantity": {
+              "amount": 300,
+              "unitCode": "g",
+              "unitLabel": {
+                "id": "gram",
+                "en": "grams"
+              }
+            },
+            "isOptional": false,
+            "groupLabel": null
+          },
+          {
+            "lineId": "l2",
+            "ingredientId": "fx_lib_bawang",
+            "rawName": "Bawang merah fiksi",
+            "quantity": {
+              "amount": 3,
+              "unitCode": "siung",
+              "unitLabel": {
+                "id": "siung",
+                "en": "cloves"
+              }
+            },
+            "isOptional": false,
+            "groupLabel": null
+          },
+          {
+            "lineId": "l3",
+            "ingredientId": "fx_lib_cabai",
+            "rawName": "Cabai fiksi",
+            "quantity": {
+              "amount": 8,
+              "unitCode": "buah",
+              "unitLabel": {
+                "id": "buah",
+                "en": "pieces"
+              }
+            },
+            "isOptional": false,
+            "groupLabel": null
+          },
+          {
+            "lineId": "l4",
+            "ingredientId": "fx_lib_udang",
+            "rawName": "Udang fiksi",
+            "quantity": {
+              "amount": 100,
+              "unitCode": "g",
+              "unitLabel": {
+                "id": "gram",
+                "en": "grams"
+              }
+            },
+            "isOptional": false,
+            "groupLabel": null
+          }
+        ],
+        "steps": [
+          {
+            "stepId": "s1",
+            "text": {
+              "id": "Tumis bumbu fiksi.",
+              "en": "Fry the fiction spices."
+            },
+            "timerSeconds": 90,
+            "ingredientLineIds": ["l2", "l3"]
+          },
+          {
+            "stepId": "s2",
+            "text": {
+              "id": "Masukkan udang dan nasi fiksi.",
+              "en": "Add the fiction shrimp and rice."
+            },
+            "timerSeconds": 180,
+            "ingredientLineIds": ["l4", "l1"]
+          }
+        ],
+        "variants": []
+      }
+    },
+    {
+      "recipeId": "fx_rcp_sayur_lodeh",
+      "baseRecipeId": null,
+      "testRecord": {
+        "testedBy": "Tim Uji Fiksi (TEST FIXTURE)",
+        "testedOn": "2026-10-01"
+      },
+      "content": {
+        "name": {
+          "id": "Sayur lodeh fiksi",
+          "en": "Fiction vegetable curry"
+        },
+        "description": {
+          "id": "Sayur bersantan rekaan.",
+          "en": "A made-up coconut vegetable dish."
+        },
+        "cuisine": "indonesian",
+        "regionId": "fx_reg_jawa",
+        "mealTypes": ["lunch"],
+        "baseServings": 4,
+        "prepMinutes": 15,
+        "cookMinutes": 30,
+        "difficulty": "easy",
+        "tags": {
+          "fried": false,
+          "santan": true,
+          "spiceLevel": "not_spicy"
+        },
+        "imageIds": [],
+        "ingredients": [
+          {
+            "lineId": "l1",
+            "ingredientId": "fx_lib_santan",
+            "rawName": "Santan fiksi",
+            "quantity": {
+              "amount": 400,
+              "unitCode": "ml",
+              "unitLabel": {
+                "id": "ml",
+                "en": "ml"
+              }
+            },
+            "isOptional": false,
+            "groupLabel": null
+          },
+          {
+            "lineId": "l2",
+            "ingredientId": "fx_lib_tempe",
+            "rawName": "Tempe fiksi",
+            "quantity": {
+              "amount": 200,
+              "unitCode": "g",
+              "unitLabel": {
+                "id": "gram",
+                "en": "grams"
+              }
+            },
+            "isOptional": false,
+            "groupLabel": null
+          },
+          {
+            "lineId": "l3",
+            "ingredientId": "fx_lib_bawang",
+            "rawName": "Bawang merah fiksi",
+            "quantity": {
+              "amount": null,
+              "unitCode": null,
+              "unitLabel": null
+            },
+            "isOptional": false,
+            "groupLabel": null
+          }
+        ],
+        "steps": [
+          {
+            "stepId": "s1",
+            "text": {
+              "id": "Rebus santan fiksi.",
+              "en": "Simmer the fiction coconut milk."
+            },
+            "timerSeconds": 600,
+            "ingredientLineIds": ["l1"]
+          },
+          {
+            "stepId": "s2",
+            "text": {
+              "id": "Masukkan tempe dan bawang fiksi.",
+              "en": "Add the fiction tempeh and shallot."
+            },
+            "timerSeconds": 900,
+            "ingredientLineIds": ["l2", "l3"]
+          }
+        ],
+        "variants": []
+      }
+    },
+    {
+      "recipeId": "fx_rcp_ayam_angciu",
+      "baseRecipeId": null,
+      "testRecord": {
+        "testedBy": "Tim Uji Fiksi (TEST FIXTURE)",
+        "testedOn": "2026-10-01"
+      },
+      "content": {
+        "name": {
+          "id": "Ayam angciu fiksi",
+          "en": "Fiction wine chicken"
+        },
+        "description": {
+          "id": "Ayam rekaan dengan angciu.",
+          "en": "Made-up chicken with cooking wine."
+        },
+        "cuisine": "indonesian",
+        "regionId": null,
+        "mealTypes": ["dinner"],
+        "baseServings": 4,
+        "prepMinutes": 20,
+        "cookMinutes": 50,
+        "difficulty": "hard",
+        "tags": {
+          "fried": false,
+          "santan": false,
+          "spiceLevel": "not_spicy"
+        },
+        "imageIds": [],
+        "ingredients": [
+          {
+            "lineId": "l1",
+            "ingredientId": "fx_lib_ayam",
+            "rawName": "Ayam fiksi",
+            "quantity": {
+              "amount": 1,
+              "unitCode": "kg",
+              "unitLabel": {
+                "id": "kg",
+                "en": "kg"
+              }
+            },
+            "isOptional": false,
+            "groupLabel": null
+          },
+          {
+            "lineId": "l2",
+            "ingredientId": "fx_lib_angciu",
+            "rawName": "Angciu fiksi",
+            "quantity": {
+              "amount": 3,
+              "unitCode": "sdm",
+              "unitLabel": {
+                "id": "sdm",
+                "en": "tbsp"
+              }
+            },
+            "isOptional": false,
+            "groupLabel": null
+          },
+          {
+            "lineId": "l3",
+            "ingredientId": "fx_lib_bawang",
+            "rawName": "Bawang merah fiksi",
+            "quantity": {
+              "amount": 4,
+              "unitCode": "siung",
+              "unitLabel": {
+                "id": "siung",
+                "en": "cloves"
+              }
+            },
+            "isOptional": false,
+            "groupLabel": null
+          }
+        ],
+        "steps": [
+          {
+            "stepId": "s1",
+            "text": {
+              "id": "Tumis bawang fiksi.",
+              "en": "Fry the fiction shallot."
+            },
+            "timerSeconds": null,
+            "ingredientLineIds": ["l3"]
+          },
+          {
+            "stepId": "s2",
+            "text": {
+              "id": "Masak ayam dengan angciu fiksi.",
+              "en": "Cook the fiction chicken with the wine."
+            },
+            "timerSeconds": 2400,
+            "ingredientLineIds": ["l1", "l2"]
+          }
+        ],
+        "variants": []
+      }
+    },
+    {
+      "recipeId": "fx_rcp_gado_gado",
+      "baseRecipeId": null,
+      "testRecord": {
+        "testedBy": "Tim Uji Fiksi (TEST FIXTURE)",
+        "testedOn": "2026-10-01"
+      },
+      "content": {
+        "name": {
+          "id": "Gado-gado fiksi",
+          "en": "Fiction gado-gado"
+        },
+        "description": {
+          "id": "Sayur dengan saus kacang rekaan.",
+          "en": "Made-up vegetables with peanut sauce."
+        },
+        "cuisine": "indonesian",
+        "regionId": null,
+        "mealTypes": ["lunch", "snack"],
+        "baseServings": 3,
+        "prepMinutes": 10,
+        "cookMinutes": 20,
+        "difficulty": "easy",
+        "tags": {
+          "fried": false,
+          "santan": false,
+          "spiceLevel": "medium"
+        },
+        "imageIds": [],
+        "ingredients": [
+          {
+            "lineId": "l1",
+            "ingredientId": "fx_lib_kacang",
+            "rawName": "Kacang tanah fiksi",
+            "quantity": {
+              "amount": 150,
+              "unitCode": "g",
+              "unitLabel": {
+                "id": "gram",
+                "en": "grams"
+              }
+            },
+            "isOptional": false,
+            "groupLabel": null
+          },
+          {
+            "lineId": "l2",
+            "ingredientId": "fx_lib_tempe",
+            "rawName": "Tempe fiksi",
+            "quantity": {
+              "amount": 100,
+              "unitCode": "g",
+              "unitLabel": {
+                "id": "gram",
+                "en": "grams"
+              }
+            },
+            "isOptional": false,
+            "groupLabel": null
+          },
+          {
+            "lineId": "l3",
+            "ingredientId": null,
+            "rawName": "Kerupuk rumahan fiksi",
+            "quantity": {
+              "amount": 1,
+              "unitCode": "genggam",
+              "unitLabel": {
+                "id": "genggam",
+                "en": "handful"
+              }
+            },
+            "isOptional": false,
+            "groupLabel": null
+          }
+        ],
+        "steps": [
+          {
+            "stepId": "s1",
+            "text": {
+              "id": "Haluskan kacang fiksi.",
+              "en": "Grind the fiction peanuts."
+            },
+            "timerSeconds": null,
+            "ingredientLineIds": ["l1"]
+          },
+          {
+            "stepId": "s2",
+            "text": {
+              "id": "Sajikan dengan tempe dan kerupuk fiksi.",
+              "en": "Serve with the fiction tempeh and crackers."
+            },
+            "timerSeconds": null,
+            "ingredientLineIds": ["l2", "l3"]
+          }
+        ],
+        "variants": []
+      }
+    }
+  ]
+}

@@ -38,7 +38,45 @@ describe("migrations", () => {
   });
 
   it("PRF-01 REC-07 SET-05 store no photos or photo URLs", () => {
-    expect(allSql).not.toMatch(/photo|image|picture|_url\b/i);
+    // LIB-03 recipe images (contract `getLibraryImage`) are the one exception:
+    // content-team food pictures in the library migration, never household
+    // data. Every other migration may not mention images at all. In the
+    // library migrations only the library image tables, their triggers, the
+    // `image_id` column and the two media types are removed before the check
+    // (security review T-041 I5), so a column like `profile_image_url` fails.
+    const isLibrary = (name: string) => name.startsWith("library-");
+    const others = MIGRATIONS.filter((migration) => !isLibrary(migration.name))
+      .map((migration) => migration.sql)
+      .join("\n");
+    expect(others).not.toMatch(/photo|image|picture|_url\b/i);
+    const library = MIGRATIONS.filter((migration) => isLibrary(migration.name));
+    expect(library.map((migration) => migration.name)).toContain("library-recipes");
+    for (const migration of library) {
+      const withoutImageNames = migration.sql
+        .replace(/'image\/(webp|jpeg)'/g, "")
+        .replace(/\blibrary_(recipe_version_)?image(_[a-z_]+)?\b/g, "")
+        .replace(/\bimage_id\b/g, "");
+      expect(withoutImageNames, migration.name).not.toMatch(/photo|image|picture|_url\b/i);
+    }
+  });
+
+  it("LIB-03 REC-07 SET-05 library images are content tables with no household link", () => {
+    for (const table of ["library_image", "library_recipe_version_image"]) {
+      const trace = SCHEMA_TRACE[table];
+      expect(trace?.entity, table).toBe("Library recipe");
+      expect(trace?.sensitivity, table).toBe("public");
+      expect(Object.keys(trace?.columns ?? {}), table).not.toContain("household_id");
+      expect(Object.keys(trace?.columns ?? {}).join(" "), table).not.toMatch(/url|profile|account/);
+    }
+  });
+
+  it("LIB-05 LIB-01 no library table stores a halal status, a tested flag or a safety result", () => {
+    for (const [table, trace] of Object.entries(SCHEMA_TRACE)) {
+      if (!table.startsWith("library_")) continue;
+      for (const column of Object.keys(trace.columns)) {
+        expect(column, `${table}.${column}`).not.toMatch(/halal|tested$|is_tested|safe|safety|ai_/);
+      }
+    }
   });
 
   it("SRS 22 store no shopping lists, costs or budgets", () => {

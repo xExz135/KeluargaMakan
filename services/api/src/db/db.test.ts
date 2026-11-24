@@ -559,6 +559,49 @@ for (const target of DATABASE_TARGETS) {
         );
       });
 
+      it("N2 H4 a rule delete locks the member first, in the same transaction as the delete", async () => {
+        const home = await seedHousehold(db);
+        await giveConsent(home, home.managerProfileId);
+        const rule = await insertHardRule(db, keys, {
+          householdId: home.householdId,
+          profileId: home.managerProfileId,
+          rule: { type: "allergy", allergen: "egg" },
+          mappingConfirmedBy: null,
+        });
+        const statements: { text: string; inTransaction: boolean }[] = [];
+        const recorder = (executor: SqlExecutor, inTransaction: boolean): SqlExecutor => ({
+          query(text, params) {
+            statements.push({ text, inTransaction });
+            return executor.query(text, params);
+          },
+          execScript: (sql) => executor.execScript(sql),
+          transaction: (fn) => executor.transaction((tx) => fn(recorder(tx, true))),
+        });
+        expect(
+          await deleteHardRule(
+            recorder(db, false),
+            home.householdId,
+            home.managerProfileId,
+            rule.id,
+          ),
+        ).toBe(true);
+        const lock = statements.findIndex((s) => /FOR NO KEY UPDATE/.test(s.text));
+        const remove = statements.findIndex((s) => /DELETE FROM hard_rule/.test(s.text));
+        expect(lock).toBeGreaterThanOrEqual(0);
+        expect(remove).toBeGreaterThan(lock);
+        expect(statements[lock]?.inTransaction).toBe(true);
+        expect(statements[remove]?.inTransaction).toBe(true);
+        // A profile of another household (or none) still answers false, after the same queries.
+        expect(
+          await deleteHardRule(
+            db,
+            home.householdId,
+            "00000000-0000-4000-8000-000000000000",
+            rule.id,
+          ),
+        ).toBe(false);
+      });
+
       it("PRF-11 QUESTIONS #36 returns exactly the selected members, and tells no rules apart from no consent", async () => {
         const home = await seedHousehold(db);
         const noConsent = await addProfile(db, home, "adult");
@@ -2046,6 +2089,30 @@ for (const target of DATABASE_TARGETS) {
         expect(
           await count(`SELECT count(*) AS n FROM health_data_key WHERE profile_id = $1`, [profile]),
         ).toBe(0);
+      });
+
+      it("N2 a rule delete waits for a safety log being written for the member", async (context) => {
+        if (opened.openSession === null) {
+          context.skip("PGlite has one connection; set TEST_DATABASE_URL to run");
+          return;
+        }
+        const home = await seedHousehold(db);
+        const profile = await addProfile(db, home, "adult");
+        await giveConsent(home, profile);
+        const rule = await insertHardRule(db, keys, {
+          householdId: home.householdId,
+          profileId: profile,
+          rule: { type: "allergy", allergen: "shrimp" },
+          mappingConfirmedBy: null,
+        });
+        // The serve window: the log transaction holds the member lock.
+        const session = await opened.openSession();
+        await lockMembers(session.executor, home.householdId, [profile]);
+        const deletion = deleteHardRule(db, home.householdId, profile, rule.id);
+        expect(await settledWithin(deletion, 300)).toBe(false);
+        expect(await count(`SELECT count(*) AS n FROM hard_rule WHERE id = $1`, [rule.id])).toBe(1);
+        await session.commit();
+        expect(await deletion).toBe(true);
       });
 
       it("H4 a rule write waits for an in-flight withdrawal and is then refused", async (context) => {

@@ -1,0 +1,397 @@
+{
+  "$comment": "TEST FIXTURE: not real safety or nutrition data. Fictional ingredients for the T-041 library API tests: every name ends in 'fiksi', every value is invented, IDs use the fx_lib_ prefix.",
+  "schema": "keluargamakan.reference.ingredients/1",
+  "version": "TEST-FIXTURE-library-1",
+  "ingredients": [
+    {
+      "id": "fx_lib_nasi",
+      "displayName": {
+        "id": "Nasi fiksi",
+        "en": "Fiction rice"
+      },
+      "localNames": [],
+      "category": "staples",
+      "components": {
+        "verification": "verified",
+        "ingredientIds": []
+      },
+      "allergens": {
+        "verification": "verified",
+        "contains": [],
+        "mayContain": []
+      },
+      "halal": {
+        "verification": "verified",
+        "value": "halal",
+        "nonHalalSources": []
+      },
+      "diet": {
+        "verification": "verified",
+        "vegetarian": "suitable",
+        "vegan": "suitable"
+      },
+      "brandVaries": false,
+      "brandVariants": [],
+      "tkpiCode": null
+    },
+    {
+      "id": "fx_lib_bawang",
+      "displayName": {
+        "id": "Bawang merah fiksi",
+        "en": "Fiction shallot"
+      },
+      "localNames": ["Brambang fiksi"],
+      "category": "spices_aromatics",
+      "components": {
+        "verification": "verified",
+        "ingredientIds": []
+      },
+      "allergens": {
+        "verification": "verified",
+        "contains": [],
+        "mayContain": []
+      },
+      "halal": {
+        "verification": "verified",
+        "value": "halal",
+        "nonHalalSources": []
+      },
+      "diet": {
+        "verification": "verified",
+        "vegetarian": "suitable",
+        "vegan": "suitable"
+      },
+      "brandVaries": false,
+      "brandVariants": [],
+      "tkpiCode": null
+    },
+    {
+      "id": "fx_lib_cabai",
+      "displayName": {
+        "id": "Cabai fiksi",
+        "en": "Fiction chili"
+      },
+      "localNames": [],
+      "category": "spices_aromatics",
+      "components": {
+        "verification": "verified",
+        "ingredientIds": []
+      },
+      "allergens": {
+        "verification": "verified",
+        "contains": [],
+        "mayContain": []
+      },
+      "halal": {
+        "verification": "verified",
+        "value": "halal",
+        "nonHalalSources": []
+      },
+      "diet": {
+        "verification": "verified",
+        "vegetarian": "suitable",
+        "vegan": "suitable"
+      },
+      "brandVaries": false,
+      "brandVariants": [],
+      "tkpiCode": null
+    },
+    {
+      "id": "fx_lib_udang",
+      "displayName": {
+        "id": "Udang fiksi",
+        "en": "Fiction shrimp"
+      },
+      "localNames": [],
+      "category": "protein",
+      "components": {
+        "verification": "verified",
+        "ingredientIds": []
+      },
+      "allergens": {
+        "verification": "verified",
+        "contains": ["shrimp", "shellfish"],
+        "mayContain": []
+      },
+      "halal": {
+        "verification": "verified",
+        "value": "halal",
+        "nonHalalSources": []
+      },
+      "diet": {
+        "verification": "verified",
+        "vegetarian": "not_suitable",
+        "vegan": "not_suitable"
+      },
+      "brandVaries": false,
+      "brandVariants": [],
+      "tkpiCode": null
+    },
+    {
+      "id": "fx_lib_terasi",
+      "displayName": {
+        "id": "Terasi fiksi",
+        "en": "Fiction shrimp paste"
+      },
+      "localNames": [],
+      "category": "sauces_condiments",
+      "components": {
+        "verification": "verified",
+        "ingredientIds": ["fx_lib_udang"]
+      },
+      "allergens": {
+        "verification": "verified",
+        "contains": ["shrimp", "shellfish"],
+        "mayContain": []
+      },
+      "halal": {
+        "verification": "verified",
+        "value": "halal",
+        "nonHalalSources": []
+      },
+      "diet": {
+        "verification": "verified",
+        "vegetarian": "not_suitable",
+        "vegan": "not_suitable"
+      },
+      "brandVaries": false,
+      "brandVariants": [],
+      "tkpiCode": null
+    },
+    {
+      "id": "fx_lib_kecap",
+      "displayName": {
+        "id": "Kecap manis fiksi",
+        "en": "Fiction sweet soy sauce"
+      },
+      "localNames": [],
+      "category": "sauces_condiments",
+      "components": {
+        "verification": "verified",
+        "ingredientIds": []
+      },
+      "allergens": {
+        "verification": "verified",
+        "contains": ["soy", "wheat"],
+        "mayContain": []
+      },
+      "halal": {
+        "verification": "verified",
+        "value": "halal",
+        "nonHalalSources": []
+      },
+      "diet": {
+        "verification": "verified",
+        "vegetarian": "suitable",
+        "vegan": "suitable"
+      },
+      "brandVaries": true,
+      "brandVariants": [
+        {
+          "brandId": "fx_lib_kecap_terperiksa",
+          "brandName": "Kecap terperiksa fiksi",
+          "verified": true,
+          "components": {
+            "verification": "verified",
+            "ingredientIds": []
+          },
+          "allergens": {
+            "verification": "verified",
+            "contains": ["soy", "wheat"],
+            "mayContain": []
+          },
+          "halal": {
+            "verification": "verified",
+            "value": "halal",
+            "nonHalalSources": []
+          },
+          "diet": {
+            "verification": "verified",
+            "vegetarian": "suitable",
+            "vegan": "suitable"
+          }
+        },
+        {
+          "brandId": "fx_lib_kecap_belum",
+          "brandName": "Kecap belum fiksi",
+          "verified": false,
+          "components": {
+            "verification": "verified",
+            "ingredientIds": []
+          },
+          "allergens": {
+            "verification": "verified",
+            "contains": ["soy", "wheat"],
+            "mayContain": []
+          },
+          "halal": {
+            "verification": "verified",
+            "value": "halal",
+            "nonHalalSources": []
+          },
+          "diet": {
+            "verification": "verified",
+            "vegetarian": "suitable",
+            "vegan": "suitable"
+          }
+        }
+      ],
+      "tkpiCode": null
+    },
+    {
+      "id": "fx_lib_angciu",
+      "displayName": {
+        "id": "Angciu fiksi",
+        "en": "Fiction cooking wine"
+      },
+      "localNames": [],
+      "category": "sauces_condiments",
+      "components": {
+        "verification": "verified",
+        "ingredientIds": []
+      },
+      "allergens": {
+        "verification": "verified",
+        "contains": [],
+        "mayContain": []
+      },
+      "halal": {
+        "verification": "verified",
+        "value": "not_halal",
+        "nonHalalSources": ["alcohol"]
+      },
+      "diet": {
+        "verification": "verified",
+        "vegetarian": "suitable",
+        "vegan": "suitable"
+      },
+      "brandVaries": false,
+      "brandVariants": [],
+      "tkpiCode": null
+    },
+    {
+      "id": "fx_lib_ayam",
+      "displayName": {
+        "id": "Ayam fiksi",
+        "en": "Fiction chicken"
+      },
+      "localNames": [],
+      "category": "protein",
+      "components": {
+        "verification": "verified",
+        "ingredientIds": []
+      },
+      "allergens": {
+        "verification": "verified",
+        "contains": [],
+        "mayContain": []
+      },
+      "halal": {
+        "verification": "verified",
+        "value": "halal",
+        "nonHalalSources": []
+      },
+      "diet": {
+        "verification": "verified",
+        "vegetarian": "not_suitable",
+        "vegan": "not_suitable"
+      },
+      "brandVaries": false,
+      "brandVariants": [],
+      "tkpiCode": null
+    },
+    {
+      "id": "fx_lib_santan",
+      "displayName": {
+        "id": "Santan fiksi",
+        "en": "Fiction coconut milk"
+      },
+      "localNames": [],
+      "category": "dairy",
+      "components": {
+        "verification": "verified",
+        "ingredientIds": []
+      },
+      "allergens": {
+        "verification": "verified",
+        "contains": [],
+        "mayContain": []
+      },
+      "halal": {
+        "verification": "verified",
+        "value": "halal",
+        "nonHalalSources": []
+      },
+      "diet": {
+        "verification": "verified",
+        "vegetarian": "suitable",
+        "vegan": "suitable"
+      },
+      "brandVaries": false,
+      "brandVariants": [],
+      "tkpiCode": null
+    },
+    {
+      "id": "fx_lib_tempe",
+      "displayName": {
+        "id": "Tempe fiksi",
+        "en": "Fiction tempeh"
+      },
+      "localNames": [],
+      "category": "protein",
+      "components": {
+        "verification": "verified",
+        "ingredientIds": []
+      },
+      "allergens": {
+        "verification": "verified",
+        "contains": ["soy"],
+        "mayContain": []
+      },
+      "halal": {
+        "verification": "verified",
+        "value": "halal",
+        "nonHalalSources": []
+      },
+      "diet": {
+        "verification": "verified",
+        "vegetarian": "suitable",
+        "vegan": "suitable"
+      },
+      "brandVaries": false,
+      "brandVariants": [],
+      "tkpiCode": null
+    },
+    {
+      "id": "fx_lib_kacang",
+      "displayName": {
+        "id": "Kacang tanah fiksi",
+        "en": "Fiction peanut"
+      },
+      "localNames": [],
+      "category": "protein",
+      "components": {
+        "verification": "verified",
+        "ingredientIds": []
+      },
+      "allergens": {
+        "verification": "verified",
+        "contains": ["peanut"],
+        "mayContain": []
+      },
+      "halal": {
+        "verification": "verified",
+        "value": "halal",
+        "nonHalalSources": []
+      },
+      "diet": {
+        "verification": "verified",
+        "vegetarian": "suitable",
+        "vegan": "suitable"
+      },
+      "brandVaries": false,
+      "brandVariants": [],
+      "tkpiCode": null
+    }
+  ]
+}

@@ -58,6 +58,7 @@ const SCOPED: ReadonlySet<Permission> = new Set<Permission>([
   "consent:write",
   "kitchen:read",
   "kitchen:write",
+  "library:read",
 ]);
 
 /** Requires an authenticated caller whose role holds `permission`. */

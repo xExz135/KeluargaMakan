@@ -9,7 +9,8 @@ export type HashPurpose =
   | "idempotent_request"
   | "kitchen_sync_cursor"
   | "kitchen_sync_change"
-  | "kitchen_removal";
+  | "kitchen_removal"
+  | "library_search_cursor";
 
 /**
  * HMAC-SHA256 under the server's hash key, over the purpose and each part
