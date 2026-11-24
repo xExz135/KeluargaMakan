@@ -11,6 +11,7 @@ import type { HealthDataKeys } from "../db/health-data-keys.js";
 import { isReferenceId } from "../db/ids.js";
 import { RETRY_AFTER_SECONDS } from "../http/problem.js";
 import { listItems, type KitchenItemRow } from "../kitchen/kitchen-store.js";
+import type { ApiLogger } from "../logger.js";
 import { foldName } from "../reference/fold.js";
 import {
   referenceDataUnavailable,
@@ -67,6 +68,8 @@ export interface LibraryServiceDeps {
   readonly config: LibraryConfig;
   readonly hashKey: Buffer;
   readonly clock?: Clock;
+  /** Operational warnings with counts only, never recipe names or household data. */
+  readonly logger?: ApiLogger;
 }
 
 type Summary = Schemas["RecipeSummary"];
@@ -251,6 +254,8 @@ export class LibraryService {
   readonly #clock: Clock;
   readonly #reader: LibraryReader;
   readonly #limiter: RateLimiter;
+  readonly #logger: ApiLogger | null;
+  #warnedVersion: string | null = null;
 
   constructor(deps: LibraryServiceDeps) {
     this.#db = deps.db;
@@ -259,6 +264,7 @@ export class LibraryService {
     this.#config = deps.config;
     this.#hashKey = deps.hashKey;
     this.#clock = deps.clock ?? systemClock;
+    this.#logger = deps.logger ?? null;
     this.#reader = new LibraryReader(deps.db);
     this.#limiter = new RateLimiter(deps.db, deps.hashKey);
   }
@@ -281,10 +287,31 @@ export class LibraryService {
 
   async #library(): Promise<LoadedLibrary> {
     try {
-      return await this.#reader.current();
+      const library = await this.#reader.current();
+      this.#warnIfLargerThanCap(library);
+      return library;
     } catch (error) {
       if (error instanceof LibraryChangingError) throw libraryChanging();
       throw error;
+    }
+  }
+
+  /**
+   * Re-check N3: once per library version, a warning when more recipes are
+   * servable than one search checks, so operations raise
+   * `search.maxCandidatesChecked` before counts and pages understate.
+   */
+  #warnIfLargerThanCap(library: LoadedLibrary): void {
+    if (this.#warnedVersion === library.libraryVersion) return;
+    this.#warnedVersion = library.libraryVersion;
+    const servable = library.recipes.filter((recipe) => this.#served(recipe)).length;
+    const cap = this.#config.search.maxCandidatesChecked;
+    if (servable > cap) {
+      this.#logger?.error("library_larger_than_candidate_cap", {
+        libraryVersion: library.libraryVersion,
+        servableRecipes: servable,
+        maxCandidatesChecked: cap,
+      });
     }
   }
 

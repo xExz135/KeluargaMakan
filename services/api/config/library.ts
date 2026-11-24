@@ -21,9 +21,14 @@ export interface LibraryConfig {
     /** Largest `limit` accepted (the contract allows at most 50). */
     readonly maxLimit: number;
     /**
-     * Security review T-041 M1: the best-matching recipes checked by Cek Aman
-     * per search, after the filters and the text match. Recipes past it are
-     * not listed or counted; a narrower search reaches them.
+     * Security review T-041 M1 and re-check N3: the best-matching recipes
+     * checked by Cek Aman per search, after the filters and the text match.
+     * Recipes past it are not listed or counted, so `totalCount` and
+     * `hiddenNotSafe.count` are then lower bounds; a narrower search reaches
+     * them. The contract has no field to tell the phone (QUESTIONS #98), so
+     * the default (1,000) is far above the planned V1 library (LIB-02: about
+     * 300), and the API logs `library_larger_than_candidate_cap` when the
+     * servable library outgrows it. 1,000 checks take about 320 ms.
      */
     readonly maxCandidatesChecked: number;
   };
@@ -51,7 +56,7 @@ const LIMIT_CEILING = 50; // contract LibrarySearchRequest.limit maximum
 const CUISINES: readonly Cuisine[] = ["indonesian", "japanese", "chinese", "fusion"];
 
 export const defaultLibraryConfig: LibraryConfig = Object.freeze({
-  search: Object.freeze({ defaultLimit: 20, maxLimit: 50, maxCandidatesChecked: 300 }),
+  search: Object.freeze({ defaultLimit: 20, maxLimit: 50, maxCandidatesChecked: 1000 }),
   rateLimits: Object.freeze({
     requestsPerHousehold: Object.freeze({ limit: 120, windowSeconds: 60 }),
     imagesPerHousehold: Object.freeze({ limit: 600, windowSeconds: 60 }),

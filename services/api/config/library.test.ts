@@ -8,7 +8,7 @@ describe("library config (T-041)", () => {
     expect(defaultLibraryConfig.search).toEqual({
       defaultLimit: 20,
       maxLimit: 50,
-      maxCandidatesChecked: 300,
+      maxCandidatesChecked: 1000,
     });
     expect(defaultLibraryConfig.rateLimits.requestsPerHousehold).toEqual({
       limit: 120,
@@ -22,7 +22,7 @@ describe("library config (T-041)", () => {
     const config = libraryConfigFromEnv({
       LIBRARY_CONFIG_JSON: JSON.stringify({ search: { maxLimit: 10 }, maxRegionalVariants: 3 }),
     });
-    expect(config.search).toEqual({ defaultLimit: 10, maxLimit: 10, maxCandidatesChecked: 300 });
+    expect(config.search).toEqual({ defaultLimit: 10, maxLimit: 10, maxCandidatesChecked: 1000 });
     expect(config.maxRegionalVariants).toBe(3);
   });
 

@@ -188,6 +188,7 @@ export async function createApp(deps: AppDeps): Promise<NestFastifyApplication> 
     reference,
     config: libraryConfig,
     hashKey: deps.secrets.hashKey,
+    logger: deps.logger,
     ...(deps.clock === undefined ? {} : { clock: deps.clock }),
   });
 

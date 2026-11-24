@@ -938,6 +938,39 @@ describe("LIB-04 LIB-08 regions, LIB-03 images", () => {
     }
   });
 
+  it("N3 LIB-08 past the candidate cap only the best matches are checked, and the API logs that the library outgrew the cap", async () => {
+    const capped = await startHarness(db, {
+      reference: referenceSourceOf(fixture.verified),
+      keys,
+      libraryConfig: resolveLibraryConfig({ search: { maxLimit: 2, maxCandidatesChecked: 2 } }),
+    });
+    try {
+      const session = await signInWithHousehold(capped);
+      const response = await search(session, { eaters: onlyMe, limit: 2 }, capped);
+      expect(response.status, response.raw).toBe(200);
+      const body = response.body as SearchBody;
+      // Counts are lower bounds past the cap (config/library.ts, QUESTIONS #98).
+      expect(body.items).toHaveLength(2);
+      expect(body.totalCount).toBe(2);
+      expect(body.nextCursor).toBeNull();
+      const warning = capped.logger.lines.find((line) =>
+        line.includes("library_larger_than_candidate_cap"),
+      );
+      expect(warning).toBeDefined();
+      expect(JSON.parse(warning ?? "{}")).toMatchObject({ maxCandidatesChecked: 2 });
+      expect(warning).not.toMatch(/fx_rcp_|fiksi/);
+      // Logged once per library version.
+      await search(session, { eaters: onlyMe, limit: 2 }, capped);
+      expect(
+        capped.logger.lines.filter((line) => line.includes("library_larger_than_candidate_cap")),
+      ).toHaveLength(1);
+      // The default cap is far above this library: no warning.
+      expect(api.logger.text).not.toContain("library_larger_than_candidate_cap");
+    } finally {
+      await capped.close();
+    }
+  });
+
   it("L6 I6 an image larger than the configured cap, or of a cuisine not served, is not served", async () => {
     const big = Buffer.alloc(4096, 1);
     await insertFixtureImage(db, "fx_img_besar", big);

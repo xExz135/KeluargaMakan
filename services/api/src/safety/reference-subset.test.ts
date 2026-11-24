@@ -225,23 +225,30 @@ describe("M1 NFR-03 checking a whole library stays within a time budget", () => 
       reference: big,
       evaluatedAt: new Date(),
     };
-    const start = performance.now();
-    let checked = 0;
-    for (let r = 0; r < 300; r++) {
-      const candidate: FoodCandidate = {
-        subject: { kind: "library_recipe", id: `fx_p_r${r}`, version: "1" },
-        lines: Array.from({ length: 20 }, (_, l) => ({
-          lineId: `l${l}`,
-          ingredientId: `fx_p_i${(r * 7 + l * 13) % N}`,
-          rawName: `Bahan ${l} fiksi`,
-        })),
-      };
-      if (checkFood(context, candidate) !== null) checked += 1;
-    }
-    const elapsed = performance.now() - start;
-    expect(checked).toBe(300);
-    // The review measured 1,293 ms before the fix; generous for slow CI.
-    expect(elapsed).toBeLessThan(1000);
+    const run = (recipes: number) => {
+      const start = performance.now();
+      let checked = 0;
+      for (let r = 0; r < recipes; r++) {
+        const candidate: FoodCandidate = {
+          subject: { kind: "library_recipe", id: `fx_p_r${r}`, version: "1" },
+          lines: Array.from({ length: 20 }, (_, l) => ({
+            lineId: `l${l}`,
+            ingredientId: `fx_p_i${(r * 7 + l * 13) % N}`,
+            rawName: `Bahan ${l} fiksi`,
+          })),
+        };
+        if (checkFood(context, candidate) !== null) checked += 1;
+      }
+      return { checked, elapsed: performance.now() - start };
+    };
+    // The review measured 1,293 ms for 300 before the fix; generous for slow CI.
+    const typical = run(300);
+    expect(typical.checked).toBe(300);
+    expect(typical.elapsed).toBeLessThan(1000);
+    // Re-check N3: the default candidate cap (1,000) stays within budget too.
+    const capped = run(1000);
+    expect(capped.checked).toBe(1000);
+    expect(capped.elapsed).toBeLessThan(3000);
   });
 });
 
